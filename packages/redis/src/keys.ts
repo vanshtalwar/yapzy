@@ -178,6 +178,12 @@ export function rateLimitKey(scope: string, subject: string): string {
   return `rl:${scope}:${assertSafeId('rate-limit subject', subject)}`;
 }
 
+/**
+ * Namespace for @fastify/rate-limit in the API. The plugin appends `<METHOD><url>-<subject>`,
+ * e.g. `rl:api:POST/v1/session-<ipHash>`.
+ */
+export const API_RATE_LIMIT_PREFIX = 'rl:api:';
+
 /** STRING: admin session (opaque id from the httpOnly cookie). */
 export function adminSessionKey(adminSessionId: string): string {
   return `admsess:${assertSafeId('adminSessionId', adminSessionId)}`;

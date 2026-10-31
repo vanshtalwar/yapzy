@@ -11,6 +11,10 @@
       "inputs": ["prisma/schema.prisma", "prisma.config.ts"],
       "outputs": ["src/generated/**"]
     },
+    "migrate:test": {
+      "dependsOn": ["generate"],
+      "cache": false
+    },
     "build": {
       "dependsOn": ["^build", "generate", "^generate"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
@@ -22,7 +26,7 @@
       "dependsOn": ["transit", "generate", "^generate"]
     },
     "test": {
-      "dependsOn": ["transit", "generate", "^generate"],
+      "dependsOn": ["transit", "generate", "^generate", "migrate:test", "^migrate:test"],
       "outputs": ["coverage/**"]
     },
     "dev": {

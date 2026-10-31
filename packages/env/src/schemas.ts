@@ -40,3 +40,58 @@ export const seedEnv = databaseEnv.extend({
 export type DatabaseEnv = z.output<typeof databaseEnv>;
 export type RedisEnv = z.output<typeof redisEnv>;
 export type SeedEnv = z.output<typeof seedEnv>;
+
+const port = z.coerce.number().int().min(1).max(65_535);
+
+const commaList = z.string().transform((value) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0),
+);
+
+/**
+ * `TRUST_PROXY`: empty/"false" = don't trust X-Forwarded-For (dev default); a number = trust
+ * that many hops; otherwise a comma list of proxy IPs/CIDRs. `true` (trust everyone) is
+ * deliberately not supported: any client could then spoof its IP and dodge IP rate limits/bans.
+ */
+const trustProxy = z
+  .string()
+  .default('')
+  .transform((value, context): false | number | string[] => {
+    const trimmed = value.trim();
+    if (trimmed === '' || trimmed === 'false') return false;
+    if (/^\d+$/.test(trimmed)) return Number(trimmed);
+    if (trimmed === 'true') {
+      context.addIssue({ code: 'custom', message: 'use a hop count or proxy IP/CIDR list' });
+      return z.NEVER;
+    }
+    return trimmed.split(',').map((item) => item.trim());
+  });
+
+export const apiEnv = baseEnv.extend({
+  ...hashPepperEnv.shape,
+  DATABASE_URL: postgresUrl,
+  REDIS_URL: redisUrl,
+  API_HOST: z.string().min(1).default('0.0.0.0'),
+  API_PORT: port.default(4000),
+  CORS_ORIGINS: commaList.pipe(z.array(z.url()).min(1)),
+  TRUST_PROXY: trustProxy,
+  RATE_LIMIT_DISABLED: z.stringbool().default(false),
+  JWT_SECRET: z.string().min(32),
+  JWT_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(7 * 24 * 60 * 60)
+    .default(43_200),
+  TOS_VERSION: z.string().min(1).max(32),
+  TURNSTILE_SECRET_KEY: z.string().min(1),
+  TURN_SECRET: z.string().min(16),
+  TURN_HOST: z.string().min(1),
+  TURN_PORT: port.default(3478),
+  TURN_CREDENTIAL_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
+  STUN_URLS: commaList.pipe(z.array(z.string().regex(/^stuns?:/, 'must start with stun:')).min(1)),
+});
+
+export type ApiEnv = z.output<typeof apiEnv>;

@@ -32,7 +32,7 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 
 | Command                        | What it does                                                        |
 | ------------------------------ | ------------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (apps arrive from Part 3)                |
+| `pnpm dev`                     | Run all apps in watch mode (currently the API)                      |
 | `pnpm build`                   | Build all apps                                                      |
 | `pnpm lint`                    | ESLint (type-aware) in every package                                |
 | `pnpm typecheck`               | `tsc` in every package                                              |
@@ -46,11 +46,39 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 | `pnpm db:generate`             | Regenerate the Prisma client after editing the schema               |
 
 Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+`@app/db`, `@app/redis` and `@app/api` tests are integration tests: run `pnpm infra:up` first.
+
+## REST API (`apps/api`, port 4000)
+
+```bash
+pnpm --filter @app/api dev     # tsx watch (or `pnpm dev` for everything)
+pnpm --filter @app/api build && pnpm --filter @app/api start   # bundled build
+```
+
+Try it with curl. In development the Turnstile test secret accepts any token, but the API still
+calls Cloudflare's siteverify, so this needs internet access.
+
+```bash
+curl localhost:4000/health          # {"status":"ok"}
+curl localhost:4000/ready           # Postgres + Redis checks (503 if either is down)
+curl localhost:4000/v1/config
+
+# Start an anonymous session (deviceId = any UUID; the web app keeps one in localStorage)
+TOKEN=$(curl -s -X POST localhost:4000/v1/session -H 'content-type: application/json' \
+  -d "{\"turnstileToken\":\"XXXX.DUMMY.TOKEN.XXXX\",\"ageConfirmed\":true,\"tosVersion\":\"2026-10-dev\",\"deviceId\":\"$(uuidgen | tr A-Z a-z)\"}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl localhost:4000/v1/turn-credentials -H "authorization: Bearer $TOKEN"
+curl localhost:4000/v1/stats/online   # 0 until the gateway exists
+```
+
+Errors always look like `{"error":{"code":"…","message":"…","requestId":"…"}}`; the same id is
+in the `x-request-id` response header and the server logs.
 
 ## Layout
 
 ```
-apps/        user-facing and backend services (from Part 3)
+apps/        api (Fastify REST); web, admin, gateway, worker in later parts
 packages/    config, env, logger, shared, db (Prisma), redis (+ matchmaking, moderation later)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init
 tools/ e2e/  bots and end-to-end tests (later parts)

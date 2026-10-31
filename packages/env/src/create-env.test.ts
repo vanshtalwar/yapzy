@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import { createEnv, EnvValidationError } from './create-env.ts';
 import { applyEnvFileContent, findWorkspaceRoot } from './load-env-file.ts';
-import { baseEnv, databaseEnv, redisEnv } from './schemas.ts';
+import { apiEnv, baseEnv, databaseEnv, redisEnv } from './schemas.ts';
 
 const serviceEnv = baseEnv.extend({
   JWT_SECRET: z.string().min(32),
@@ -95,5 +95,47 @@ describe('service schemas', () => {
     expect(() => createEnv(redisEnv, { source: { REDIS_URL: 'http://localhost' } })).toThrow(
       /REDIS_URL/,
     );
+  });
+});
+
+describe('apiEnv', () => {
+  const valid = {
+    DATABASE_URL: 'postgresql://app:app@localhost:5432/app',
+    REDIS_URL: 'redis://localhost:6379',
+    IP_HASH_PEPPER: 'p'.repeat(16),
+    DEVICE_HASH_PEPPER: 'd'.repeat(16),
+    CORS_ORIGINS: 'http://localhost:3000, http://localhost:3001',
+    JWT_SECRET: 's'.repeat(32),
+    TOS_VERSION: '2026-10-dev',
+    TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
+    TURN_SECRET: 't'.repeat(16),
+    TURN_HOST: 'localhost',
+    STUN_URLS: 'stun:localhost:3478',
+  };
+
+  it('parses lists, booleans and defaults', () => {
+    const env = createEnv(apiEnv, { source: { ...valid, RATE_LIMIT_DISABLED: 'true' } });
+    expect(env.CORS_ORIGINS).toEqual(['http://localhost:3000', 'http://localhost:3001']);
+    expect(env.STUN_URLS).toEqual(['stun:localhost:3478']);
+    expect(env.RATE_LIMIT_DISABLED).toBe(true);
+    expect(env.TRUST_PROXY).toBe(false);
+    expect(env.API_PORT).toBe(4000);
+    expect(env.JWT_TTL_SECONDS).toBe(43_200);
+  });
+
+  it('accepts hop counts and proxy lists for TRUST_PROXY but refuses "true"', () => {
+    expect(createEnv(apiEnv, { source: { ...valid, TRUST_PROXY: '1' } }).TRUST_PROXY).toBe(1);
+    expect(
+      createEnv(apiEnv, { source: { ...valid, TRUST_PROXY: '10.0.0.0/8, 127.0.0.1' } }).TRUST_PROXY,
+    ).toEqual(['10.0.0.0/8', '127.0.0.1']);
+    expect(() => createEnv(apiEnv, { source: { ...valid, TRUST_PROXY: 'true' } })).toThrow(
+      /TRUST_PROXY/,
+    );
+  });
+
+  it('treats RATE_LIMIT_DISABLED=false as false (not truthy string)', () => {
+    expect(
+      createEnv(apiEnv, { source: { ...valid, RATE_LIMIT_DISABLED: 'false' } }).RATE_LIMIT_DISABLED,
+    ).toBe(false);
   });
 });

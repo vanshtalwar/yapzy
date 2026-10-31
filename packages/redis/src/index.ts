@@ -1,4 +1,9 @@
-export { type BanCacheEntry, banCacheEntrySchema } from './bans.ts';
+export {
+  BAN_CACHE_MAX_TTL_SECONDS,
+  BAN_CACHE_NEGATIVE_TTL_SECONDS,
+  type BanCacheEntry,
+  banCacheEntrySchema,
+} from './bans.ts';
 export {
   createRedis,
   type CreateRedisOptions,
