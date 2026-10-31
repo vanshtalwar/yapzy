@@ -1,0 +1,24 @@
+# WebSocket transport (rendered by entrypoint.sh): the Janus API for browsers on 8188 and the
+# Admin API for the gateway on 7188. Plain ws in development; production terminates TLS in
+# front of 8188 (wss) and never exposes 7188 outside the private network.
+general: {
+	json = "compact"
+	ws = true
+	ws_port = 8188
+	wss = false
+	ws_logging = "err,warn"
+	pingpong_trigger = 30
+	pingpong_timeout = 10
+}
+
+admin: {
+	admin_ws = true
+	admin_ws_port = 7188
+	admin_wss = false
+}
+
+cors: {
+}
+
+certificates: {
+}

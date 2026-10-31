@@ -18,14 +18,14 @@
     "clean": "turbo run clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "infra:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml up -d --wait postgres redis coturn minio && docker compose --env-file .env -f infra/docker/docker-compose.yml run --rm minio-init",
+    "infra:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml up -d --wait postgres redis coturn minio janus && docker compose --env-file .env -f infra/docker/docker-compose.yml run --rm minio-init",
     "infra:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml down",
     "infra:logs": "docker compose --env-file .env -f infra/docker/docker-compose.yml logs -f --tail=100",
     "infra:ps": "docker compose --env-file .env -f infra/docker/docker-compose.yml ps",
     "infra:reset": "docker compose --env-file .env -f infra/docker/docker-compose.yml down -v --remove-orphans",
     "obs:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile observability up -d --wait prometheus grafana",
     "obs:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile observability stop prometheus grafana",
-    "stack:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile full up -d --build --wait postgres redis coturn minio api gateway worker web admin",
+    "stack:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile full up -d --build --wait postgres redis coturn minio janus api gateway worker web admin",
     "stack:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile full stop api gateway worker web admin",
     "db:generate": "pnpm --filter @app/db generate",
     "db:migrate": "pnpm --filter @app/db migrate",
@@ -35,7 +35,9 @@
     "db:seed": "pnpm --filter @app/db seed",
     "db:studio": "pnpm --filter @app/db studio",
     "bots": "pnpm --filter @app/bots bots",
-    "admin:create": "pnpm --filter @app/db admin:create"
+    "admin:create": "pnpm --filter @app/db admin:create",
+    "sfu:multi:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile sfu-multi up -d --wait janus janus-2",
+    "sfu:multi:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile sfu-multi stop janus-2"
   },
   "devDependencies": {
     "@app/config": "workspace:*",

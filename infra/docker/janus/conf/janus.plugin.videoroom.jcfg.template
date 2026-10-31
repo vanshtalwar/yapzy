@@ -1,0 +1,9 @@
+# VideoRoom plugin (rendered by entrypoint.sh). No static rooms: the gateway creates one room
+# per group call through the Admin API.
+general: {
+	# Only the backend (which knows the key) can create rooms or list private ones.
+	admin_key = "${JANUS_ADMIN_SECRET}"
+	# rtp_forward also needs the key (a production moderation tap would use it).
+	lock_rtp_forward = true
+	string_ids = false
+}

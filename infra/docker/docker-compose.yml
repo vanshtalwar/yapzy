@@ -17,6 +17,8 @@ x-app-env: &app-env
   REDIS_URL: redis://redis:6379
   S3_ENDPOINT: http://minio:9000
   S3_PUBLIC_ENDPOINT: http://localhost:9000
+  # Browsers reach Janus on localhost; the gateway container reaches its Admin API in-network.
+  JANUS_NODES: '[{"id":"janus-1","wsUrl":"ws://localhost:8188","adminUrl":"ws://janus:7188"}]'
 
 services:
   postgres:
@@ -80,6 +82,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  # Janus VideoRoom SFU for group calls (Part 11), built from infra/docker/janus (pinned
+  # release, VideoRoom + WebSockets only). 8188 = Janus API for browsers; 7188 = Admin API for
+  # the gateway only (published on 127.0.0.1 because the dev gateway runs on the host — never
+  # publish it publicly). RTP ports are published 1:1 because candidates advertise them.
+  janus:
+    build: ./janus
+    image: randomchat-janus:1.4.3
+    environment: &janus-env
+      JANUS_NODE_ID: janus-1
+      JANUS_ADMIN_SECRET: ${JANUS_ADMIN_SECRET:?JANUS_ADMIN_SECRET must be set in .env}
+      JANUS_TOKEN_SECRET: ${JANUS_TOKEN_SECRET:?JANUS_TOKEN_SECRET must be set in .env}
+      JANUS_PUBLIC_IP: ${JANUS_PUBLIC_IP:-127.0.0.1}
+      JANUS_RTP_PORT_RANGE: 20000-20100
+      JANUS_DEBUG_LEVEL: ${JANUS_DEBUG_LEVEL:-4}
+    ports:
+      - '${JANUS_BIND_IP:-127.0.0.1}:8188:8188'
+      - '127.0.0.1:7188:7188'
+      - '${JANUS_BIND_IP:-127.0.0.1}:20000-20100:20000-20100/udp'
+    restart: unless-stopped
+
+  # Second Janus node for placement and failover tests (`--profile sfu-multi`); add it to
+  # JANUS_NODES as {"id":"janus-2","wsUrl":"ws://localhost:8189","adminUrl":"ws://localhost:7189"}.
+  janus-2:
+    image: randomchat-janus:1.4.3
+    profiles: [sfu-multi]
+    depends_on:
+      janus: { condition: service_started }
+    environment:
+      <<: *janus-env
+      JANUS_NODE_ID: janus-2
+      JANUS_RTP_PORT_RANGE: 20200-20300
+    ports:
+      - '${JANUS_BIND_IP:-127.0.0.1}:8189:8188'
+      - '127.0.0.1:7189:7188'
+      - '${JANUS_BIND_IP:-127.0.0.1}:20200-20300:20200-20300/udp'
     restart: unless-stopped
 
   minio:
