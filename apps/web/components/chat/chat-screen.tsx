@@ -1,18 +1,7 @@
 'use client';
 
 import { MAX_MESSAGE_LENGTH } from '@app/shared';
-import {
-  Button,
-  ChatComposer,
-  ChatShell,
-  Label,
-  MessageBubble,
-  MessageList,
-  Spinner,
-  Switch,
-  SystemMessage,
-  TypingIndicator,
-} from '@app/ui';
+import { Button, ChatComposer, ChatShell, Label, Spinner, Switch } from '@app/ui';
 import { HomeIcon, PlayIcon, SquareIcon, WifiOffIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useId, useState } from 'react';
@@ -23,6 +12,7 @@ import { LANGUAGE_NAMES } from '../../lib/languages.ts';
 import { getSession } from '../../lib/session-token.ts';
 import { AgeGate } from '../age-gate.tsx';
 import { BlockedScreen } from '../blocked-screen.tsx';
+import { ChatEntries } from './chat-entries.tsx';
 import { NextButton } from './next-button.tsx';
 
 function headerFor(state: ChatState): { title: string; status: string } {
@@ -64,6 +54,8 @@ export function ChatScreen() {
   useEffect(() => {
     const controller = getChatController();
     const store = getChatStore().getState();
+    // Coming from a video chat in this tab: leave it, this screen has no camera.
+    if (store.preferences.mode !== 'text' && store.status !== 'idle') void controller.stop();
     store.setPreferences({ mode: 'text' });
     if (getSession() === null) {
       store.setError('auth', 'Please confirm you are 18+ to start chatting.');
@@ -257,26 +249,7 @@ export function ChatScreen() {
             )}
           </div>
         ) : (
-          <MessageList revision={`${String(state.entries.length)}-${String(state.peerTyping)}`}>
-            {state.entries.map((entry) =>
-              entry.kind === 'system' ? (
-                <SystemMessage key={entry.id}>{entry.text}</SystemMessage>
-              ) : entry.kind === 'self' ? (
-                <MessageBubble
-                  key={entry.clientMsgId}
-                  from="self"
-                  text={entry.text}
-                  status={entry.status}
-                  onRetry={() => {
-                    controller().retry(entry.clientMsgId);
-                  }}
-                />
-              ) : (
-                <MessageBubble key={entry.id} from="stranger" text={entry.text} />
-              ),
-            )}
-            {matched && state.peerTyping && <TypingIndicator />}
-          </MessageList>
+          <ChatEntries entries={state.entries} peerTyping={matched && state.peerTyping} />
         )}
       </ChatShell>
       {gate}

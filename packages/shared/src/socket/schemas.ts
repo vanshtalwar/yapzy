@@ -33,7 +33,13 @@ export const queueLeaveSchema = emptyPayload;
 export const pingSchema = emptyPayload;
 
 export const sessionRefSchema = z.object({ sessionId: sessionIdSchema });
-export const chatNextSchema = sessionRefSchema;
+
+/**
+ * Why a client skips. `rtc_failed`: WebRTC could not (re)connect after an ICE restart; the
+ * session ends with `RTC_FAILED` and the others count as innocent (priority requeue, D-048).
+ */
+export const NEXT_REASONS = ['rtc_failed'] as const;
+export const chatNextSchema = sessionRefSchema.extend({ reason: z.enum(NEXT_REASONS).optional() });
 export const chatEndSchema = sessionRefSchema;
 /** Must arrive within MATCH_ACK_TIMEOUT_MS of `match:found` (ghost-tab protection, D-047). */
 export const matchAckSchema = sessionRefSchema;

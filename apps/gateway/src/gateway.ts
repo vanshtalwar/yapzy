@@ -20,6 +20,7 @@ import { createClientIpResolver } from './client-ip.ts';
 import { registerHandlers } from './handlers/index.ts';
 import { startPresence } from './presence.ts';
 import { attachGuards, type GuardOptions, markSocketReady } from './register-handler.ts';
+import { createRtcStats } from './rtc-stats.ts';
 import { createLifecycle } from './sessions/lifecycle.ts';
 import { createSessionStore } from './sessions/store.ts';
 import { createSingleSocketPolicy } from './single-socket.ts';
@@ -262,6 +263,8 @@ export async function createGateway(deps: GatewayDeps) {
     await lifecycle.prepareShutdown();
   });
 
+  const rtcStats = createRtcStats();
+
   io.on('connection', (socket) => {
     const { visitorId } = socket.data;
     // Listeners first (synchronously) so no early event is lost while we await Redis below.
@@ -271,7 +274,7 @@ export async function createGateway(deps: GatewayDeps) {
       abuse: GATEWAY_DEFAULTS.abuse,
       logger,
     });
-    registerHandlers(socket, { lifecycle, store, now, logger });
+    registerHandlers(socket, { lifecycle, store, now, logger, rtcStats });
 
     socket.on('disconnect', (reason) => {
       logger.debug({ visitorId, socketId: socket.id, reason }, 'socket disconnected');
@@ -351,6 +354,7 @@ export async function createGateway(deps: GatewayDeps) {
     presence,
     sweeper,
     sessionLogQueue,
+    rtcStats,
     listen(port: number, host?: string): Promise<number> {
       return new Promise((resolve, reject) => {
         httpServer.once('error', reject);

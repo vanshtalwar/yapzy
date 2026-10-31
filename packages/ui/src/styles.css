@@ -7,7 +7,7 @@
  *  - primary #3b82f6 → #2563eb so white text meets WCAG AA (≈5.2:1 instead of ≈3.7:1);
  *  - system font stacks instead of Inter/Source Serif/JetBrains Mono (no web-font CDN);
  *  - fixed the theme's @theme mappings (radius scale, font families);
- *  - added success/warning tokens for status UI.
+ *  - added success/warning tokens for status UI, and stage tokens for the video surface.
  */
 :root {
   --background: #ffffff;
@@ -32,6 +32,9 @@
   --input: #e5e7eb;
   --ring: #3b82f6;
   --radius: 0.375rem;
+  /* Video stage: always dark behind camera images, in both themes. */
+  --stage: #0a0a0a;
+  --stage-foreground: #fafafa;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -79,6 +82,8 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-stage: var(--stage);
+  --color-stage-foreground: var(--stage-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

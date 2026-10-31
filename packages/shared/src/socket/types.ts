@@ -23,6 +23,8 @@ export type QueueJoinPayload = z.input<typeof schemas.queueJoinSchema>;
 export type ChatMessagePayload = z.input<typeof schemas.chatMessageSchema>;
 export type ChatTypingPayload = z.input<typeof schemas.chatTypingSchema>;
 export type SessionRefPayload = z.input<typeof schemas.sessionRefSchema>;
+export type ChatNextPayload = z.input<typeof schemas.chatNextSchema>;
+export type NextReason = (typeof schemas.NEXT_REASONS)[number];
 export type RtcDescriptionPayload = z.input<typeof schemas.rtcDescriptionSchema>;
 export type RtcIcePayload = z.input<typeof schemas.rtcIceSchema>;
 export type RtcSummaryPayload = z.input<typeof schemas.rtcSummarySchema>;
@@ -54,7 +56,7 @@ export type QueuePreferences = z.output<typeof schemas.queueJoinSchema>;
 export interface ClientToServerEvents {
   'queue:join': (payload: QueueJoinPayload, ack: AckCallback) => void;
   'queue:leave': (payload: EmptyPayload, ack: AckCallback) => void;
-  'chat:next': (payload: SessionRefPayload, ack: AckCallback) => void;
+  'chat:next': (payload: ChatNextPayload, ack: AckCallback) => void;
   'chat:end': (payload: SessionRefPayload, ack: AckCallback) => void;
   'chat:message': (payload: ChatMessagePayload, ack: AckCallback<ChatMessageAck>) => void;
   'chat:typing': (payload: ChatTypingPayload, ack: AckCallback) => void;

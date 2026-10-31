@@ -172,6 +172,8 @@ export const webEnv = baseEnv.extend({
   NEXT_PUBLIC_API_URL: z.url().default('http://localhost:4000'),
   NEXT_PUBLIC_GATEWAY_URL: z.url().default('http://localhost:4001'),
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1).default('1x00000000000000000000AA'),
+  /** Relay-only ICE for video (verify TURN, or hide IPs from peers at a bandwidth cost). */
+  NEXT_PUBLIC_FORCE_TURN_RELAY: z.stringbool().default(false),
 });
 
 export type WebEnv = z.output<typeof webEnv>;

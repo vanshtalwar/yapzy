@@ -13,6 +13,7 @@ import {
 } from '@app/redis';
 import {
   ErrorCode,
+  type NextReason,
   type PeerRole,
   type QueuePreferences,
   type ServerToClientEvents,
@@ -566,8 +567,13 @@ export function createLifecycle(deps: LifecycleDeps) {
       });
     },
 
-    /** `chat:next`: leave the session and rejoin the queue with the same preferences. */
-    next(socket: GatewaySocket, sessionId: string): Promise<void> {
+    /**
+     * `chat:next`: leave the session and rejoin the queue with the same preferences. With
+     * `rtc_failed` (video only) the session ends as RTC_FAILED and the others are innocent:
+     * requeued with priority if it happened early (D-048). The reporter requeues normally, so
+     * claiming a failure never buys a place at the head of the queue.
+     */
+    next(socket: GatewaySocket, sessionId: string, reason?: NextReason): Promise<void> {
       const { visitorId } = socket.data;
       return withVisitorLock(visitorId, async () => {
         await requireSession(visitorId, sessionId);
@@ -575,7 +581,12 @@ export function createLifecycle(deps: LifecycleDeps) {
         if (preferences === null) {
           throw new SocketError(ErrorCode.INVALID_STATE, 'No queue preferences on this socket');
         }
-        await leaveSession(visitorId, 'SKIP', { expectedSessionId: sessionId });
+        const rtcFailed =
+          reason === 'rtc_failed' && (await store.context(sessionId))?.mode === 'video';
+        await leaveSession(visitorId, rtcFailed ? 'RTC_FAILED' : 'SKIP', {
+          expectedSessionId: sessionId,
+          earlyFailure: rtcFailed,
+        });
         await startSearching(searcherOf(socket, preferences));
       });
     },
@@ -664,6 +675,24 @@ export function createLifecycle(deps: LifecycleDeps) {
      * Membership check for in-session events: the session ref must name `sessionId`, the
      * session must be active and the sender must not have left.
      */
+    /**
+     * `rtc:summary` arrives when a peer connection closes, often after the session ended: it
+     * only needs the visitor to have been in this video session, and `peer` to be someone else
+     * in it. Ended sessions keep their keys for an hour.
+     */
+    async checkSummary(socket: GatewaySocket, sessionId: string, peer: string): Promise<void> {
+      const context = await store.context(sessionId);
+      const self = [...(context?.participants ?? [])].find(
+        ([, record]) => record.visitorId === socket.data.visitorId,
+      );
+      if (context?.mode !== 'video' || self === undefined) {
+        throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Not in this session');
+      }
+      if (peer === self[0] || !context.participants.has(peer)) {
+        throw new SocketError(ErrorCode.FORBIDDEN, 'Peer is not in this session');
+      }
+    },
+
     async inSession(socket: GatewaySocket, sessionId: string): Promise<InSession> {
       const ref = await store.getSessionRef(socket.data.visitorId);
       if (ref?.sessionId !== sessionId) {

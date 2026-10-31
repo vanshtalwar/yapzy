@@ -435,4 +435,77 @@ describe('validation & WebRTC relay', () => {
       }),
     ).toMatchObject({ ok: false, error: { code: 'INVALID_STATE' } });
   });
+
+  it('chat:next with rtc_failed ends a video session as RTC_FAILED and requeues the peer first', async () => {
+    const { a, b, matchA, matchB } = await pair('de', { mode: 'video', autoRequeue: true });
+    const peerLeft = nextEvent<PeerLeft>(b, 'peer:left');
+    const requeuedB = nextEvent(b, 'queue:waiting');
+    const requeuedA = nextEvent(a, 'queue:waiting');
+    expect(
+      await ack(a, 'chat:next', { sessionId: matchA.sessionId, reason: 'rtc_failed' }),
+    ).toEqual({ ok: true });
+    expect(await peerLeft).toMatchObject({
+      sessionId: matchB.sessionId,
+      reason: 'disconnected',
+      sessionEnded: true,
+    });
+    // Both search again (the recent-pair rule keeps them apart); b was requeued by the server.
+    await Promise.all([requeuedA, requeuedB]);
+
+    const job = await nodeA.gateway.sessionLogQueue.getJob(matchA.sessionId);
+    const reporter = job?.data.participants.find(
+      (p) => p.participantId === matchA.selfParticipantId,
+    );
+    expect(reporter?.leaveReason).toBe('RTC_FAILED');
+    await Promise.all([ack(a, 'queue:leave', {}), ack(b, 'queue:leave', {})]);
+  });
+
+  it('treats rtc_failed in a text session as a normal skip', async () => {
+    const { a, b, matchA } = await pair('fr');
+    const peerLeft = nextEvent<PeerLeft>(b, 'peer:left');
+    expect(
+      await ack(a, 'chat:next', { sessionId: matchA.sessionId, reason: 'rtc_failed' }),
+    ).toEqual({ ok: true });
+    expect(await peerLeft).toMatchObject({ reason: 'left', sessionEnded: true });
+    await ack(a, 'queue:leave', {});
+    expect(
+      await ack(a, 'chat:next', { sessionId: matchA.sessionId, reason: 'other' }),
+    ).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } });
+  });
+
+  it('accepts rtc:summary after the session ended, from participants only, once per peer', async () => {
+    const { a, b, matchA } = await pair('es', { mode: 'video' });
+    const peerLeft = nextEvent(b, 'peer:left');
+    expect(await ack(a, 'chat:end', { sessionId: matchA.sessionId })).toEqual({ ok: true });
+    await peerLeft;
+
+    const summary = (peer: string | undefined) => ({
+      sessionId: matchA.sessionId,
+      peer,
+      localCandidateType: 'relay',
+      remoteCandidateType: 'srflx',
+      avgRttMs: 40,
+      avgBitrateKbps: 700,
+      timeToConnectedMs: 900,
+      failed: false,
+    });
+    const peerId = matchA.peers[0]?.participantId;
+    const before = nodeA.gateway.rtcStats.snapshot();
+    expect(await ack(a, 'rtc:summary', summary(peerId))).toEqual({ ok: true });
+    expect(await ack(a, 'rtc:summary', summary(peerId))).toEqual({ ok: true }); // duplicate
+    const after = nodeA.gateway.rtcStats.snapshot();
+    expect(after.summaries - before.summaries).toBe(1);
+    expect(after.relayed - before.relayed).toBe(1);
+    expect(after.timeToConnectedMs.sum - before.timeToConnectedMs.sum).toBe(900);
+
+    expect(await ack(a, 'rtc:summary', summary(matchA.selfParticipantId))).toMatchObject({
+      ok: false,
+      error: { code: 'FORBIDDEN' },
+    });
+    const stranger = await visitor(nodeA.url);
+    expect(await ack(stranger, 'rtc:summary', summary(peerId))).toMatchObject({
+      ok: false,
+      error: { code: 'NOT_IN_SESSION' },
+    });
+  });
 });

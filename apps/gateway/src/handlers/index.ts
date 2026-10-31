@@ -23,6 +23,7 @@ import { ulid } from 'ulid';
 
 import { SocketError } from '../errors.ts';
 import { registerHandler } from '../register-handler.ts';
+import { type RtcStats } from '../rtc-stats.ts';
 import { type InSession, type Lifecycle } from '../sessions/lifecycle.ts';
 import { type SessionStore } from '../sessions/store.ts';
 import { type GatewaySocket } from '../types.ts';
@@ -55,8 +56,12 @@ export interface HandlerDeps {
   lifecycle: Lifecycle;
   store: SessionStore;
   now: () => Date;
-  logger: { info(obj: object, msg: string): void };
+  logger: { debug(obj: object, msg: string): void };
+  rtcStats: RtcStats;
 }
+
+/** Summaries remembered per socket to drop duplicates (one per peer connection is expected). */
+const MAX_SUMMARIES_PER_SOCKET = 64;
 
 /**
  * Other participants still in the session. `reconnecting` ones are included: messages reach
@@ -83,6 +88,7 @@ function recipient(session: InSession, to: string): string {
 export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void {
   const { lifecycle, store, now } = deps;
   const lastTyping = { isTyping: false, sentAt: 0 };
+  const summarized = new Set<string>();
 
   registerHandler(socket, 'ping', pingSchema, (): Pong => ({ serverTime: now().getTime() }), {
     cost: EVENT_COSTS.ping,
@@ -104,7 +110,7 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     socket,
     'chat:next',
     chatNextSchema,
-    ({ sessionId }) => lifecycle.next(socket, sessionId),
+    ({ sessionId, reason }) => lifecycle.next(socket, sessionId, reason),
     { cost: EVENT_COSTS['chat:next'] },
   );
 
@@ -210,9 +216,14 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     'rtc:summary',
     rtcSummarySchema,
     async (summary) => {
-      await lifecycle.inSession(socket, summary.sessionId);
-      // Connection-quality metrics only (no addresses); Part 7 aggregates them.
-      deps.logger.info({ rtcSummary: summary }, 'rtc summary');
+      await lifecycle.checkSummary(socket, summary.sessionId, summary.peer);
+      const key = `${summary.sessionId}:${summary.peer}`;
+      if (summarized.has(key)) return;
+      if (summarized.size >= MAX_SUMMARIES_PER_SOCKET) summarized.clear();
+      summarized.add(key);
+      // Connection-quality metrics only (no addresses); exported as metrics in Part 10.
+      deps.rtcStats.record(summary);
+      deps.logger.debug({ rtcSummary: summary }, 'rtc summary');
     },
     { cost: EVENT_COSTS['rtc:summary'] },
   );

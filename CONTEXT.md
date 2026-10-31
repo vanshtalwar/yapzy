@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (12 parts, executed one at a time) |
 | Planned group calls | Up to **4 people per video call** via **Janus VideoRoom** (Parts 11–12); 2-person calls stay P2P. Parts 1–10 must stay participant-list based and keep the `CallManager` transport interface |
-| Current status | Parts 1–6 done (web app with end-to-end text chat) — **next: Part 7** (Video chat, WebRTC) |
+| Current status | Parts 1–7 done (text + P2P video chat) — **next: Part 8** (Trust & safety) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -25,7 +25,7 @@
 | 4 | Real-time gateway core | ✅ Done | 2026-10-31 | Two nodes verified live (stats 3+2=5); sharded adapter on node-redis (D-031); `VALIDATION_FAILED` used instead of spec's `VALIDATION_ERROR` (D-034) |
 | 5 | Matchmaking & chat session lifecycle | ✅ Done (+ follow-up) | 2026-10-31 | Follow-up (D-046…D-049, D-052…D-053) done: resume/ack/deadlines/priority requeue, queue buckets. Bots 50 × 2 min × 2 nodes, ghost 0.1, reconnect 0.1: 0 protocol errors, 0 asymmetric, 0 undelivered; p95 to match 1 289 ms (4 buckets) vs 1 586 ms (1 bucket); gateway restart mid-run: 168 resumes, 0 sessions ended |
 | 6 | Web app & text chat | ✅ Done | 2026-10-31 | Next.js 16.4 + React 19.3 + Tailwind 4; `@app/ui` from 21st.dev; Zustand store + controller. Headless-Chrome smoke (2 browsers): gate → match → chat both ways (HTML shown as text) → typing → Next (auto-requeue rematch) → network drop + resume with missed message → Stop → mobile 390 px, no overflow |
-| 7 | Video chat (WebRTC) | ⬜ Not started | | |
+| 7 | Video chat (WebRTC) | ✅ Done | 2026-10-31 | Headless Chrome, fake camera + synthesized mic: connected ≈ 0.2–0.3 s after both start; rapid Next ×20 → 21 PCs created, 1 open per side, camera acquired once, 2 live local tracks; relay-only → relay↔relay through coturn; gateway restart mid-call → 0 video stalls, same PC kept, text resumed; camera denied → no Start; 390 px layout + chat drawer OK |
 | 8 | Trust & safety | ⬜ Not started | | |
 | 9 | Admin & moderation dashboard | ⬜ Not started | | |
 | 10 | Hardening, observability, testing & DX | ⬜ Not started | | |
@@ -67,7 +67,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Media | WebRTC (P2P) + coturn (TURN/STUN) for 2-person calls; **Janus VideoRoom** (SFU) for 3–4-person calls (Part 11, D-050) | coturn 4.18 (`coturn/coturn:4.18-alpine`); Janus TBD (Part 11) |
 | Auth | `jose` JWT (visitors), argon2id + TOTP (admins) | jose 6.2 (HS256 visitor tokens, `@app/shared/visitor-token`); `@node-rs/argon2` 2.2 (argon2id default) |
 | Bot protection | Cloudflare Turnstile (test keys in dev) | — |
-| Testing | Vitest, Testing Library, Playwright | Vitest 5.0 (jsdom 30 for React packages), @testing-library/react 16.3; Playwright in Part 10 (Part 6 smoke used playwright-core 1.64 + installed Google Chrome, outside the repo) |
+| Testing | Vitest, Testing Library, Playwright | Vitest 5.0 (jsdom 30 for React packages), @testing-library/react 16.3; WebRTC unit tests use fakes (`apps/web/lib/rtc/testing.ts`); Playwright in Part 10 (Parts 6–7 browser checks used playwright-core 1.64 + installed Google Chrome with fake devices, outside the repo) |
 | Observability | pino, prom-client, Prometheus, Grafana | TBD |
 
 ## 5. Architecture (summary)
@@ -101,7 +101,8 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/sessions/    store.ts (refs, session create/leave Lua, context, transcript), lifecycle.ts
 │     │                   (queue → match → session → leave orchestration, per-visitor locks, timers)
 │     ├─ src/sweeper.ts   stale-ticket sweeper (30 s, SET NX PX lock)
-│     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts
+│     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts,
+│     │   rtc-stats.ts (node-local counters from rtc:summary, exported as metrics in Part 10)
 │     ├─ src/test/        helpers.ts (2 real nodes on random ports, Redis DB 13, unique channels)
 │  │  └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
 │  ├─ worker/             BullMQ consumers: src/worker.ts (createWorkers), src/jobs/session-log.ts, src/server.ts
@@ -112,9 +113,15 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ components/      age-gate.tsx (consents + Turnstile → POST /v1/session), turnstile.tsx, blocked-screen.tsx,
 │     │                   site-header/footer, landing/ (start-panel, online-count), chat/ (chat-screen, next-button),
 │     │                   legal/legal-page.tsx
-│     └─ lib/             chat-store.ts (state machine), chat-controller.ts (socket protocol), chat.ts (singletons +
-│                         useChat), socket.ts, api.ts (typed REST + ApiError), session-token.ts, device.ts,
+│     │                   video/ (video-chat-screen, pre-join, media-video, chat-panel, device-settings-dialog,
+│     │                   media-error, device-controls), chat/ also has chat-entries + use-confirm-press
+│     └─ lib/             chat-store.ts (state machine), chat-controller.ts (socket protocol + video calls),
+│                         chat.ts (singletons: store, controller, LocalMedia, ICE cache; useChat, useLocalMedia),
+│                         socket.ts, api.ts (typed REST + ApiError), session-token.ts, device.ts,
 │                         preferences.ts, consent.ts, storage.ts, config.ts, languages.ts; *.test.ts
+│                         rtc/: types.ts (CallTransport, views), peer-session.ts, mesh-transport.ts,
+│                         call-manager.ts, local-media.ts, ice-servers.ts, stats.ts, use-audio-level.ts,
+│                         testing.ts (fakes: RTCPeerConnection, MediaStream, tracks)
 ├─ packages/
 │  ├─ config/             tsconfig.base/node/nextjs/react.json, eslint.config.base.js (createEslintConfig({ react, next })),
 │  │                      prettier.config.js
@@ -134,7 +141,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ moderation/         bans.ts: createBanChecker (shared by api + gateway); text filter etc. arrive in Part 8
 │  ├─ ui/                 `@app/ui` React kit (TS source, no build): src/styles.css (theme tokens, `@theme inline`),
 │  │                      src/lib/cn.ts, src/components/ (button, card, badge, input, label, checkbox, switch, dialog,
-│  │                      select, toaster, spinner, status-dot, tag-input, consent-gate, chat/*), components.json
+│  │                      select, sheet, toaster, spinner, status-dot, tag-input, consent-gate, chat/*, video/*:
+│  │                      video-tile, video-grid, call-controls, quality-badge, level-meter, device-fields),
+│  │                      components.json
 │  └─ redis/              src/client.ts (createRedis), keys.ts (ALL key builders), json.ts (Zod JSON helpers),
 │                         control.ts (gw:control pub/sub), bans.ts (ban cache schema + TTLs), ttl.ts,
 │                         testing.ts (`@app/redis/testing`: createTestRedis(name, { dbIndex }))
@@ -147,6 +156,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  └─ bots/               `connect` (hold N connections) and `bots` (full chat-flow load test; `pnpm bots -- …`)
 ├─ package.json  pnpm-workspace.yaml (workspaces + version catalog)  turbo.json
 ├─ prettier.config.js  .prettierignore  .editorconfig  .nvmrc  .npmrc  .gitignore
+├─ docs/                 LAN_TESTING.md (phones/LAN: secure context, Chrome flag or Caddy HTTPS proxy, TURN IPs)
 └─ .env.example  README.md  CONTEXT.md  CLAUDE.md  MASTER_IMPLEMENTATION_PROMPT.md
 ```
 
@@ -214,6 +224,18 @@ Conventions established in Part 6:
 - **Security headers** (`next.config.mjs`): CSP `default-src 'self'`, `script-src 'self' 'unsafe-inline'` (+ `'unsafe-eval'` in dev) `https://challenges.cloudflare.com`, `connect-src` = self + API + gateway (http/ws) origins, `frame-src` Turnstile, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri`/`form-action 'self'`; plus nosniff, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, COOP same-origin, `Permissions-Policy: camera=(self), microphone=(self), …=()`, no `X-Powered-By`. Final (nonce) CSP in Part 10.
 - **Theme:** light/dark from `prefers-color-scheme` only (no toggle); system font stacks (no web fonts); mobile-first (chat fills the viewport, composer uses 16 px text on mobile to avoid iOS zoom).
 
+### WebRTC design (Part 7)
+- **Pieces** (`apps/web/lib/rtc/`, framework-agnostic): `LocalMedia` (camera + mic once per tab), `CallManager` (one per video session) → `CallTransport` (`MeshTransport` today, `SfuTransport` in Part 11) → one `PeerSession` per remote participant. React only gets plain values (`CallView` in the store: participant id, state, quality, trackCount; `LocalMediaSnapshot` via `useSyncExternalStore`); `<video>` elements get streams in effects through `controller.remoteStream(id)` / `getLocalMedia().getStream()` (D-049, D-080).
+- **Call lifecycle = store state** (D-074): the controller creates the CallManager on `match:found` (video) **before** sending `match:ack`, and a store subscription closes it whenever the store leaves `matched` or switches session (skip, stop, peer left, expiry, ban, auth error, page leave). Closing sends one `rtc:summary` per peer connection. A socket disconnect never closes it; after `session:resume` succeeds the call is asked to `recover()`.
+- **Negotiation:** perfect negotiation with server roles (`initiator` = impolite). The initiator makes the first offer; the polite side ignores `negotiationneeded` until a remote description was applied (its `addTrack` transceivers bind to the offer's m-lines), then may renegotiate (ICE restarts). `setLocalDescription()` without arguments (creates + applies the offer/answer in one step). Collisions: impolite ignores the other offer (and its candidates' errors), polite rolls back implicitly via `setRemoteDescription`. Incoming signals are processed sequentially per PeerSession; candidates are queued until a remote description exists; signals of another session or sender are dropped (D-071). Handlers (`ontrack`, `onicecandidate`, `onnegotiationneeded`, `onconnectionstatechange`) are attached right after construction, before `addTrack`. End-of-candidates (`null`) is not signaled.
+- **Restart policy:** `disconnected` for 3 s → ICE restart by the initiator; `failed` → one ICE restart (initiator; polite side waits), then if it fails again or isn't `connected` within 10 s → `onFailed` → `chat:next { reason: 'rtc_failed' }` + toast. The budget resets once connected (one restart per failure episode, D-072). `online` event → `recover()` (initiator restarts ICE if not connected).
+- **Media:** constraints ideal 640×480, ≤ 30 fps, echoCancellation/noiseSuppression/autoGainControl; video track `contentHint = 'motion'`; mute / camera off = `track.enabled` (no renegotiation); device switch = new `getUserMedia` for that kind + `replaceTrack` in every connection, old track stopped; a track ending (device unplugged) falls back to the default device once. On connect, video senders get `maxBitrate` 800 kbps + `degradationPreference: 'maintain-framerate'` (retried without the preference if a browser rejects it).
+- **ICE servers:** `GET /v1/turn-credentials` cached until 60 s before expiry (`createIceServerCache`), fetched before `queue:join` in video mode, refreshed on a timer; fresh servers go to running connections via `setConfiguration`, and a connection whose selected local candidate is `relay` restarts ICE so coturn allocations are re-made with valid credentials (D-073). `NEXT_PUBLIC_FORCE_TURN_RELAY=true` → `iceTransportPolicy: 'relay'` (hides IPs; all media via TURN).
+- **Stats:** every 2 s `getStats()` → selected pair (transport `selectedCandidatePairId`, fallback nominated pair) candidate **types only** (no addresses kept), RTT, inbound loss, send/receive kbps → quality badge (`poor`: loss > 8 % or RTT > 500 ms; `fair`: loss > 3 % or RTT > 250 ms). Summary on close: candidate types, avg RTT, avg send kbps, time to connected, failed (bounded to the schema's limits).
+- **Gateway:** `rtc:summary` needs only membership in the (possibly ended) video session — session keys live 1 h after the end — and `peer` must be another participant; duplicates per socket are dropped; counters in `rtc-stats.ts` (summaries, failed, relayed, local candidate types, sums of connect time / RTT / bitrate) for Part 10 (D-069). `chat:next { reason: 'rtc_failed' }` in a video session leaves with `RTC_FAILED` + early-failure requeue of the others; in text it is a plain skip (D-070).
+- **UI:** `/chat?mode=video` → pre-join (preview, device pickers, mic meter via Web Audio analyser, mute/camera toggles, "Start video chat" only when media is ready; denied / no device / busy / insecure-context messages with "Try again" and a link to text chat) → age gate if there is no session token → call screen: stage with remote tiles (`VideoGrid`, ready for 1–3 remote tiles), mirrored local PiP, quality badge, "Reconnecting to RandomChat…" / "Stranger's connection is unstable…" banners, searching / ended / paused overlays over a dimmed local preview, controls bar (Mute, Camera, Chat with unread badge on phones, Settings dialog, Report disabled until Part 8, Next with confirm / Esc×2, Stop / New chat), text chat as a side panel (≥ md) or bottom sheet (phones). Autoplay refused → plays muted with "Tap to unmute". The camera stays on across matches and is released (deferred 250 ms) when leaving the page.
+- **Page/network events:** `pagehide` → close the call and send `chat:end` (or `queue:leave`) immediately (D-077); `SERVER_RESTARTING` notice → disconnect and reconnect after 250–500 ms to another node (D-076).
+
 ### Matchmaking & session design (Part 5 + follow-up)
 - **Buckets (D-052, D-056):** a queue family `(region, pool, mode, lang)` has `MM_BUCKETS_BY_QUEUE["<mode>:<lang>"] ?? MM_BUCKETS` buckets, each its own hash tag `{mm:<region>:<pool>:<mode>:<lang>:<bucket>}`. Join: `chooseBucket` samples up to `BUCKET_CHOICES` = 4 random buckets in one pipelined call (LLEN of `q:any` + the ticket's interest queues) and takes the one with the most waiters (random among ties). Interest matching and recent-pair avoidance are per bucket (a rematch across buckets is possible but negligible in busy queues; small queues use 1 bucket).
 - **Hopping:** a waiting ticket's node timer fires every `MM_BUCKET_HOP_MS` (jittered 75–125 %, D-059): `hop` = cancel-if-waiting in the old bucket (a concurrent match wins) → choose another bucket → enqueue with **priority** (LPUSH, head of queue), same ticketId/createdAt/phase; the visitor ref moves to the new bucket only if it still names the ticket (else the new ticket is cancelled). A ticket id may be re-enqueued into a bucket where it is `cancelled` (hopping back).
@@ -254,6 +276,8 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | Status dot | `packages/ui/src/components/status-dot.tsx` | Design inspired by "Status" by diceui (21st.dev); written in-house | own code |
 | Landing hero | `apps/web/app/page.tsx` | Layout inspired by "Minimal Centered Hero" by ln-dev7 (21st.dev); written in-house | own code |
 | Button, Card, Badge, Input/Textarea, Label, Checkbox, Switch, Dialog, NativeSelect, Toaster, Spinner, SystemMessage | `packages/ui/src/components/*.tsx` | shadcn/ui-style primitives on `radix-ui` / `sonner`, written for this kit (21st free tier allows only 2 component-code retrievals a day) | own code (shadcn/ui is MIT) |
+| Call controls bar + buttons | `packages/ui/src/components/video/call-controls.tsx` | Design inspired by "Video Call Controls Bar" by cnippet-dev — https://21st.dev/r/cnippet-dev/v-toggle-9 (id 22214) and the "Toolbar" video-call demo by cnippet-dev; only the preview images were used (daily code quota exhausted), written in-house | own code |
+| Video tile, video grid, quality badge, level meter, device fields, sheet | `packages/ui/src/components/video/*.tsx`, `sheet.tsx` | Written in-house (21st search found no fitting component; quota exhausted) | own code |
 
 ### MCP servers for agents
 - `21st` (21st.dev, HTTP `https://21st.dev/api/mcp`): configured twice — in the user's local Claude config (key inline, takes precedence) and in project `.mcp.json` (key from env var `API_KEY_21ST`, **not set** as of 2026-10-31). `.mcp.json` contains no secret and is safe to commit. Used for all frontend UI work (see master prompt → Reference Design → Frontend UI components).
@@ -264,7 +288,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 
 | Service | Port | Start command | Status |
 |---|---|---|---|
-| web | 3000 | `pnpm --filter @app/web dev` (`next dev`, Turbopack) · `build` · `start`; also started by root `pnpm dev` | ✅ two-browser chat verified (headless Chrome) |
+| web | 3000 | `pnpm --filter @app/web dev` (`next dev`, Turbopack) · `build` · `start`; also started by root `pnpm dev` | ✅ two-browser text and video chat verified (headless Chrome, fake devices) |
 | admin | 3001 | TBD | not built |
 | api | 4000 (`API_HOST`, default 0.0.0.0) | `pnpm --filter @app/api dev` (tsx watch) · `build` (tsup) · `start` (`node dist/server.js`) | ✅ running in dev; graceful shutdown verified |
 | gateway | 4001 (+4011 via `dev:multi`), `GATEWAY_HOST` default 0.0.0.0 | `pnpm --filter @app/gateway dev` · `dev:multi` · `build` (tsup) · `start` | ✅ two nodes verified; graceful drain verified |
@@ -278,6 +302,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 - Relay candidates advertise `TURN_EXTERNAL_IP` (default `127.0.0.1`) via `--external-ip`; the relay port range is published 1:1, so browsers on the Mac reach `127.0.0.1:491xx`.
 - Forced relay on both sides (relay↔relay) works: the "peer" of each allocation is the other allocation's `127.0.0.1:<port>`, which requires `allow-loopback-peers` (dev only). Verified with `turnutils_uclient -y` from a container via `host.docker.internal:3478`: 0 % loss, wrong HMAC secret rejected.
 - Without forced relay, two tabs on the same Mac connect via host candidates and never use TURN.
+- **Browser check (Part 7):** with `NEXT_PUBLIC_FORCE_TURN_RELAY=true`, two headless Chrome instances on the Mac connect relay↔relay through coturn (selected pair `relay`/`relay`) and video plays.
 - Mixed relay↔host may fail on Docker Desktop: the host peer's packets reach coturn NATed from the Docker VM gateway IP, not the IP in its permission. Not a production concern (TURN runs on a real host with a public IP).
 - To test from a phone on the LAN, set `TURN_EXTERNAL_IP` (and later `TURN_HOST`/`STUN_URLS`) to the Mac's LAN IP and `pnpm infra:up` again.
 - `static-auth-secret` is passed as a CLI flag (visible in `docker inspect`) — acceptable for dev only. The coturn image entrypoint `eval`s each argument, so `TURN_SECRET` must not contain shell metacharacters (hex is safe).
@@ -316,7 +341,7 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | CORS_ORIGINS | api, gateway (also the WebSocket Origin allowlist) | Comma list of allowed browser origins (validated URLs) | http://localhost:3000,http://localhost:3001 |
 | TRUST_PROXY | api, gateway (proxy-addr) | Proxies trusted for X-Forwarded-For: empty = none, hop count, or IP/CIDR list; `true` rejected (new, not in master design) | empty |
 | NEXT_PUBLIC_API_URL, NEXT_PUBLIC_GATEWAY_URL | web (`webEnv`, inlined at build; also used for the CSP `connect-src`), bots (defaults for `connect`) | Public API / gateway URLs | http://localhost:4000, http://localhost:4001 |
-| NEXT_PUBLIC_FORCE_TURN_RELAY | (Part 7) | Force relay-only ICE | false |
+| NEXT_PUBLIC_FORCE_TURN_RELAY | web (`webEnv` `z.stringbool()`, inlined at build → `publicConfig.forceTurnRelay`) | Relay-only ICE (`iceTransportPolicy: 'relay'`): hides IPs from peers, all media via TURN | false |
 | S3_ACCESS_KEY, S3_SECRET_KEY | docker-compose (MinIO root user/password, minio-init), API/worker later | MinIO creds (password ≥ 8 chars) | randomchat, placeholder |
 | S3_BUCKET_EVIDENCE, S3_BUCKET_FRAMES | docker-compose (minio-init), API/worker later | Bucket names | evidence, frames |
 | S3_ENDPOINT, S3_REGION | (Part 8) | S3 client | http://localhost:9000, us-east-1 |
@@ -361,6 +386,7 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | `pnpm --filter @app/bots connect --count N --gateway URL[,URL]` | N bot visitors (real sessions via the API), round-robin over gateways; Ctrl-C to stop |
 | `pnpm --filter @app/api test` | API integration tests (needs `pnpm infra:up`; turbo `pnpm test` also migrates `app_test` first) |
 | `pnpm --filter @app/web dev` / `build` / `start` / `test` | Web app (Next dev on 3000 / production build / serve it / Vitest store + controller tests). `typecheck` runs `next typegen` first (route types for `PageProps`) |
+| `RECENT_PAIR_TTL_MS=0 pnpm --filter @app/gateway dev` | Gateway with the no-rematch window off, for skip tests with only two browsers. Real env vars reach an app only when it is run directly: `pnpm dev` (turbo, strict env mode) passes only `.env` values |
 | `pnpm --filter @app/<pkg> test` | Run one package's tests |
 
 ## 10. Data model (implemented)
@@ -457,11 +483,11 @@ Contract: `packages/shared/src/socket/` (names, Zod schemas, types). Acks: `{ ok
 | C→S | `match:ack` | ✅ | `{ sessionId }` within `MATCH_ACK_TIMEOUT_MS`; `NOT_IN_SESSION` if the session is over |
 | C→S | `session:resume` | ✅ | `{ sessionId, lastMessageId? }` on any node → ack `{ selfParticipantId, peers, missedMessages }` or `SESSION_NOT_RESUMABLE` |
 | C→S | `queue:leave` | ✅ | waiting only (`INVALID_STATE` otherwise) |
-| C→S | `chat:next` / `chat:end` | ✅ | current `sessionId` only (`NOT_IN_SESSION` otherwise); next = leave (SKIP) + requeue with the socket's last preferences; end = leave (STOP) → idle |
+| C→S | `chat:next` / `chat:end` | ✅ | current `sessionId` only (`NOT_IN_SESSION` otherwise); next = leave (SKIP) + requeue with the socket's last preferences; `chat:next { reason: 'rtc_failed' }` (video) = leave as RTC_FAILED, others count as innocent (priority requeue if early); end = leave (STOP) → idle |
 | C→S | `chat:message` | ✅ | ack `{ ok: true, data: { id, at } }`; `NOT_IN_SESSION` for stale/ended sessions |
 | C→S | `chat:typing` | ✅ | relayed on change, repeats ≤ 1 per 2 s |
 | C→S | `rtc:offer` / `rtc:answer` / `rtc:ice` | ✅ | video sessions only (`INVALID_STATE`), `to` must be an active other participant (`FORBIDDEN`) |
-| C→S | `rtc:summary` | ✅ (log only) | membership-checked, logged; aggregation in Part 7 |
+| C→S | `rtc:summary` | ✅ | accepted from any participant of the video session, also after it ended (≤ 1 h); `peer` must be another participant (`FORBIDDEN`); duplicates per socket dropped; node-local counters (`rtc-stats.ts`), debug log |
 | C→S | `moderation:signal` | 🟨 stub | validated, ack `NOT_IMPLEMENTED` (Part 8) |
 | C→S | any other event | ✅ | ack `VALIDATION_FAILED "Unknown event"` + abuse strike |
 | S→C | `system:notice` | ✅ `SESSION_REPLACED`, `SERVER_RESTARTING`, `RATE_LIMITED` | `BANNED`, `MESSAGE_BLOCKED` codes defined, used from Part 5/8 |
@@ -543,6 +569,18 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-066 | 2026-10-31 | The chat page releases its controller with a 250 ms delay (`releaseChatController`); `dispose()` sends `chat:end`/`queue:leave` before disconnecting | React StrictMode mounts effects twice in dev; an immediate dispose would drop the socket and the session between the two mounts |
 | D-067 | 2026-10-31 | Age gate pre-checks the consents when this browser accepted the current ToS version (`rc.acceptedTos`), but always requires a fresh Turnstile check; sessions are per tab (`sessionStorage`), and a second tab of the same device is the same visitor, so the older tab gets `SESSION_REPLACED` and offers "Use RandomChat here" | Bot check stays mandatory per session; one chat per visitor (Part 4 single-socket policy) with a clear way back |
 | D-068 | 2026-10-31 | A `NOT_IN_SESSION` answer to `chat:next` falls back to `queue:join`; `INVALID_STATE` on `queue:join` is treated as "already waiting" | The session may have ended (peer left) between the click and the server; the server may already have requeued us with priority (D-048) |
+| D-069 | 2026-10-31 | `rtc:summary` is checked against session **membership** (context lives 1 h after the end), not "in session"; duplicates per socket dropped; node-local counters for Part 10 metrics | Summaries are sent when a connection closes, which is usually after the session ended (the stranger left first) |
+| D-070 | 2026-10-31 | `chat:next` gets an optional `reason: 'rtc_failed'` (video sessions only; text → plain skip). The session ends as `RTC_FAILED` with early-failure requeue of the **others**; the reporter requeues normally | Implements the D-048 "WebRTC failed" case; giving the reporter priority would let anyone jump the queue by claiming failures |
+| D-071 | 2026-10-31 | Perfect negotiation where only the initiator makes the first offer (the polite side waits for a remote description before handling `negotiationneeded`); incoming signals processed sequentially per peer | Matches the spec ("initiator creates the first offer") while keeping glare-safe renegotiation for ICE restarts; ordering avoids applying candidates/answers out of order |
+| D-072 | 2026-10-31 | ICE restart budget: one restart per failure episode (resets when `connected`); the polite side waits up to 10 s for the initiator's restart before giving up | A long call that survives one network blip should get another chance later; only one side drives restarts so they don't collide |
+| D-073 | 2026-10-31 | TURN credentials refreshed 60 s before expiry; running connections get them via `setConfiguration`, and a relayed connection restarts ICE (either side) | coturn checks the REST credential's expiry on every request incl. allocation refreshes, so a relayed call longer than the TTL (600 s) would otherwise drop |
+| D-074 | 2026-10-31 | The CallManager follows the store: created on `match:found` before `match:ack`, closed by a store subscription whenever the store leaves `matched`/the session | One place guarantees no zombie peer connections (verified: 20 rapid skips → 1 open PC per side) |
+| D-075 | 2026-10-31 | A `chat:next` refused with `RATE_LIMITED` (or timed out) is retried every 1 s while the UI already searches; Stop during a pending skip sends `chat:end` for that session | Found by the rapid-Next browser test: each match costs ≈ 9 socket tokens (≈ 25 ICE candidates at 0.125), so skips faster than ~1 per 2 s hit the 20-token bucket; before, the client showed "searching" while the server kept it in the old chat |
+| D-076 | 2026-10-31 | On `SERVER_RESTARTING` the client disconnects and reconnects after 250–500 ms instead of waiting to be cut off | Drains finish quickly and clients land on a healthy node; sessions resume (D-046) |
+| D-077 | 2026-10-31 | `pagehide` closes the call and sends `chat:end` / `queue:leave`; `online` reconnects at once and asks the call to recover | The stranger shouldn't wait for the 15 s grace period after a closed tab; network changes need an ICE restart |
+| D-078 | 2026-10-31 | `agentRules: false` in `next.config.mjs` | Next 16.4's dev server writes an `AGENTS.md` into the app; this repo's agent instructions are CLAUDE.md + CONTEXT.md |
+| D-079 | 2026-10-31 | Video components (tile, grid, controls, quality badge, level meter, device fields, sheet) written in-house in `@app/ui`; new theme tokens `--stage` / `--stage-foreground` for the always-dark video surface | 21st free tier: daily code quota already used by Part 6; preview images of the 21st "Video Call Controls Bar" served as design reference |
+| D-080 | 2026-10-31 | The web client validates every server event and ack payload with the shared Zod schemas and drops malformed ones | Global rule "Zod at every boundary"; a version-mismatched or buggy server can't put the client into an impossible state |
 
 ## 15. Known issues / TODOs / production gaps
 
@@ -574,7 +612,11 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - **Web (Part 6):** a page reload ends the current chat (the new page starts a fresh search; the gateway marks the old participant `reconnecting` and `queue:join` then leaves that session, so the stranger sees "Stranger has disconnected"). Resuming across reloads would need the sessionId in `sessionStorage` and our own sent messages (not returned by `session:resume`) — deferred.
 - **Web:** CSP still allows `'unsafe-inline'` scripts (Next's inline bootstrap) and, in dev only, `'unsafe-eval'`; nonce-based CSP is Part 10. In dev, Next's dev-tools button ("N", bottom left) overlaps the page; it is not in production builds.
 - **Web:** the Turnstile widget needs internet (Cloudflare script + siteverify) even in dev; the dev CSP also allows `ws:`/`wss:` for Next's HMR socket.
-- **Web:** video mode is disabled ("Coming soon") until Part 7; there is no report button until Part 8.
+- **Web:** there is no report button until Part 8 (the video controls show a disabled "Report").
+- **Video:** the stranger turning their camera off shows as black video (no "camera off" signal yet; a `media:state` event could add one). Chosen camera/mic are not remembered between visits (defaults each time).
+- **Video:** headless Chrome on macOS hangs when capturing (even fake) audio; the browser checks synthesize the microphone with Web Audio (real browsers are unaffected).
+- **Video:** skipping faster than about once every 2 s is throttled by the gateway's token bucket (by design); the client retries the skip (D-075). The online count can lag ~15 s (10 s poll + 5 s presence + 2 s cache).
+- **Video:** `rtc:summary` counters are in-memory per gateway node (Part 10 exports them; they reset on restart).
 - **21st.dev licenses** of the adapted components (theme, Chat Messages, consent gate) were not returned by the MCP — verify on each component page before production (listed in §6 "UI components list").
 - The Part 6 browser smoke test (two Chrome contexts via playwright-core, network drop simulated by proxying the gateway WebSocket with `routeWebSocket`, because Chrome's offline emulation does not close open WebSockets) lived outside the repo; Part 10 adds Playwright e2e tests to the repo.
 - Production-only items (tracked fully in `docs/PRODUCTION_CHECKLIST.md` from Part 10): legal review, age-assurance vendor, CSAM hash matching + NCMEC reporting process, human moderation staffing, bare-metal TURN with `denied-peer-ip`, Kubernetes, Redis Cluster, PgBouncer, multi-region, CDN/WAF/DDoS.
@@ -596,3 +638,4 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | 2026-10-31 | — | Scale review for 1M concurrent users: queue buckets with hopping + region in matchmaking keys (D-052), sharded deadlines and match counters (D-053), risk-based frame sampling with a global budget (D-054), production-plan items for session analytics, multi-region and 1M validation (D-055). Master prompt: Reference Design (key schema, new "Queue buckets" section, env vars, `match:found.moderation`), Parts 5, 8, 10 updated. Part 5 follow-up note extended. |
 | 2026-10-31 | 5 (follow-up) | Session resilience + scale fixes: `match:ack` with sharded Redis ack deadlines, reconnect grace + `session:resume` on any node (missed messages), participant statuses, deadline processor (exactly-once via ZREM), fair priority requeue, shutdown keeps sessions; queue buckets with region in the tag, `chooseBucket` (4 choices) + jittered priority hops, sharded match counters; `MATCH_TIMEOUT` enum migration; new env vars (resilience + `MM_*`, shards). Bots: `--ghost-rate`, `--reconnect-rate`, forced reconnect on restart, per-message delivery tracking. Acceptance (50 bots, 2 min, 2 nodes, ghost/reconnect 0.1): 0 protocol errors, 0 asymmetric, 0 undelivered; p95 1 289 ms (4 buckets) vs 1 586 ms (1 bucket); restart mid-run → 168 resumes, 0 sessions ended; ghost sessions ended ≤ 6.0 s. Bugs found by the bots and fixed: resume cut-off lost messages (D-057), lockstep hops (D-059), 2-choice bucket misses (D-056). Tests: 134. Decisions D-056…D-060. Also committed the concurrent plan update separately and removed an accidentally committed transcript. |
 | 2026-10-31 | 6 | Web app & text chat: `apps/web` (Next.js 16.4, React 19.3, Tailwind 4) with landing (mode cards, language, interests, auto-requeue, live online count), age gate (consents + Turnstile → `/v1/session`, banned screen), `/chat` (state machine store + socket controller: match ack, resume with drop-time cursor + dedupe, stale-session filtering, optimistic messages with retry/blocked, typing, Next confirm/Esc×2, Stop, auto-requeue, ghost-tab pause, single-tab handling), placeholder legal pages, security headers/CSP; `packages/ui` (`@app/ui`, shadcn-style kit adapted from 21st.dev: theme, chat components, consent gate); shared REST schemas in `@app/shared`; `webEnv`; ESLint react/next presets and `tsconfig.react.json`. Tests: 9 store + 7 controller (fake socket) + 3 HTML-escaping component tests; headless-Chrome two-browser smoke passed. |
+| 2026-10-31 | 7 | Video chat (WebRTC): `lib/rtc` (LocalMedia, PeerSession with perfect negotiation, candidate queuing, restart policy, 800 kbps cap, stats/quality, summaries; MeshTransport behind a `CallTransport` interface; CallManager; TURN credential cache with refresh), controller integration (call follows the store, ack after the call exists, rtc signal routing, `rtc_failed`, throttled-skip retry, `pagehide`/`online`, `SERVER_RESTARTING` reconnect, Zod-validated server payloads), `/chat?mode=video` (pre-join check, call screen, device settings, mobile chat drawer, autoplay fallback), Video enabled on the landing page; `@app/ui` video components + sheet + stage tokens; gateway: `chat:next` reason `rtc_failed`, `rtc:summary` membership check + counters; `NEXT_PUBLIC_FORCE_TURN_RELAY` in `webEnv`; `docs/LAN_TESTING.md`; `agentRules: false`. Tests: PeerSession (16), CallManager (7), stats (3), ICE cache (2), LocalMedia (5), controller video (7) + throttle/restart/validation (4), gateway (3). |

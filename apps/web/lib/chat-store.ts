@@ -12,6 +12,7 @@ import {
 import { createStore } from 'zustand/vanilla';
 
 import { DEFAULT_PREFERENCES } from './preferences.ts';
+import { type CallView } from './rtc/types.ts';
 
 /**
  * Chat state machine (Part 6):
@@ -22,6 +23,8 @@ import { DEFAULT_PREFERENCES } from './preferences.ts';
  *    └─────────────────┴──────────────────────────────┘          peer:left / stop     ▼
  *                                                                               ended ──new chat──▶ connecting
  *   blocked (banned) and error (auth / replaced / network) are terminal until the user acts.
+ *   Video (Part 7): `call` mirrors the CallManager of the matched session; leaving `matched`
+ *   or switching sessions clears it (the controller closes the CallManager on the same change).
  *
  * Every session-scoped server event is ignored unless its sessionId is the current one, so
  * stale signals from a chat the user already skipped can never leak into the new one.
@@ -70,6 +73,8 @@ export interface ChatData {
   blockedUntil: string | null;
   errorKind: ErrorKind | null;
   errorMessage: string | null;
+  /** Video call of the current session: plain values only, media stays in the CallManager. */
+  call: CallView | null;
 }
 
 export interface ChatActions {
@@ -97,6 +102,8 @@ export interface ChatActions {
   stopSearching(): void;
   setBlocked(expiresAt: string | null): void;
   setError(kind: ErrorKind, message: string): void;
+  /** Ignored unless it belongs to the current matched session (or clears the call). */
+  setCall(view: CallView | null): void;
   reset(): void;
 }
 
@@ -113,6 +120,7 @@ const freshSession = {
   endReason: null,
   lastReceivedId: null,
   resumeCursor: null,
+  call: null,
 } satisfies Partial<ChatData>;
 
 let systemCounter = 0;
@@ -233,6 +241,7 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
           endReason: disconnected ? 'peer_disconnected' : 'peer_left',
           peerTyping: false,
           peerUnstable: false,
+          call: null,
           entries: [
             ...state.entries,
             system(disconnected ? 'Stranger has disconnected.' : 'Stranger has left the chat.'),
@@ -284,6 +293,7 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
           status: 'ended',
           endReason: 'self_left',
           peerTyping: false,
+          call: null,
           entries: [...state.entries, system('You left the chat.')],
         }));
       },
@@ -295,6 +305,7 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
           endReason: 'expired',
           peerTyping: false,
           peerUnstable: false,
+          call: null,
           entries: [...state.entries, system('This chat has ended.')],
         }));
       },
@@ -348,7 +359,17 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
       },
 
       setError: (kind, message) => {
-        set({ status: 'error', errorKind: kind, errorMessage: message, peerTyping: false });
+        set({
+          status: 'error',
+          errorKind: kind,
+          errorMessage: message,
+          peerTyping: false,
+          call: null,
+        });
+      },
+
+      setCall: (view) => {
+        if (view === null || current(view.sessionId)) set({ call: view });
       },
 
       reset: () => {

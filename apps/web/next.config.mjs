@@ -14,6 +14,7 @@ for (const key of /** @type {const} */ ([
 ])) {
   process.env[key] = env[key];
 }
+process.env.NEXT_PUBLIC_FORCE_TURN_RELAY = String(env.NEXT_PUBLIC_FORCE_TURN_RELAY);
 
 const isDev = process.env.NODE_ENV !== 'production';
 const gateway = new URL(env.NEXT_PUBLIC_GATEWAY_URL);
@@ -40,7 +41,11 @@ const csp = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // `next dev` would otherwise write an AGENTS.md here; agent docs live in CLAUDE.md/CONTEXT.md.
+  agentRules: false,
   transpilePackages: ['@app/shared', '@app/ui'],
+  // LAN testing (docs/LAN_TESTING.md): the dev server accepts the host the public URLs use.
+  allowedDevOrigins: [gateway.hostname],
   turbopack: { root: path.join(import.meta.dirname, '../..') },
   headers() {
     return Promise.resolve([

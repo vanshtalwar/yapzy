@@ -69,7 +69,25 @@ pnpm --filter @app/web test                                     # store/controll
 
 The UI kit lives in `packages/ui` (`@app/ui`): shadcn-style components adapted from
 [21st.dev](https://21st.dev) via the `21st` MCP (provenance in each file and in `CONTEXT.md`).
-Video chat arrives in Part 7.
+
+### Video chat
+
+Pick **Video chat** on the landing page (or open <http://localhost:3000/chat?mode=video>). The
+pre-join screen asks for camera and microphone, shows a preview, device pickers and a mic
+meter; **Start video chat** only enables once both work, so nobody is matched without media.
+Calls are peer-to-peer WebRTC with coturn as fallback; text chat stays available next to the
+video (a drawer on phones).
+
+- Relay-only mode: set `NEXT_PUBLIC_FORCE_TURN_RELAY=true` in `.env` and restart the web app;
+  `chrome://webrtc-internals` then shows a `relay` candidate pair.
+- Restarting the gateway during a call does not interrupt the video; text chat resumes once the
+  socket reconnects.
+- Phones and other devices on the LAN: see [`docs/LAN_TESTING.md`](./docs/LAN_TESTING.md)
+  (the camera needs https or localhost).
+
+Overrides for `pnpm dev` go in `.env`: Turborepo runs tasks in strict env mode, so variables
+set on the command line (`FOO=1 pnpm dev`) do not reach the apps. To override one app only, run
+it directly, e.g. `RECENT_PAIR_TTL_MS=0 pnpm --filter @app/gateway dev`.
 
 ## REST API (`apps/api`, port 4000)
 

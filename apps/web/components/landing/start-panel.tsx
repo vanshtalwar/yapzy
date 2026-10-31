@@ -24,7 +24,7 @@ import { BlockedScreen } from '../blocked-screen.tsx';
 
 const MODE_CARDS: Record<ChatMode, { title: string; description: string; available: boolean }> = {
   text: { title: 'Text chat', description: 'Type with a stranger.', available: true },
-  video: { title: 'Video chat', description: 'Face to face, camera on.', available: false },
+  video: { title: 'Video chat', description: 'Face to face, camera on.', available: true },
 };
 
 /** Mode, language and interests, then the age gate on first start. */

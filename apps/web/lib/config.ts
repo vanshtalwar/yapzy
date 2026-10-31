@@ -9,9 +9,12 @@ export const publicConfig = z
     apiUrl: z.url(),
     gatewayUrl: z.url(),
     turnstileSiteKey: z.string().min(1),
+    /** Relay-only ICE: hides IP addresses from the stranger at the cost of TURN bandwidth. */
+    forceTurnRelay: z.boolean(),
   })
   .parse({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000',
     gatewayUrl: process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:4001',
     turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '1x00000000000000000000AA',
+    forceTurnRelay: process.env.NEXT_PUBLIC_FORCE_TURN_RELAY === 'true',
   });

@@ -36,9 +36,35 @@ export {
 export { fieldClasses, Input, Textarea } from './components/input.tsx';
 export { Label } from './components/label.tsx';
 export { NativeSelect } from './components/select.tsx';
+export {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from './components/sheet.tsx';
 export { Spinner } from './components/spinner.tsx';
 export { StatusDot } from './components/status-dot.tsx';
 export { Switch } from './components/switch.tsx';
 export { TagInput, type TagInputProps } from './components/tag-input.tsx';
 export { toast, Toaster } from './components/toaster.tsx';
+export {
+  CallControlButton,
+  type CallControlButtonProps,
+  CallControls,
+} from './components/video/call-controls.tsx';
+export {
+  type DeviceChoice,
+  DeviceFields,
+  type DeviceFieldsProps,
+} from './components/video/device-fields.tsx';
+export { LevelMeter } from './components/video/level-meter.tsx';
+export {
+  type CallConnection,
+  type CallQuality,
+  QualityBadge,
+} from './components/video/quality-badge.tsx';
+export { VideoGrid } from './components/video/video-grid.tsx';
+export { VideoTile, type VideoTileProps } from './components/video/video-tile.tsx';
 export { cn } from './lib/cn.ts';
