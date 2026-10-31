@@ -94,6 +94,7 @@
 │  ├─ config/        tsconfig bases, ESLint flat config, Prettier
 │  ├─ env/           Zod env loaders per service
 │  ├─ shared/        socket event contracts, Zod schemas, constants, error codes
+│  ├─ ui/            shared React UI kit (shadcn-style; components sourced from 21st.dev), theme tokens
 │  ├─ logger/        pino logger factory
 │  ├─ db/            Prisma schema, client singleton, seed
 │  ├─ redis/         ioredis factory, central key builders, pub/sub helpers
@@ -105,6 +106,18 @@
 ├─ docs/             PRODUCTION_CHECKLIST.md (Part 10)
 ├─ CONTEXT.md  CLAUDE.md  MASTER_IMPLEMENTATION_PROMPT.md  README.md  .env.example
 ```
+
+### Frontend UI components (21st.dev) — applies to all UI work (Parts 6–9, 11)
+
+UI components are sourced from **21st.dev** through the `21st` MCP server configured for this project (`.mcp.json` + local config). Rules:
+
+1. **Use the MCP.** Before building any non-trivial UI element, use the `21st` MCP tools (list them to see the current names — e.g. component search/inspiration, component builder, refiner, logo search) to find or generate a fitting component. If the MCP is not available in the session, tell the human, then fall back to shadcn/ui primitives and note it in `CONTEXT.md`.
+2. **One shared kit.** 21st.dev components follow shadcn/ui conventions (React, Tailwind, Radix primitives, `cn()` helper). Put reusable components in `packages/ui` (`@app/ui`) with a shadcn-style `components.json`, `cn()` (clsx + tailwind-merge), and theme tokens as CSS variables (light + dark). Apps import from `@app/ui`; app-specific compositions live in the app.
+3. **Adapt, don't paste.** Every imported component must: use the project's theme tokens (no hard-coded colors), pass strict TypeScript and lint, be keyboard-accessible with visible focus and correct ARIA, respect `prefers-reduced-motion`, and work at 360 px width.
+4. **Presentational only.** Components receive data and callbacks via props. Socket, WebRTC, API and store logic stays in the app's own code.
+5. **Security review each component.** No external scripts, fonts, images or CDN URLs (self-host assets; CSP), no `dangerouslySetInnerHTML`, no analytics/tracking, no `eval`, no demo/sample data left in.
+6. **Dependencies.** Allowed as needed: Radix primitives, `lucide-react`, `class-variance-authority`, `motion` (animations). Add them to the pnpm `catalog:`. Avoid heavy libraries (3D, large chart kits) on the chat/video screens; decorative animation is for the landing page only, never on hot paths.
+7. **Provenance & license.** Add a header comment to each sourced file: `// Source: 21st.dev — <component name / URL>, adapted`. Check the component's license and record name, source and license in `CONTEXT.md` (UI components list).
 
 **Internal package strategy:** workspace packages export TypeScript source (`"exports": { ".": "./src/index.ts" }`). Node apps run with `tsx watch` in dev and are bundled with `tsup` for build (bundle `@app/*` workspace packages). Next.js apps use `transpilePackages`. Single root `.env` for all services in development (load it in each app's scripts, e.g. `dotenv-cli`, and document how).
 
@@ -412,7 +425,9 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 **Goal:** `apps/web` (Next.js App Router) where a real user can pass the age gate and text-chat with a stranger.
 
 **Tasks**
-1. Next.js (App Router, TypeScript, Tailwind CSS, ESLint from `packages/config`), `transpilePackages` for `@app/shared`. Light/dark theme following system preference. Mobile-first responsive layout.
+1. Next.js (App Router, TypeScript, Tailwind CSS, ESLint from `packages/config`), `transpilePackages` for `@app/shared` and `@app/ui`. Light/dark theme following system preference. Mobile-first responsive layout.
+   - Create `packages/ui` per **Frontend UI components (21st.dev)** in the Reference Design: shadcn-style setup, `cn()`, theme tokens (light/dark), Tailwind configured so both Next apps pick up the package's classes.
+   - Use the `21st` MCP to source and adapt the UI for this part: landing hero, mode-selection cards, language select, interest tag input, online-count badge, age-gate dialog (checkboxes + Turnstile slot), chat layout, message bubbles (self / stranger / system), typing indicator, chat input with counter, Next/Stop buttons, toasts, blocked/banned screen, empty and loading states. Shared primitives (Button, Dialog, Input, Select, Badge, Toast, Card, etc.) go in `@app/ui`.
 2. Pages:
    - `/` landing: product name, short safety statement, mode selection (Text / Video — Video disabled with "coming soon" until Part 7), language select, interests tag input (≤ 5), live online count (`/v1/stats/online`, poll 10 s), links to guidelines/terms/privacy.
    - Age gate modal (first chat attempt): confirm 18+, accept Terms + Privacy + Community Guidelines (with `TOS_VERSION`), Cloudflare Turnstile widget → `POST /v1/session`. Banned → friendly blocked screen with expiry.
@@ -457,7 +472,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - Every outgoing/incoming signal is tagged with `sessionId`; signals for other sessions are dropped.
    - Collect `getStats()` every 2 s (RTT, packet loss, bitrate, selected candidate pair types) → quality indicator; send `rtc:summary` once at session end.
 3. Gateway: handle `rtc:summary` (validate, log at debug, keep counters for Part 10 metrics).
-4. Video chat page `/chat?mode=video`: remote video large (rendered from the list of remote participants, so the layout already handles 1 or 2 remote tiles), local picture-in-picture, text chat panel (side on desktop, drawer on mobile), controls (Next, Stop, Mute, Camera, Device settings, Report placeholder disabled until Part 8), "Looking for someone…" state with local preview, connection quality badge, autoplay handling (muted-autoplay fallback with tap-to-unmute). Enable Video mode on the landing page and set `features.video` accordingly.
+4. Video chat page `/chat?mode=video`: remote video large (rendered from the list of remote participants, so the layout already handles 1 or 2 remote tiles), local picture-in-picture, text chat panel (side on desktop, drawer on mobile), controls (Next, Stop, Mute, Camera, Device settings, Report placeholder disabled until Part 8), "Looking for someone…" state with local preview, connection quality badge, autoplay handling (muted-autoplay fallback with tap-to-unmute). Enable Video mode on the landing page and set `features.video` accordingly. Source the video tiles, controls bar, device-settings dialog and quality badge via the `21st` MCP into `@app/ui` (Reference Design → Frontend UI components); keep all WebRTC logic outside the components.
 5. Handle tab visibility/background, page unload (`chat:end` via `pagehide`), and network change (`online/offline`).
 6. Document LAN/mobile testing: `getUserMedia` needs a secure context — describe running `next dev --experimental-https` (or a local HTTPS proxy) and pointing `NEXT_PUBLIC_*` URLs at the LAN IP.
 
@@ -498,7 +513,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - `GET /v1/config` → `features.reports = true`.
 4. Worker jobs: `classify-frame` (run `HashMatcher` then `ImageClassifier`; clean → delete frame immediately; flagged → `ModerationEvent`, `Evidence` (`AUTO_FLAG_FRAME`), auto-created high-priority `Report`, trust decrease, auto SHADOW ban above threshold / HARD ban + escalation on hash match, publish `ban_applied`); `moderation-event` (persist + trust update); `report-threshold` (≥ N distinct reporters in 24 h → automatic SHADOW ban, configurable). `BanService.apply()` writes Postgres, refreshes Redis ban cache, publishes `ban_applied`.
 5. Web:
-   - Report button + dialog (reason radio list, optional details). Keep an **in-memory** ring buffer of the last 3 remote frames sampled every 3 s (640 px JPEG via canvas) — never uploaded unless the user reports. Submit, then auto-Next with confirmation toast.
+   - Report button + dialog (reason radio list, optional details; UI sourced via the `21st` MCP like the blur overlay and blocked-message notices). Keep an **in-memory** ring buffer of the last 3 remote frames sampled every 3 s (640 px JPEG via canvas) — never uploaded unless the user reports. Submit, then auto-Next with confirmation toast.
    - Client NSFW (`nsfwjs`, model files self-hosted under `/public/models`, lazy-loaded only in video mode): classify the remote video every 2 s at 224 px; above threshold → blur remote video with an overlay offering Next / Report; send `moderation:signal`. Classify own outgoing video every 5 s; above threshold → warn the user. Run inference off the critical render path (`requestIdleCallback` or a Web Worker with OffscreenCanvas when supported).
    - Server frame sampling: during video sessions upload own downscaled frame every 30 s ± 10 s jitter.
    - Banned/blocked UX; message-blocked UX.
@@ -532,7 +547,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - Admin users (ADMIN only): list, create, disable, reset TOTP.
    - Every mutating action writes `AuditLog` in the same transaction.
    - RBAC: MODERATOR may review, dismiss, shadow-ban, and hard-ban up to 30 days; ADMIN everything.
-2. Admin UI (Next.js, port 3001): login (+TOTP step), dashboard with stat cards and matches-per-minute chart (auto-refresh 5 s), reports queue table (sortable, filter chips, priority badges), report detail page with **evidence blurred by default and click-to-reveal** (moderator wellbeing), transcript view, action panel with confirmation dialogs, bans page, visitor page, audit log page, admin users page (ADMIN only). Keyboard shortcuts for queue triage (j/k to move, d dismiss, s shadow-ban) with visible hints.
+2. Admin UI (Next.js, port 3001), built with `@app/ui` plus dashboard components sourced via the `21st` MCP (sidebar/app shell, data table with sorting/filtering/pagination, stat cards, line chart, OTP input, filter chips, confirmation dialogs, command palette for search) — follow **Frontend UI components (21st.dev)** in the Reference Design; the admin CSP forbids any third-party asset, so self-host everything. Screens: login (+TOTP step), dashboard with stat cards and matches-per-minute chart (auto-refresh 5 s), reports queue table (sortable, filter chips, priority badges), report detail page with **evidence blurred by default and click-to-reveal** (moderator wellbeing), transcript view, action panel with confirmation dialogs, bans page, visitor page, audit log page, admin users page (ADMIN only). Keyboard shortcuts for queue triage (j/k to move, d dismiss, s shadow-ban) with visible hints.
 3. `noindex` headers, strict CSP, no third-party scripts in admin.
 
 **Required tests:** auth (wrong password, lockout, TOTP required/valid/invalid), RBAC matrix, CSRF header required, audit log written for each action, presigned URLs only for evidence of the requested report, ban action publishes `ban_applied` and the gateway disconnects the user.
