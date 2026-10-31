@@ -3,7 +3,7 @@
 #   docker build -f apps/api/Dockerfile -t randomchat-api .
 # Configuration comes from the environment at run time (no .env in the image).
 
-FROM node:24.22.2-alpine3.24 AS base
+FROM node:26.12.1-alpine3.24 AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
@@ -33,7 +33,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 FROM build AS migrate
 CMD ["pnpm", "--filter", "@app/db", "migrate:deploy"]
 
-FROM node:24.22.2-alpine3.24 AS runtime
+FROM node:26.12.1-alpine3.24 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /prod/api/package.json ./
