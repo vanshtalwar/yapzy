@@ -5,8 +5,8 @@ import { createRedis, type Redis } from './client.ts';
 /**
  * Connection to an integration-test Redis DB. Tests call FLUSHDB, so DB 0 (development data)
  * is refused. turbo runs packages' tests in parallel, so each package passes its own
- * `dbIndex` (redis: 15 from REDIS_URL_TEST, api: 14, gateway: 13) to avoid flushing another
- * package's data mid-run.
+ * `dbIndex` (redis: 15 from REDIS_URL_TEST, api: 14, gateway: 13, moderation: 12) so tests
+ * never flush another package's data mid-run.
  */
 export function createTestRedis(connectionName: string, options: { dbIndex?: number } = {}): Redis {
   const { REDIS_URL_TEST } = createEnv(redisTestEnv, { service: 'redis-tests' });

@@ -32,7 +32,7 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 
 | Command                        | What it does                                                        |
 | ------------------------------ | ------------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (currently the API)                      |
+| `pnpm dev`                     | Run all apps in watch mode (API + one gateway node)                 |
 | `pnpm build`                   | Build all apps                                                      |
 | `pnpm lint`                    | ESLint (type-aware) in every package                                |
 | `pnpm typecheck`               | `tsc` in every package                                              |
@@ -46,7 +46,8 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 | `pnpm db:generate`             | Regenerate the Prisma client after editing the schema               |
 
 Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-`@app/db`, `@app/redis` and `@app/api` tests are integration tests: run `pnpm infra:up` first.
+`@app/db`, `@app/redis`, `@app/moderation`, `@app/api` and `@app/gateway` tests are integration
+tests: run `pnpm infra:up` first.
 
 ## REST API (`apps/api`, port 4000)
 
@@ -75,11 +76,30 @@ curl localhost:4000/v1/stats/online   # 0 until the gateway exists
 Errors always look like `{"error":{"code":"…","message":"…","requestId":"…"}}`; the same id is
 in the `x-request-id` response header and the server logs.
 
+## Real-time gateway (`apps/gateway`, port 4001)
+
+```bash
+pnpm --filter @app/gateway dev         # one node on 4001
+pnpm --filter @app/gateway dev:multi   # two nodes: gw-4001 and gw-4011
+pnpm --filter @app/gateway build && pnpm --filter @app/gateway start
+curl localhost:4001/health && curl localhost:4001/ready
+```
+
+Watch the online count across both nodes (API and `dev:multi` running):
+
+```bash
+pnpm --filter @app/bots connect --count 5 --gateway http://localhost:4001,http://localhost:4011
+curl localhost:4000/v1/stats/online   # {"online":5} within ~5 s; drops when you Ctrl-C the bots
+```
+
+Each bot starts a real session through the API, so more than 10 bots per minute from one IP hit
+the session rate limit unless `RATE_LIMIT_DISABLED=true` (honoured only in development).
+
 ## Layout
 
 ```
-apps/        api (Fastify REST); web, admin, gateway, worker in later parts
-packages/    config, env, logger, shared, db (Prisma), redis (+ matchmaking, moderation later)
+apps/        api (Fastify REST), gateway (Socket.io); web, admin, worker in later parts
+packages/    config, env, logger, shared, db (Prisma), redis, moderation (bans)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init
-tools/ e2e/  bots and end-to-end tests (later parts)
+tools/bots   socket bot clients (`connect`)
 ```

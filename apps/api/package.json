@@ -16,6 +16,7 @@
     "@app/db": "workspace:*",
     "@app/env": "workspace:*",
     "@app/logger": "workspace:*",
+    "@app/moderation": "workspace:*",
     "@app/redis": "workspace:*",
     "@app/shared": "workspace:*",
     "@fastify/cors": "catalog:",

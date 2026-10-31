@@ -104,6 +104,15 @@ export function visitorSessionKey(visitorId: string): string {
   return `visitor:${assertSafeId('visitorId', visitorId)}:session`;
 }
 
+/**
+ * STRING: id of the visitor's one live socket. Written on connect; the `kick_visitor` handler on
+ * every node disconnects local sockets of that visitor whose id differs, so the LAST connection
+ * wins even when two connections race on different nodes.
+ */
+export function visitorSocketKey(visitorId: string): string {
+  return `visitor:${assertSafeId('visitorId', visitorId)}:socket`;
+}
+
 /** Socket.io room every socket of a visitor joins; all cross-node delivery targets it. */
 export function visitorRoom(visitorId: string): string {
   return `visitor:${assertSafeId('visitorId', visitorId)}`;

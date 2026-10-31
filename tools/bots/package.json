@@ -1,0 +1,25 @@
+{
+  "name": "@app/bots",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "connect": "tsx src/connect.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@app/env": "workspace:*",
+    "@app/logger": "workspace:*",
+    "@app/shared": "workspace:*",
+    "socket.io-client": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@app/config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  }
+}

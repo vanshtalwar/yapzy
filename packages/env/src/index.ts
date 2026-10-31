@@ -14,6 +14,8 @@ export {
   type DatabaseEnv,
   databaseEnv,
   databaseTestEnv,
+  type GatewayEnv,
+  gatewayEnv,
   hashPepperEnv,
   LOG_LEVELS,
   type LogLevel,

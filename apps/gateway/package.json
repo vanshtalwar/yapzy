@@ -1,0 +1,46 @@
+{
+  "name": "@app/gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/server.ts",
+    "dev:multi": "tsx scripts/dev-multi.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@app/db": "workspace:*",
+    "@app/env": "workspace:*",
+    "@app/logger": "workspace:*",
+    "@app/moderation": "workspace:*",
+    "@app/redis": "workspace:*",
+    "@app/shared": "workspace:*",
+    "@prisma/adapter-pg": "catalog:",
+    "@prisma/client": "catalog:",
+    "@socket.io/redis-adapter": "catalog:",
+    "ioredis": "catalog:",
+    "jose": "catalog:",
+    "pino": "catalog:",
+    "pino-pretty": "catalog:",
+    "proxy-addr": "catalog:",
+    "redis": "catalog:",
+    "socket.io": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@app/config": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/proxy-addr": "catalog:",
+    "eslint": "catalog:",
+    "socket.io-client": "catalog:",
+    "tsup": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

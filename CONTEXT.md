@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (10 parts + optional future Part 11, executed one at a time) |
 | Planned future feature | Add a 3rd random person to a running video call (Part 11) — Parts 1–10 must stay participant-list based |
-| Current status | Parts 1–3 done — **next: Part 4** (Real-time gateway core) |
+| Current status | Parts 1–4 done — **next: Part 5** (Matchmaking & chat session lifecycle) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -22,7 +22,7 @@
 | 1 | Monorepo foundation & local infrastructure | ✅ Done | 2026-10-31 | Postgres host port configurable (`POSTGRES_PORT`); MinIO via community fork image (D-014) |
 | 2 | Database & shared server packages | ✅ Done | 2026-10-31 | Prisma 7.10.1 (driver adapter), CHECK constraints in migration SQL, ioredis 6 pinned to RESP2 (D-019) |
 | 3 | REST API service | ✅ Done | 2026-10-31 | Fastify 5; TURN creds verified against live coturn; real Turnstile siteverify call in dev |
-| 4 | Real-time gateway core | ⬜ Not started | | |
+| 4 | Real-time gateway core | ✅ Done | 2026-10-31 | Two nodes verified live (stats 3+2=5); sharded adapter on node-redis (D-031); `VALIDATION_FAILED` used instead of spec's `VALIDATION_ERROR` (D-034) |
 | 5 | Matchmaking & chat session lifecycle | ⬜ Not started | | |
 | 6 | Web app & text chat | ⬜ Not started | | |
 | 7 | Video chat (WebRTC) | ⬜ Not started | | |
@@ -57,7 +57,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Web / Admin | Next.js (App Router) + Tailwind CSS | TBD |
 | UI components | 21st.dev components (via `21st` MCP) in shared `packages/ui` (`@app/ui`), shadcn-style conventions (D-018) | TBD (Part 6) |
 | REST API | Node.js + Fastify + Zod | Fastify 5.12, fastify-type-provider-zod 7, @fastify/cors 11, helmet 13, rate-limit 11 (Redis store), sensible 6; bundled with tsup 9, dev via tsx 4 |
-| Real-time | Socket.io + `@socket.io/redis-adapter` (sharded) | TBD |
+| Real-time | Socket.io + `@socket.io/redis-adapter` (sharded) | socket.io 4.8.4 (+ socket.io-client 4.8.4), @socket.io/redis-adapter 8.3 `createShardedAdapter` (`subscriptionMode: 'dynamic'`) on **node-redis 6.3** (adapter only; D-031), proxy-addr 2 |
 | Database | PostgreSQL + Prisma ORM | Postgres 18.6 (image `postgres:18.6-alpine`); Prisma **7.10.1** (`prisma-client` generator, `@prisma/adapter-pg` driver adapter, pinned exactly — D-020) |
 | Cache / queues / matchmaking | Redis (≥ 7.2) + ioredis + Lua | Redis 8.10.3 (`redis:8.10.3-alpine`); ioredis **6.0** (RESP2 forced — D-019) |
 | Background jobs | BullMQ (`apps/worker`) | TBD |
@@ -81,23 +81,36 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 ```
 /
 ├─ apps/
-│  └─ api/                Fastify REST API (port 4000)
+│  ├─ api/                Fastify REST API (port 4000)
 │     ├─ src/server.ts    entry: env, logger, redis, prisma singleton, listen, graceful SIGTERM/SIGINT
 │     ├─ src/app.ts       buildApp(deps) — plugins, rate limit, auth, routes (DI: config, prisma, redis, turnstile, clock, logger)
 │     ├─ src/plugins/     auth.ts (Bearer JWT → request.visitor), error-handler.ts (envelope, 404)
 │     ├─ src/routes/      health.ts, config.ts, session.ts, turn.ts, stats.ts
 │     ├─ src/services/    turnstile.ts, bans.ts (ban checker + Redis cache), turn.ts (coturn creds), online.ts
 │     ├─ src/test/        helpers.ts (test config, fakes, Redis DB 14); src/**/*.test.ts
-│     └─ tsup.config.ts   bundles @app/* into dist/server.js; npm deps stay external
+│  │  └─ tsup.config.ts   bundles @app/* into dist/server.js; npm deps stay external
+│  └─ gateway/            Socket.io gateway (port 4001; second node 4011)
+│     ├─ src/server.ts    entry: env, node id, logger, prisma singleton, listen, SIGTERM/SIGINT → shutdown()
+│     ├─ src/gateway.ts   createGateway(deps): HTTP /health /ready, Socket.io + sharded adapter, origin check,
+│     │                   handshake, single-socket policy, presence, onShutdown hooks, shutdown()
+│     ├─ src/auth.ts      handshake middleware (JWT, ban check, socket.data)
+│     ├─ src/register-handler.ts  attachGuards / registerHandler / markSocketReady (validation, token bucket, abuse)
+│     ├─ src/handlers/    index.ts: EVENT_COSTS, ping, NOT_IMPLEMENTED stubs (replaced in Part 5)
+│     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts
+│     ├─ src/test/        helpers.ts (2 real nodes on random ports, Redis DB 13, unique channels)
+│     └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
 ├─ packages/
 │  ├─ config/             tsconfig.base/node/nextjs.json, eslint.config.base.js (createEslintConfig), prettier.config.js
 │  ├─ env/                createEnv(schema), EnvValidationError, root .env loader; schemas: baseEnv, databaseEnv,
 │  │                      databaseTestEnv, redisEnv, redisTestEnv, hashPepperEnv, seedEnv, apiEnv
 │  ├─ logger/             createLogger({ service, level, nodeEnv, destination }), REDACT_PATHS
-│  ├─ shared/             constants.ts, errors.ts (ErrorCode), schemas.ts; server-only subpaths `@app/shared/crypto` (hmacHash),
+│  ├─ shared/             constants.ts, errors.ts (ErrorCode), schemas.ts, socket/ (events.ts names + NOTICE_CODES,
+│  │                      schemas.ts payload Zod schemas both directions, types.ts event maps/acks/SocketData);
+│  │                      server-only subpaths `@app/shared/crypto` (hmacHash),
 │  │                      `@app/shared/visitor-token` (createVisitorTokenService: issue/verify visitor JWTs)
 │  ├─ db/                 prisma.config.ts, prisma/schema.prisma, prisma/migrations/, prisma/seed.ts,
 │  │                      src/client.ts (createPrismaClient), src/prisma.ts (singleton), src/ban.ts, src/generated/ (gitignored)
+│  ├─ moderation/         bans.ts: createBanChecker (shared by api + gateway); text filter etc. arrive in Part 8
 │  └─ redis/              src/client.ts (createRedis), keys.ts (ALL key builders), json.ts (Zod JSON helpers),
 │                         control.ts (gw:control pub/sub), bans.ts (ban cache schema + TTLs), ttl.ts,
 │                         testing.ts (`@app/redis/testing`: createTestRedis(name, { dbIndex }))
@@ -106,7 +119,8 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ coturn/turnserver.conf
 │  ├─ postgres/init/01-create-test-db.sql   (creates app_test on first boot)
 │  └─ minio/init.sh, minio/frames-lifecycle.json
-├─ tools/                 (empty; .gitkeep)
+├─ tools/
+│  └─ bots/               `pnpm --filter @app/bots connect [--count N] [--gateway URL,URL] [--api URL]`
 ├─ package.json  pnpm-workspace.yaml (workspaces + version catalog)  turbo.json
 ├─ prettier.config.js  .prettierignore  .editorconfig  .nvmrc  .npmrc  .gitignore
 └─ .env.example  README.md  CONTEXT.md  CLAUDE.md  MASTER_IMPLEMENTATION_PROMPT.md
@@ -138,6 +152,25 @@ Conventions established in Part 3:
 - Rate limits are per route (`config.rateLimit`), Redis-backed, keyed by IP hash or visitor id (never raw IP); keys `rl:api:<METHOD><url>-<subject>`. Auth-keyed limits use `hook: 'preHandler'` so they run after `app.authenticate`.
 - Test Redis DB per package (turbo runs packages in parallel and tests FLUSHDB): redis 15, api 14, gateway 13 (reserved). API test files run sequentially (`fileParallelism: false`). Tests build config from literals, not the developer's `.env` (except `DATABASE_URL_TEST`/`REDIS_URL_TEST`).
 
+Conventions established in Part 4:
+- Socket event names come from `CLIENT_EVENTS` / `SERVER_EVENTS` (`@app/shared`); payload schemas for both directions live in `packages/shared/src/socket/schemas.ts`; the typed maps `ClientToServerEvents` / `ServerToClientEvents` are checked against the name constants at compile time (`SocketEventMapsMatch`).
+- Every client→server handler is registered with `registerHandler(socket, event, schema, handler, { cost })`; never `socket.on` directly. Handlers throw `SocketError(code, message)` for expected failures; the ack is always answered (`{ ok: true, data? }` / `{ ok: false, error }`).
+- Handlers run only after the socket is fully registered (Redis socket key, kick broadcast, `visitor:<id>` room joined) — `markSocketReady`.
+- Never emit to a socket id across nodes; emit to `visitorRoom(visitorId)` (works on any node through the sharded adapter). Use `io.local` only for node-local work (kicks, shutdown).
+- Gateway tests start real gateway instances (`startGateway`) with unique control/adapter channel names per run, so they can run while a dev gateway is up.
+
+### Gateway design (Part 4)
+- **Transport:** plain `node:http` server; Socket.io with `transports: ['websocket']`, `perMessageDeflate: false`, `maxHttpBufferSize` 32 KB, ping 25 s / timeout 20 s, `serveClient: false`. `GET /health` (liveness) and `GET /ready` (Redis app client + adapter client + Postgres; 503 while draining).
+- **Origin check:** `allowRequest` rejects any `Origin` not in `CORS_ORIGINS` (CORS doesn't protect WebSockets); requests without `Origin` (bots/tests) are allowed but still need a JWT. Also rejects everything while draining.
+- **Adapter:** `createShardedAdapter(pub, sub, { subscriptionMode: 'dynamic' })` with node-redis clients; channel prefix `socket.io` (tests override). ioredis is used for app data and for a dedicated `gw:control` subscriber.
+- **Handshake** (`auth.ts`): `auth.token` → visitor JWT verify → client IP via proxy-addr with `TRUST_PROXY` semantics → `ipHash` → ban check (`@app/moderation`, visitor id + IP hash) → HARD ban rejects with `BANNED` (+`expiresAt`); SHADOW → `pool: 'shadow'`. Sets `socket.data = { visitorId, ipHash, pool, state: 'idle' }`. Errors reach the client as `connect_error` with `data: { code, message }` (`UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED`, `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`).
+- **One socket per visitor** (`single-socket.ts`): on connect `SET visitor:<id>:socket <socketId> EX 86400` → publish `kick_visitor { keepSocketId }` on `gw:control` → join `visitor:<id>` → evict stale. Every node, on `kick_visitor`, disconnects its local sockets of that visitor whose id ≠ the Redis value (after emitting `system:notice SESSION_REPLACED`). On disconnect the key is deleted only if it still names this socket (Lua compare-and-delete).
+- **Guards** (`register-handler.ts`): per-socket token bucket (capacity 20, refill 5/s) with per-event costs; strikes (rate-limited, invalid payload, unknown event) drain an abuse bucket (capacity 30, refill 0.5/s) — when empty: `system:notice RATE_LIMITED` + disconnect. Unknown events are acked with `VALIDATION_FAILED "Unknown event"`. `RATE_LIMIT_DISABLED=true` disables both only in development.
+- **Event costs** (`handlers/index.ts` `EVENT_COSTS`): queue:join 2, queue:leave 1, chat:next 3, chat:end 1, chat:message 1, chat:typing 0.25, rtc:offer 1, rtc:answer 1, rtc:ice 0.125, rtc:summary 1, moderation:signal 0.5, ping 1.
+- **Presence** (`presence.ts`): every 5 s `SET presence:node:<nodeId> <localSocketCount> EX 15` + `SADD presence:nodes`; each tick also `SREM`s members whose node key has expired (crashed nodes). Graceful stop deletes the key and set member.
+- **Shutdown** (`gateway.shutdown()`): draining on (handshakes and `/ready` refused) → run `onShutdown` hooks (Part 5: end sessions) → `system:notice SERVER_RESTARTING` to local sockets → wait until all leave or 10 s → disconnect the rest → unsubscribe control, presence cleanup, `io.close()` (HTTP server + adapter) → quit all Redis clients. `server.ts` force-exits after 20 s.
+- **Node id:** `GATEWAY_NODE_ID` or `<hostname>-<port>`; must be unique per running process.
+
 ### UI components list (sourced from 21st.dev)
 
 _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev source — license._
@@ -156,7 +189,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | web | 3000 | TBD | not built |
 | admin | 3001 | TBD | not built |
 | api | 4000 (`API_HOST`, default 0.0.0.0) | `pnpm --filter @app/api dev` (tsx watch) · `build` (tsup) · `start` (`node dist/server.js`) | ✅ running in dev; graceful shutdown verified |
-| gateway | 4001 (+4011) | TBD | not built |
+| gateway | 4001 (+4011 via `dev:multi`), `GATEWAY_HOST` default 0.0.0.0 | `pnpm --filter @app/gateway dev` · `dev:multi` · `build` (tsup) · `start` | ✅ two nodes verified; graceful drain verified |
 | worker | — | TBD | not built |
 | PostgreSQL | 5432 (host port = `POSTGRES_PORT`; **5433 on this machine**), bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; dbs `app`, `app_test` |
 | Redis | 6379, bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; AOF and RDB off |
@@ -185,13 +218,13 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | NODE_ENV | `@app/env` baseEnv | `development` \| `test` \| `production` | development |
 | LOG_LEVEL | `@app/env` baseEnv | pino level incl. `silent` | debug (schema default `info`) |
 | POSTGRES_PORT | docker-compose | Host port for Docker Postgres (new, not in master design) | 5432 (`.env` here: 5433) |
-| DATABASE_URL | `@app/db` (prisma singleton, prisma.config.ts, seed), api (`apiEnv`) | Postgres URL (validated: `postgres(ql)://`) | postgresql://app:app@localhost:5432/app |
+| DATABASE_URL | `@app/db` (prisma singleton, prisma.config.ts, seed), api, gateway (ban fallback) | Postgres URL (validated: `postgres(ql)://`) | postgresql://app:app@localhost:5432/app |
 | DATABASE_URL_TEST | `@app/db` tests, `db:migrate:test` (via `DB_TARGET=test`) | Integration-test DB | postgresql://app:app@localhost:5432/app_test |
 | DB_TARGET | `packages/db/prisma.config.ts` | Not in .env: `test` makes Prisma CLI use `DATABASE_URL_TEST` (set by the `migrate:test` script) | unset |
-| REDIS_URL | api (`apiEnv`) | Redis URL (validated: `redis(s)://`) | redis://localhost:6379 |
-| REDIS_URL_TEST | `@app/redis` tests (`createTestRedis`) | Integration-test Redis; must select a non-zero DB (new, not in master design) | redis://localhost:6379/15 |
-| JWT_SECRET, JWT_TTL_SECONDS | api (gateway from Part 4) | Visitor JWT HS256 secret (≥ 32 chars) / lifetime (60 s – 7 d) | placeholder, 43200 |
-| IP_HASH_PEPPER, DEVICE_HASH_PEPPER | seed, api (`hashPepperEnv`, min 16 chars) | HMAC peppers — rotating one invalidates all stored hashes (bans by device/IP) | placeholders |
+| REDIS_URL | api, gateway (app client, control subscriber, adapter pub/sub) | Redis URL (validated: `redis(s)://`) | redis://localhost:6379 |
+| REDIS_URL_TEST | integration tests (`createTestRedis`; DB index overridden per package: redis 15, api 14, gateway 13, moderation 12) | Integration-test Redis; must select a non-zero DB (new, not in master design) | redis://localhost:6379/15 |
+| JWT_SECRET, JWT_TTL_SECONDS | api (issue), gateway (verify; TTL unused there) | Visitor JWT HS256 secret (≥ 32 chars) / lifetime (60 s – 7 d) | placeholder, 43200 |
+| IP_HASH_PEPPER, DEVICE_HASH_PEPPER | seed, api; gateway reads IP_HASH_PEPPER only (`hashPepperEnv`, min 16 chars) | HMAC peppers — rotating one invalidates all stored hashes (bans by device/IP) | placeholders |
 | TOS_VERSION | api (`/v1/config`, session check); web in Part 6 | Current ToS version clients must accept | 2026-10-dev |
 | TURNSTILE_SECRET_KEY | api (siteverify) | Cloudflare secret; dev = always-pass test secret | 1x0000000000000000000000000000000AA |
 | NEXT_PUBLIC_TURNSTILE_SITE_KEY | (Part 6) | Cloudflare site key | always-pass test key |
@@ -200,15 +233,17 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | TURN_HOST, TURN_PORT, TURN_CREDENTIAL_TTL_SECONDS, STUN_URLS | api (`/v1/turn-credentials`) | TURN/STUN servers handed to clients; STUN_URLS comma list of `stun:`/`stuns:` URLs | localhost, 3478, 600, stun:localhost:3478 |
 | API_HOST | api | Listen address (new, not in master design) | 0.0.0.0 |
 | API_PORT | api | API port | 4000 |
-| GATEWAY_PORT, GATEWAY_NODE_ID | (Part 4) | Gateway port / node id | 4001, unset → hostname+port |
-| CORS_ORIGINS | api (gateway from Part 4) | Comma list of allowed browser origins (validated URLs) | http://localhost:3000,http://localhost:3001 |
-| TRUST_PROXY | api | Proxies trusted for X-Forwarded-For: empty = none, hop count, or IP/CIDR list; `true` rejected (new, not in master design) | empty |
-| NEXT_PUBLIC_API_URL, NEXT_PUBLIC_GATEWAY_URL, NEXT_PUBLIC_FORCE_TURN_RELAY | (Part 6) | Browser config | http://localhost:4000, http://localhost:4001, false |
+| GATEWAY_HOST | gateway | Listen address (new, not in master design) | 0.0.0.0 |
+| GATEWAY_PORT, GATEWAY_NODE_ID | gateway | Port / unique node id (`[A-Za-z0-9_-]{1,64}`; `dev:multi` sets gw-4001 / gw-4011) | 4001, unset → `<hostname>-<port>` |
+| CORS_ORIGINS | api, gateway (also the WebSocket Origin allowlist) | Comma list of allowed browser origins (validated URLs) | http://localhost:3000,http://localhost:3001 |
+| TRUST_PROXY | api, gateway (proxy-addr) | Proxies trusted for X-Forwarded-For: empty = none, hop count, or IP/CIDR list; `true` rejected (new, not in master design) | empty |
+| NEXT_PUBLIC_API_URL, NEXT_PUBLIC_GATEWAY_URL | bots (defaults for `connect`); web in Part 6 | Public API / gateway URLs | http://localhost:4000, http://localhost:4001 |
+| NEXT_PUBLIC_FORCE_TURN_RELAY | (Part 7) | Force relay-only ICE | false |
 | S3_ACCESS_KEY, S3_SECRET_KEY | docker-compose (MinIO root user/password, minio-init), API/worker later | MinIO creds (password ≥ 8 chars) | randomchat, placeholder |
 | S3_BUCKET_EVIDENCE, S3_BUCKET_FRAMES | docker-compose (minio-init), API/worker later | Bucket names | evidence, frames |
 | S3_ENDPOINT, S3_REGION | (Part 8) | S3 client | http://localhost:9000, us-east-1 |
 | INTEREST_FALLBACK_MS, RECENT_PAIR_TTL_MS | (Part 5) | Matchmaking timings | 5000, 60000 |
-| RATE_LIMIT_DISABLED | api (gateway from Part 4) | Disables rate limits **only if NODE_ENV=development** (ignored + warning otherwise); parsed with `z.stringbool()` | false |
+| RATE_LIMIT_DISABLED | api, gateway (token bucket + abuse guard) | Disables rate limits **only if NODE_ENV=development** (ignored + warning otherwise); parsed with `z.stringbool()` | false |
 | SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD | `db:seed` (`seedEnv`: email, password ≥ 12 chars) | Dev admin login (password: see your `.env`) | admin@randomchat.local, placeholder |
 | ADMIN_SESSION_TTL_SECONDS | (Part 9) | Admin session lifetime | 28800 |
 
@@ -233,6 +268,9 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | `pnpm approve-builds <pkg>` | Allow a dependency's install script (pnpm 12) |
 | `pnpm --filter @app/api dev` | API with tsx watch (reads root `.env` via `@app/env`) |
 | `pnpm --filter @app/api build` / `start` | tsup bundle → `apps/api/dist/server.js` / run it with node |
+| `pnpm --filter @app/gateway dev` / `dev:multi` | One gateway node (4001) / two nodes gw-4001 + gw-4011 (tsx watch) |
+| `pnpm --filter @app/gateway build` / `start` | tsup bundle → `apps/gateway/dist/server.js` / run it |
+| `pnpm --filter @app/bots connect --count N --gateway URL[,URL]` | N bot visitors (real sessions via the API), round-robin over gateways; Ctrl-C to stop |
 | `pnpm --filter @app/api test` | API integration tests (needs `pnpm infra:up`; turbo `pnpm test` also migrates `app_test` first) |
 | `pnpm --filter @app/<pkg> test` | Run one package's tests |
 
@@ -269,10 +307,12 @@ Builders in `packages/redis/src/keys.ts` (functions/constants in parentheses). B
 | `{mm:…}:tickets` | HASH | `.tickets` | ticket JSON schema defined in Part 5 |
 | `{mm:…}:recent` | ZSET | `.recent`, member `recentPairMember(a, b)` | member `minId\|maxId` |
 | `visitor:<id>:ticket` / `visitor:<id>:session` | STRING | `visitorTicketKey`, `visitorSessionKey` | |
+| `visitor:<id>:socket` | STRING | `visitorSocketKey` | id of the visitor's one live socket (TTL 24 h safety; compare-and-delete on disconnect). New in Part 4 (not in master design) |
 | `visitor:<id>` | Socket.io room | `visitorRoom` | not a key; delivery target |
 | `session:{<id>}:meta` / `:participants` / `:log` | HASH / HASH / LIST | `sessionKeys(sessionId)` | 1 h TTL after end (`SESSION_ENDED_TTL_SECONDS`); log capped at `TRANSCRIPT_MAX_MESSAGES`=100 |
-| `presence:node:<nodeId>` | STRING | `presenceNodeKey` | TTL `PRESENCE_TTL_SECONDS`=15 |
-| `presence:nodes` | SET | `PRESENCE_NODES_KEY` | |
+| `presence:node:<nodeId>` | STRING | `presenceNodeKey` | local socket count, written every 5 s by each gateway, TTL `PRESENCE_TTL_SECONDS`=15 |
+| `presence:nodes` | SET | `PRESENCE_NODES_KEY` | gateway node ids; dead members pruned by live nodes |
+| `socket.io#…` | sharded PUB/SUB | (adapter) | Socket.io adapter channels (prefix `socket.io`, dynamic per-room channels) |
 | `stats:matches:<yyyyMMddHHmm>` (UTC) | STRING | `statsMatchesKey(date)` | TTL `STATS_MATCHES_TTL_SECONDS`=7200 |
 | `ban:visitor:<id>`, `ban:device:<hash>`, `ban:ip:<hash>` | STRING (JSON) | `banVisitorKey`, `banDeviceKey`, `banIpKey` | value `banCacheEntrySchema`: `{ banned: false }` (TTL `BAN_CACHE_NEGATIVE_TTL_SECONDS`=60) or `{ banned: true, banId, type: HARD\|SHADOW, expiresAt: ISO\|null }` (TTL = time to expiry, max `BAN_CACHE_MAX_TTL_SECONDS`=3600). Written by the API ban checker |
 | `trust:<visitorId>` | STRING | `trustKey` | |
@@ -311,9 +351,18 @@ Cross-cutting: body limit 64 KB (413 `PAYLOAD_TOO_LARGE`), 404 `NOT_FOUND`, helm
 
 ## 13. Socket events (implemented)
 
+Contract: `packages/shared/src/socket/` (names, Zod schemas, types). Acks: `{ ok: true, data? } | { ok: false, error: { code, message } }`.
+
 | Direction | Event | Status | Notes |
 |---|---|---|---|
-| — | — | — | _(added from Part 4 onward)_ |
+| C→S | `ping` | ✅ implemented | ack `{ ok: true, data: { serverTime } }` (ms epoch) |
+| C→S | `queue:join`, `queue:leave`, `chat:next`, `chat:end`, `chat:message`, `chat:typing`, `rtc:offer`, `rtc:answer`, `rtc:ice`, `rtc:summary`, `moderation:signal` | 🟨 stub | payload validated and rate-limited, then ack `NOT_IMPLEMENTED` (Part 5 replaces) |
+| C→S | any other event | ✅ | ack `VALIDATION_FAILED "Unknown event"` + abuse strike |
+| S→C | `system:notice` | ✅ `SESSION_REPLACED`, `SERVER_RESTARTING`, `RATE_LIMITED` | `BANNED`, `MESSAGE_BLOCKED` codes defined, used from Part 5/8 |
+| S→C | `queue:waiting`, `match:found`, `participant:joined`, `chat:message`, `chat:typing`, `rtc:*`, `peer:left` | ⬜ typed only | emitted from Part 5 (`participant:joined` Part 11) |
+| handshake | `connect_error` | ✅ | `data.code`: `UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED` (+`expiresAt`), `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`; bad Origin → plain websocket error |
+
+Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; chat text ≤ 500 after trim; clientMsgId ≤ 64; SDP ≤ 16 KB (`MAX_SDP_BYTES`); ICE candidate string ≤ 1024 (`MAX_ICE_CANDIDATE_LENGTH`); rtc:summary metrics bounded, candidate types host/srflx/prflx/relay/unknown; moderation:signal `kind` `[a-z_]{1,32}`, score 0–1; whole message ≤ 32 KB (`maxHttpBufferSize`).
 
 ## 14. Decisions log (ADR-lite)
 
@@ -349,6 +398,13 @@ Cross-cutting: body limit 64 KB (413 `PAYLOAD_TOO_LARGE`), 404 `NOT_FOUND`, helm
 | D-028 | 2026-10-31 | `TRUST_PROXY` accepts only a hop count or proxy IP/CIDR list, never `true`; request ids are server-generated | Trusting every X-Forwarded-For would let clients spoof IPs past IP rate limits/bans; client-chosen request ids could pollute log correlation |
 | D-029 | 2026-10-31 | Visitor-token issue/verify lives in `@app/shared/visitor-token` (server-only subpath, jose) | API issues and gateway verifies with identical claims/algorithm checks — one implementation |
 | D-030 | 2026-10-31 | New `ErrorCode`s: `TOKEN_EXPIRED`, `TOKEN_INVALID`, `PAYLOAD_TOO_LARGE`, `SERVICE_UNAVAILABLE` | Clients must tell "start a new session" (expired) from other auth failures |
+| D-031 | 2026-10-31 | Sharded Socket.io adapter uses **node-redis** (`redis` 6.x) clients; ioredis stays the app client | The adapter documents node-redis ≥ 4.6 for `createShardedAdapter`; it cannot use ioredis with Redis Cluster (ioredis#1759), and production will be Cluster |
+| D-032 | 2026-10-31 | "Last connection wins" is decided by a Redis key `visitor:<id>:socket`, not by `kick_visitor` message order; new key builder `visitorSocketKey` | Two connections racing on different nodes would otherwise kick each other; the key gives one winner |
+| D-033 | 2026-10-31 | Socket handlers wait for the socket's registration (room join) via `markSocketReady` | With the sharded adapter the room join is async (per-room channel subscription); without waiting, replies to the visitor room could be lost right after connect |
+| D-034 | 2026-10-31 | Invalid socket payloads use `VALIDATION_FAILED` (same code as REST), not the spec's `VALIDATION_ERROR`; new code `NOT_IMPLEMENTED` for Part 4 stubs | One error vocabulary across REST and sockets |
+| D-035 | 2026-10-31 | Ban checking moved to `@app/moderation` (`createBanChecker`), identifiers optional; the gateway checks visitor id + IP hash only (device bans are enforced when the API issues the session token) | One implementation for API and gateway; the gateway has no device id |
+| D-036 | 2026-10-31 | WebSocket Origin allowlist via `allowRequest`; connections without `Origin` allowed (still need a JWT) | Browsers always send Origin, so cross-site WebSocket hijacking is blocked; bots/tests/native clients work |
+| D-037 | 2026-10-31 | Per-socket in-memory token bucket (20 burst, 5/s) + abuse bucket (30 strikes, 0.5/s) instead of Redis-backed socket rate limits | Socket events are per-connection and hot-path; no Redis round trip per event. Cross-connection abuse is bounded by API session rate limits and one-socket-per-visitor |
 
 ## 15. Known issues / TODOs / production gaps
 
@@ -363,6 +419,10 @@ Cross-cutting: body limit 64 KB (413 `PAYLOAD_TOO_LARGE`), 404 `NOT_FOUND`, helm
 - ESLint pinned below 10.14.0 for now only because 10.14.0 was younger than pnpm's minimum release age at install time; `pnpm update` will pick it up later.
 - `docker compose up -d --wait` without the service list fails on the exited `minio-init` one-shot container — always use `pnpm infra:up`.
 - Turborepo collects anonymous telemetry by default; opt out with `pnpm exec turbo telemetry disable` if desired.
+- Gateway: a device ban created while a visitor is connected does not disconnect them yet (the gateway doesn't know device hashes); Part 8's ban writer must resolve affected visitor ids and publish `ban_applied`/`kick_visitor`. The `ban_applied` message is defined but not handled by the gateway yet.
+- Gateway drain always waits up to 10 s if clients don't reconnect elsewhere (e.g. single-URL bots); the web client (Part 6) should reconnect on `SERVER_RESTARTING`.
+- `turbo dev` (root `pnpm dev`) runs a single gateway node; use `pnpm --filter @app/gateway dev:multi` for two.
+- Killing only the child of `tsx watch` (e.g. by port) leaves the `tsx watch` parent alive; stop dev servers with Ctrl-C in their terminal.
 - Production-only items (tracked fully in `docs/PRODUCTION_CHECKLIST.md` from Part 10): legal review, age-assurance vendor, CSAM hash matching + NCMEC reporting process, human moderation staffing, bare-metal TURN with `denied-peer-ip`, Kubernetes, Redis Cluster, PgBouncer, multi-region, CDN/WAF/DDoS.
 
 ## 16. Changelog
@@ -375,3 +435,4 @@ Cross-cutting: body limit 64 KB (413 `PAYLOAD_TOO_LARGE`), 404 `NOT_FOUND`, helm
 | 2026-10-31 | — | Plan update: frontend UI to use 21st.dev components via the `21st` MCP in a shared `packages/ui` (D-018). Master prompt: new Reference Design section "Frontend UI components (21st.dev)", Parts 6–9 updated. Added `.mcp.json` (21st server, key via `API_KEY_21ST`). |
 | 2026-10-31 | 2 | Database & shared server packages: `@app/db` (Prisma 7.10.1 schema with 9 models + 10 enums, init migration with CHECK constraints, adapter-pg client factory + globalThis singleton, idempotent seed with argon2id dev admin), `@app/redis` (createRedis on RESP2, every Reference Design key builder, Zod JSON helpers, typed `gw:control` pub/sub, ban cache schema), `@app/shared/crypto` (`hmacHash`), env schemas for db/redis/seed. Root `db:*` scripts, turbo `generate` task, `REDIS_URL_TEST`. Tests: 42 (incl. Postgres + Redis integration). Decisions D-019…D-023. Kept the concurrent plan update (D-018, `.mcp.json`). |
 | 2026-10-31 | 3 | REST API (`apps/api`, Fastify 5): `buildApp(deps)` with Zod type provider, CORS allowlist, helmet, Redis rate limits, error envelope + request ids, auth plugin; routes `/health`, `/ready`, `/v1/config`, `/v1/session` (Turnstile, ToS/age, hashed device/IP, visitor upsert, cached ban check, JWT), `/v1/turn-credentials` (coturn REST creds, verified against live coturn), `/v1/stats/online`; graceful shutdown; tsup build. Added `apiEnv`, `@app/shared/visitor-token`, ban cache negative entries, 4 error codes, `API_HOST`, `TRUST_PROXY`, turbo `migrate:test` task. Tests: 72 total (22 API). Decisions D-024…D-030. |
+| 2026-10-31 | 4 | Real-time gateway (`apps/gateway`): typed socket contract in `@app/shared/socket` (names, Zod schemas both directions, event maps with compile-time key check), Socket.io 4.8 on node:http with `/health` `/ready`, sharded Redis adapter (node-redis), Origin allowlist, JWT + ban handshake, one-socket-per-visitor across nodes via `visitor:<id>:socket` + `gw:control`, `registerHandler` (Zod, token bucket, abuse disconnect, always-ack), presence, graceful drain with `onShutdown` hooks, `ping` + `NOT_IMPLEMENTED` stubs, `dev:multi`. New `@app/moderation` (ban checker moved from API), `tools/bots` `connect`, `gatewayEnv`, `GATEWAY_HOST`, `NOT_IMPLEMENTED` code. Verified live: 2 nodes, `/v1/stats/online` = 3 + 2, graceful drain. Tests: 94 total (13 gateway incl. cross-node kick + adapter delivery). Decisions D-031…D-037. |

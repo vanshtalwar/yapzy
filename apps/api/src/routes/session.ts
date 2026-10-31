@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@app/db';
 import { type ApiEnv } from '@app/env';
+import { type BanChecker } from '@app/moderation';
 import { ErrorCode } from '@app/shared';
 import { hmacHash } from '@app/shared/crypto';
 import { type VisitorTokenService } from '@app/shared/visitor-token';
@@ -8,7 +9,6 @@ import { z } from 'zod';
 
 import { type Clock } from '../deps.ts';
 import { AppError } from '../errors.ts';
-import { type BanChecker } from '../services/bans.ts';
 import { TurnstileUnavailableError, type TurnstileVerifier } from '../services/turnstile.ts';
 
 const sessionBody = z.object({

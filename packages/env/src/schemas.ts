@@ -95,3 +95,22 @@ export const apiEnv = baseEnv.extend({
 });
 
 export type ApiEnv = z.output<typeof apiEnv>;
+
+export const gatewayEnv = baseEnv.extend({
+  DATABASE_URL: postgresUrl,
+  REDIS_URL: redisUrl,
+  IP_HASH_PEPPER: hashPepperEnv.shape.IP_HASH_PEPPER,
+  JWT_SECRET: z.string().min(32),
+  GATEWAY_HOST: z.string().min(1).default('0.0.0.0'),
+  GATEWAY_PORT: port.default(4001),
+  /** Unique per process; defaults to "<hostname>-<port>" (see apps/gateway). */
+  GATEWAY_NODE_ID: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .optional(),
+  CORS_ORIGINS: commaList.pipe(z.array(z.url()).min(1)),
+  TRUST_PROXY: trustProxy,
+  RATE_LIMIT_DISABLED: z.stringbool().default(false),
+});
+
+export type GatewayEnv = z.output<typeof gatewayEnv>;

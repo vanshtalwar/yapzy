@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { createLogger } from '@app/logger';
+import { createBanChecker } from '@app/moderation';
 import { API_RATE_LIMIT_PREFIX } from '@app/redis';
 import { ErrorCode } from '@app/shared';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
@@ -24,7 +25,6 @@ import { healthRoutes } from './routes/health.ts';
 import { sessionRoutes } from './routes/session.ts';
 import { statsRoutes } from './routes/stats.ts';
 import { turnRoutes } from './routes/turn.ts';
-import { createBanChecker } from './services/bans.ts';
 import { createOnlineCounter } from './services/online.ts';
 
 export const BODY_LIMIT_BYTES = 64 * 1024;
@@ -101,7 +101,7 @@ export async function buildApp(deps: AppDeps) {
   });
   await app.register(authPlugin, { tokens });
 
-  const bans = createBanChecker({ prisma, redis, clock, logger: app.log });
+  const bans = createBanChecker({ prisma, redis, logger: app.log, now: () => clock.now() });
   const online = createOnlineCounter({ redis, clock });
 
   await app.register(healthRoutes, { prisma, redis });

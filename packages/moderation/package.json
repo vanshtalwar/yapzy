@@ -1,0 +1,28 @@
+{
+  "name": "@app/moderation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@app/db": "workspace:*",
+    "@app/logger": "workspace:*",
+    "@app/redis": "workspace:*"
+  },
+  "devDependencies": {
+    "@app/config": "workspace:*",
+    "@app/env": "workspace:*",
+    "@app/shared": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
