@@ -6,9 +6,19 @@ import { type GatewayEnv } from '@app/env';
 import { type Logger } from '@app/logger';
 import { createMatchmaker } from '@app/matchmaking';
 import { createBanChecker } from '@app/moderation';
-import { createRedis, GW_CONTROL_CHANNEL, subscribeControl } from '@app/redis';
+import {
+  createRedis,
+  GW_CONTROL_CHANNEL,
+  type GwControlMessage,
+  subscribeControl,
+} from '@app/redis';
 import { NOTICE_CODES } from '@app/shared';
-import { BULLMQ_PREFIX, QUEUE_NAMES, type SessionLogJob } from '@app/shared/jobs';
+import {
+  BULLMQ_PREFIX,
+  type ModerationEventJob,
+  QUEUE_NAMES,
+  type SessionLogJob,
+} from '@app/shared/jobs';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import { createShardedAdapter } from '@socket.io/redis-adapter';
 import { Queue } from 'bullmq';
@@ -18,6 +28,7 @@ import { Server } from 'socket.io';
 import { createHandshakeMiddleware } from './auth.ts';
 import { createClientIpResolver } from './client-ip.ts';
 import { registerHandlers } from './handlers/index.ts';
+import { createGatewayModeration } from './moderation.ts';
 import { startPresence } from './presence.ts';
 import { attachGuards, type GuardOptions, markSocketReady } from './register-handler.ts';
 import { createRtcStats } from './rtc-stats.ts';
@@ -26,6 +37,8 @@ import { createSessionStore } from './sessions/store.ts';
 import { createSingleSocketPolicy } from './single-socket.ts';
 import { startTicketSweeper } from './sweeper.ts';
 import { type GatewayServer } from './types.ts';
+
+type BanApplied = Extract<GwControlMessage, { type: 'ban_applied' }>;
 
 export const GATEWAY_DEFAULTS = {
   maxHttpBufferSize: 32 * 1024,
@@ -157,10 +170,31 @@ export async function createGateway(deps: GatewayDeps) {
   });
   const bans = createBanChecker({ prisma, redis, logger, now });
 
+  const jobDefaults = {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 1_000 },
+    removeOnComplete: { age: 3_600, count: 10_000 },
+    removeOnFail: { age: 7 * 24 * 3_600 },
+  } as const;
+  const moderationQueue = new Queue<ModerationEventJob>(QUEUE_NAMES.MODERATION_EVENT, {
+    connection: { url: deps.redisUrl ?? config.REDIS_URL },
+    prefix: BULLMQ_PREFIX,
+    defaultJobOptions: jobDefaults,
+  });
+  const moderation = createGatewayModeration({
+    redis,
+    config,
+    enqueueEvent: async (job) => {
+      await moderationQueue.add(QUEUE_NAMES.MODERATION_EVENT, job);
+    },
+    now,
+  });
+
   io.use(
     createHandshakeMiddleware({
       tokens,
       bans,
+      poolFor: (visitorId, banType) => moderation.poolFor(visitorId, banType),
       ipPepper: config.IP_HASH_PEPPER,
       clientIp: createClientIpResolver(config.TRUST_PROXY),
       isDraining: () => draining,
@@ -169,10 +203,16 @@ export async function createGateway(deps: GatewayDeps) {
   );
 
   const singleSocket = createSingleSocketPolicy({ io, redis, nodeId, controlChannel, logger });
+  /** Set once the lifecycle exists; bans that arrive earlier find no sockets anyway. */
+  const banHandler: { apply?: (message: BanApplied) => void } = {};
   const unsubscribeControl = await subscribeControl(
     controlSubscriber,
     {
       onMessage: (message) => {
+        if (message.type === 'ban_applied') {
+          banHandler.apply?.(message);
+          return;
+        }
         singleSocket.onControlMessage(message).catch((error: unknown) => {
           logger.warn({ err: error, type: message.type }, 'control message handling failed');
         });
@@ -202,12 +242,7 @@ export async function createGateway(deps: GatewayDeps) {
   const sessionLogQueue = new Queue<SessionLogJob>(QUEUE_NAMES.SESSION_LOG, {
     connection: { url: deps.redisUrl ?? config.REDIS_URL },
     prefix: BULLMQ_PREFIX,
-    defaultJobOptions: {
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 1_000 },
-      removeOnComplete: { age: 3_600, count: 10_000 },
-      removeOnFail: { age: 7 * 24 * 3_600 },
-    },
+    defaultJobOptions: jobDefaults,
   });
   const lifecycle = createLifecycle({
     io,
@@ -228,9 +263,30 @@ export async function createGateway(deps: GatewayDeps) {
     enqueueSessionLog: async (job) => {
       await sessionLogQueue.add(QUEUE_NAMES.SESSION_LOG, job, { jobId: job.sessionId });
     },
+    moderation,
+    resolvePool: async (socket) => {
+      const { visitorId, ipHash } = socket.data;
+      const ban = await bans.findActiveBan({ visitorId, ipHash });
+      if (ban?.type === 'HARD') return 'banned';
+      return moderation.poolFor(visitorId, ban?.type ?? null);
+    },
     logger,
     now,
   });
+  // `ban_applied` (BanService, any process): act on this node's sockets of that visitor or IP.
+  banHandler.apply = (message) => {
+    for (const socket of io.of('/').sockets.values()) {
+      const { visitorId, ipHash } = socket.data;
+      const hit =
+        visitorId === message.visitorId ||
+        (message.ipHash !== undefined && ipHash === message.ipHash);
+      if (!hit) continue;
+      lifecycle.applyBan(socket, message.banType).catch((error: unknown) => {
+        logger.warn({ err: error, visitorId, banId: message.banId }, 'applying ban failed');
+      });
+    }
+  };
+
   const sweeper = startTicketSweeper({
     redis,
     matchmaker,
@@ -274,7 +330,7 @@ export async function createGateway(deps: GatewayDeps) {
       abuse: GATEWAY_DEFAULTS.abuse,
       logger,
     });
-    registerHandlers(socket, { lifecycle, store, now, logger, rtcStats });
+    registerHandlers(socket, { lifecycle, store, now, logger, rtcStats, moderation });
 
     socket.on('disconnect', (reason) => {
       logger.debug({ visitorId, socketId: socket.id, reason }, 'socket disconnected');
@@ -339,6 +395,7 @@ export async function createGateway(deps: GatewayDeps) {
     await io.close(); // closes the HTTP server and the adapter
     await Promise.allSettled([
       sessionLogQueue.close(),
+      moderationQueue.close(),
       redis.quit(),
       controlSubscriber.quit(),
       adapterPub.close(),
@@ -354,6 +411,7 @@ export async function createGateway(deps: GatewayDeps) {
     presence,
     sweeper,
     sessionLogQueue,
+    moderationQueue,
     rtcStats,
     listen(port: number, host?: string): Promise<number> {
       return new Promise((resolve, reject) => {

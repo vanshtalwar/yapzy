@@ -8,6 +8,7 @@ import { api } from './api.ts';
 import { type ChatController, createChatController } from './chat-controller.ts';
 import { type ChatState, type ChatStore, createChatStore } from './chat-store.ts';
 import { publicConfig } from './config.ts';
+import { createCallModeration } from './moderation/call-moderation.ts';
 import { DEFAULT_PREFERENCES, loadPreferences, savePreferences } from './preferences.ts';
 import { createIceServerCache, type IceServerCache } from './rtc/ice-servers.ts';
 import { LocalMedia, type LocalMediaSnapshot } from './rtc/local-media.ts';
@@ -84,6 +85,18 @@ export function getChatController(): ChatController {
       localMedia: getLocalMedia(),
       iceServers: getIceServers(),
       forceRelay: publicConfig.forceTurnRelay,
+      moderation: {
+        create: (options) =>
+          createCallModeration(options, {
+            uploadFrame: (sessionId, frame) => api.uploadFrame(getToken() ?? '', sessionId, frame),
+            nsfw: true,
+          }),
+      },
+    },
+    reports: {
+      submit: async (fields, frames) => {
+        await api.report(getToken() ?? '', fields, frames);
+      },
     },
   });
   return controller;

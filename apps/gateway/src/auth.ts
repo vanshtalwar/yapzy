@@ -2,7 +2,7 @@ import { type IncomingMessage } from 'node:http';
 
 import { type Logger } from '@app/logger';
 import { type BanChecker } from '@app/moderation';
-import { ErrorCode } from '@app/shared';
+import { ErrorCode, type MatchPool } from '@app/shared';
 import { hmacHash } from '@app/shared/crypto';
 import { VisitorTokenError, type VisitorTokenService } from '@app/shared/visitor-token';
 import { z } from 'zod';
@@ -18,6 +18,8 @@ export interface HandshakeDeps {
   ipPepper: string;
   clientIp: (request: IncomingMessage) => string;
   isDraining: () => boolean;
+  /** Pool from the ban type and the cached trust score (shadow below the trust threshold). */
+  poolFor: (visitorId: string, banType: 'HARD' | 'SHADOW' | null) => Promise<MatchPool>;
   logger: Pick<Logger, 'info' | 'warn'>;
 }
 
@@ -26,7 +28,7 @@ export interface HandshakeDeps {
  * `socket.data`. Rejections reach the client as `connect_error` with `data: { code, message }`.
  */
 export function createHandshakeMiddleware(deps: HandshakeDeps) {
-  const { tokens, bans, ipPepper, clientIp, isDraining, logger } = deps;
+  const { tokens, bans, ipPepper, clientIp, isDraining, poolFor, logger } = deps;
 
   async function authenticate(socket: GatewaySocket): Promise<void> {
     if (isDraining()) {
@@ -56,7 +58,7 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
     socket.data = {
       visitorId,
       ipHash,
-      pool: ban?.type === 'SHADOW' ? 'shadow' : 'normal',
+      pool: await poolFor(visitorId, ban?.type ?? null),
       state: 'idle',
       preferences: null,
     };

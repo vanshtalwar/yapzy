@@ -186,7 +186,8 @@ model Report {
   id                    String       @id @default(uuid(7)) @db.Uuid
   /// No FK: the session log is written asynchronously and may not exist yet.
   sessionId             String       @map("session_id") @db.Uuid
-  reporterId            String       @map("reporter_id") @db.Uuid
+  /// null = automatic report (server classifier or hash match).
+  reporterId            String?      @map("reporter_id") @db.Uuid
   /// Resolved server-side from reportedParticipantId; never sent by the client.
   reportedId            String       @map("reported_id") @db.Uuid
   reportedParticipantId String       @map("reported_participant_id") @db.VarChar(32)
@@ -203,7 +204,7 @@ model Report {
   createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  reporter   Visitor    @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reporter   Visitor?   @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
   reported   Visitor    @relation("ReportReported", fields: [reportedId], references: [id], onDelete: Cascade)
   assignedTo AdminUser? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
   evidence   Evidence[]

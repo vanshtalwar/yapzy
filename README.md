@@ -85,6 +85,24 @@ video (a drawer on phones).
 - Phones and other devices on the LAN: see [`docs/LAN_TESTING.md`](./docs/LAN_TESTING.md)
   (the camera needs https or localhost).
 
+### Trust & safety
+
+- Links, emails, phone numbers and "add me on …" requests are blocked before they reach the
+  stranger (also obfuscated forms like `w w w . x . c o m`); slurs are blocked, other
+  profanity is masked.
+- **Report** (flag button) ends the chat and sends the recent messages — and, in video, the
+  stranger's last few frames, which the browser kept in memory only — to the moderation queue.
+  Check the result in `pnpm db:studio` (`Report`, `Evidence`) and in the MinIO console
+  (<http://localhost:9001>, bucket `evidence`).
+- Video is sampled server-side by risk tier (new visitors, low trust or recent reports more
+  often); the worker classifies frames (mock classifier in development) and shadow-bans
+  above the threshold. Shadow-banned or low-trust visitors only meet each other.
+- To see a live shadow ban: create a session for a known device id
+  (`curl -X POST localhost:4000/v1/session …`, see the API section), start the worker with
+  `DEV_FORCE_FLAG_VISITOR_IDS=<that visitorId> pnpm --filter @app/worker dev`, then video chat
+  as that device (`localStorage['rc.deviceId']`). Its first sampled frame is flagged and the
+  chat ends silently; from then on it is matched only within the shadow pool.
+
 Overrides for `pnpm dev` go in `.env`: Turborepo runs tasks in strict env mode, so variables
 set on the command line (`FOO=1 pnpm dev`) do not reach the apps. To override one app only, run
 it directly, e.g. `RECENT_PAIR_TTL_MS=0 pnpm --filter @app/gateway dev`.
@@ -171,7 +189,8 @@ To compare queue bucketing, start the gateways with `MM_BUCKETS=1` and then `MM_
 
 ```
 apps/        web (Next.js), api (Fastify REST), gateway (Socket.io), worker (BullMQ); admin in Part 9
-packages/    config, env, logger, shared, ui (React kit), db (Prisma), redis, matchmaking (Lua), moderation (bans)
+packages/    config, env, logger, shared, ui (React kit), db (Prisma), redis, matchmaking (Lua),
+             moderation (text filter, bans, trust, sampling), storage (S3/MinIO)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init
 tools/bots   socket bot clients (`connect`, `bots`)
 ```

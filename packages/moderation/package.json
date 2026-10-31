@@ -14,12 +14,14 @@
   "dependencies": {
     "@app/db": "workspace:*",
     "@app/logger": "workspace:*",
-    "@app/redis": "workspace:*"
+    "@app/redis": "workspace:*",
+    "@app/shared": "workspace:*",
+    "obscenity": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@app/config": "workspace:*",
     "@app/env": "workspace:*",
-    "@app/shared": "workspace:*",
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",

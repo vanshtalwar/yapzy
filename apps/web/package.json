@@ -4,20 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
+    "dev": "node scripts/prepare-nsfw-model.mjs && next dev -p 3000",
+    "build": "node scripts/prepare-nsfw-model.mjs && next build",
     "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf .next"
+    "clean": "rm -rf .next",
+    "models": "node scripts/prepare-nsfw-model.mjs"
   },
   "dependencies": {
     "@app/env": "workspace:*",
     "@app/shared": "workspace:*",
     "@app/ui": "workspace:*",
+    "@tensorflow/tfjs": "catalog:",
+    "buffer": "catalog:",
     "lucide-react": "catalog:",
     "next": "catalog:",
+    "nsfwjs": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "socket.io-client": "catalog:",

@@ -21,7 +21,7 @@ export const configRoutes: FastifyPluginAsyncZod<{ tosVersion: string }> = (
         maxMessageLength: MAX_MESSAGE_LENGTH,
         maxInterests: MAX_INTERESTS,
         supportedLangs: [...SUPPORTED_LANGS],
-        features: { video: true, reports: false },
+        features: { video: true, reports: true },
       };
     },
   );

@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@app/db';
 import { type ApiEnv } from '@app/env';
-import { type BanChecker } from '@app/moderation';
+import { type BanChecker, type RiskProfiles, type TrustStore } from '@app/moderation';
 import { ErrorCode, sessionRequestSchema, sessionResponseSchema } from '@app/shared';
 import { hmacHash } from '@app/shared/crypto';
 import { type VisitorTokenService } from '@app/shared/visitor-token';
@@ -15,6 +15,9 @@ export interface SessionRouteOptions {
   prisma: PrismaClient;
   turnstile: TurnstileVerifier;
   bans: BanChecker;
+  /** Trust score and risk profile are cached for the gateway's pool / sampling decisions. */
+  trust: TrustStore;
+  risk: RiskProfiles;
   tokens: VisitorTokenService;
   clock: Clock;
 }
@@ -22,7 +25,7 @@ export interface SessionRouteOptions {
 export const SESSION_RATE_LIMIT = { max: 10, timeWindow: '1 minute' } as const;
 
 export const sessionRoutes: FastifyPluginAsyncZod<SessionRouteOptions> = (app, options) => {
-  const { config, prisma, turnstile, bans, tokens, clock } = options;
+  const { config, prisma, turnstile, bans, trust, risk, tokens, clock } = options;
   const ipHashOf = (ip: string) => hmacHash(ip, config.IP_HASH_PEPPER);
 
   async function upsertVisitor(deviceIdHash: string, ipHash: string, tosVersion: string) {
@@ -33,7 +36,7 @@ export const sessionRoutes: FastifyPluginAsyncZod<SessionRouteOptions> = (app, o
         where: { deviceIdHash },
         create: { deviceIdHash, firstSeenAt: now, ...seen },
         update: seen,
-        select: { id: true },
+        select: { id: true, trustScore: true, firstSeenAt: true },
       });
     try {
       return await upsert();
@@ -94,6 +97,16 @@ export const sessionRoutes: FastifyPluginAsyncZod<SessionRouteOptions> = (app, o
       if (ban?.type === 'HARD') {
         request.log.info({ visitorId: visitor.id, banId: ban.banId }, 'banned visitor refused');
         throw new AppError(403, ErrorCode.BANNED, 'Access denied', { expiresAt: ban.expiresAt });
+      }
+
+      try {
+        await Promise.all([
+          trust.cache(visitor.id, visitor.trustScore),
+          risk.seen(visitor.id, visitor.firstSeenAt),
+        ]);
+      } catch (error) {
+        // The gateway falls back to defaults (trust 50, "new" tier); don't fail the session.
+        request.log.warn({ err: error, visitorId: visitor.id }, 'caching trust/risk failed');
       }
 
       const { token, expiresAt } = await tokens.issue(visitor.id);

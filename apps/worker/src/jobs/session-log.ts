@@ -18,7 +18,7 @@ export async function persistSessionLog(
   prisma: PrismaClient,
   job: SessionLogJob,
   logger: Pick<Logger, 'warn'>,
-): Promise<{ participants: number; skipped: number }> {
+): Promise<{ participants: number; skipped: number; known: Set<string> }> {
   const candidateIds = [...new Set(job.participants.map((p) => p.visitorId))].filter((id) =>
     UUID.test(id),
   );
@@ -63,5 +63,5 @@ export async function persistSessionLog(
     }),
   ]);
 
-  return { participants: participants.length, skipped };
+  return { participants: participants.length, skipped, known };
 }

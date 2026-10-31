@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { createLogger } from '@app/logger';
-import { createBanChecker } from '@app/moderation';
+import { createBanChecker, createRiskProfiles, createTrustStore } from '@app/moderation';
 import { API_RATE_LIMIT_PREFIX } from '@app/redis';
 import { ErrorCode } from '@app/shared';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
@@ -21,16 +21,19 @@ import { AppError } from './errors.ts';
 import { authPlugin } from './plugins/auth.ts';
 import { registerErrorHandling } from './plugins/error-handler.ts';
 import { configRoutes } from './routes/config.ts';
+import { frameRoutes } from './routes/frames.ts';
 import { healthRoutes } from './routes/health.ts';
+import { reportRoutes } from './routes/reports.ts';
 import { sessionRoutes } from './routes/session.ts';
 import { statsRoutes } from './routes/stats.ts';
 import { turnRoutes } from './routes/turn.ts';
 import { createOnlineCounter } from './services/online.ts';
+import { createSessionState } from './services/session-state.ts';
 
 export const BODY_LIMIT_BYTES = 64 * 1024;
 
 export async function buildApp(deps: AppDeps) {
-  const { config, prisma, redis, turnstile } = deps;
+  const { config, prisma, redis, turnstile, objects, jobs } = deps;
   const clock = deps.clock ?? systemClock;
   // Typed as Fastify's base logger so the instance stays compatible with plugin typings.
   const logger: FastifyBaseLogger =
@@ -106,9 +109,23 @@ export async function buildApp(deps: AppDeps) {
 
   await app.register(healthRoutes, { prisma, redis });
   await app.register(configRoutes, { tosVersion: config.TOS_VERSION });
-  await app.register(sessionRoutes, { config, prisma, turnstile, bans, tokens, clock });
+  const trust = createTrustStore({ prisma, redis });
+  const risk = createRiskProfiles({ redis });
+  await app.register(sessionRoutes, {
+    config,
+    prisma,
+    turnstile,
+    bans,
+    trust,
+    risk,
+    tokens,
+    clock,
+  });
   await app.register(turnRoutes, { config, clock });
   await app.register(statsRoutes, { online });
+  const sessions = createSessionState(redis);
+  await app.register(reportRoutes, { config, prisma, objects, jobs, sessions, clock });
+  await app.register(frameRoutes, { config, redis, objects, jobs, sessions, clock });
 
   return app;
 }

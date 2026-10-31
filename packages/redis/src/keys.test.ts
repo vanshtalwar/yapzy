@@ -99,7 +99,8 @@ describe('session keys', () => {
     expect(keys.meta).toBe(`session:{${SESSION_ID}}:meta`);
     expect(keys.participants).toBe(`session:{${SESSION_ID}}:participants`);
     expect(keys.log).toBe(`session:{${SESSION_ID}}:log`);
-    expect(new Set([keys.meta, keys.participants, keys.log].map(hashTagOf))).toEqual(
+    expect(keys.frames).toBe(`session:{${SESSION_ID}}:frames`);
+    expect(new Set([keys.meta, keys.participants, keys.log, keys.frames].map(hashTagOf))).toEqual(
       new Set([SESSION_ID]),
     );
   });

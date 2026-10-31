@@ -7,7 +7,15 @@ import { z } from 'zod';
 
 import { createEnv, EnvValidationError } from './create-env.ts';
 import { applyEnvFileContent, findWorkspaceRoot } from './load-env-file.ts';
-import { apiEnv, baseEnv, databaseEnv, gatewayEnv, redisEnv, webEnv } from './schemas.ts';
+import {
+  apiEnv,
+  baseEnv,
+  databaseEnv,
+  gatewayEnv,
+  redisEnv,
+  webEnv,
+  workerEnv,
+} from './schemas.ts';
 
 const serviceEnv = baseEnv.extend({
   JWT_SECRET: z.string().min(32),
@@ -111,6 +119,8 @@ describe('apiEnv', () => {
     TURN_SECRET: 't'.repeat(16),
     TURN_HOST: 'localhost',
     STUN_URLS: 'stun:localhost:3478',
+    S3_ACCESS_KEY: 'randomchat',
+    S3_SECRET_KEY: 'minio-secret',
   };
 
   it('parses lists, booleans and defaults', () => {
@@ -161,12 +171,61 @@ describe('gatewayEnv', () => {
     expect(createEnv(gatewayEnv, { source: valid }).MM_BUCKETS_BY_QUEUE).toEqual({});
   });
 
+  it('parses moderation sampling settings with the documented defaults', () => {
+    const env = createEnv(gatewayEnv, { source: valid });
+    expect(env.MOD_FRAME_INTERVALS_MS).toEqual({
+      high: 20_000,
+      new: 30_000,
+      normal: 120_000,
+      trusted: 0,
+    });
+    expect(env).toMatchObject({
+      MOD_NORMAL_SAMPLE_RATE: 0.3,
+      MOD_TRUSTED_SPOTCHECK_RATE: 0.1,
+      MOD_FRAME_BUDGET_PER_SEC: 50,
+      TRUST_SHADOW_BELOW: 10,
+      TRUST_HIGH_RISK_BELOW: 40,
+      TRUST_TRUSTED_FROM: 70,
+    });
+    for (const bad of ['{nope', '{"high": 1000, "new": 30000, "normal": 120000, "trusted": 0}']) {
+      expect(() =>
+        createEnv(gatewayEnv, { source: { ...valid, MOD_FRAME_INTERVALS_MS: bad } }),
+      ).toThrow(/MOD_FRAME_INTERVALS_MS/);
+    }
+    expect(() =>
+      createEnv(gatewayEnv, { source: { ...valid, MOD_NORMAL_SAMPLE_RATE: '1.5' } }),
+    ).toThrow(/MOD_NORMAL_SAMPLE_RATE/);
+  });
+
   it('rejects malformed bucket overrides', () => {
     for (const bad of ['{not json', '{"en": 4}', '{"video:en": 0}']) {
       expect(() =>
         createEnv(gatewayEnv, { source: { ...valid, MM_BUCKETS_BY_QUEUE: bad } }),
       ).toThrow(/MM_BUCKETS_BY_QUEUE/);
     }
+  });
+});
+
+describe('workerEnv', () => {
+  it('reads S3, thresholds and the dev force-flag list', () => {
+    const env = createEnv(workerEnv, {
+      source: {
+        DATABASE_URL: 'postgresql://app:app@localhost:5432/app',
+        REDIS_URL: 'redis://localhost:6379',
+        S3_ACCESS_KEY: 'randomchat',
+        S3_SECRET_KEY: 'minio-secret',
+        DEV_FORCE_FLAG_VISITOR_IDS: ' a1, b2 ,',
+      },
+    });
+    expect(env).toMatchObject({
+      S3_ENDPOINT: 'http://localhost:9000',
+      S3_BUCKET_EVIDENCE: 'evidence',
+      S3_BUCKET_FRAMES: 'frames',
+      MOD_AUTO_SHADOW_SCORE: 0.9,
+      MOD_REPORT_THRESHOLD: 3,
+      MOD_AUTO_BAN_HOURS: 168,
+      DEV_FORCE_FLAG_VISITOR_IDS: ['a1', 'b2'],
+    });
   });
 });
 

@@ -27,6 +27,7 @@
     "bullmq": "catalog:",
     "ioredis": "catalog:",
     "jose": "catalog:",
+    "obscenity": "catalog:",
     "pino": "catalog:",
     "pino-pretty": "catalog:",
     "proxy-addr": "catalog:",

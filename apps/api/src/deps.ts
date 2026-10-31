@@ -2,7 +2,9 @@ import { type PrismaClient } from '@app/db';
 import { type ApiEnv } from '@app/env';
 import { type Logger } from '@app/logger';
 import { type Redis } from '@app/redis';
+import { type ObjectStore } from '@app/storage';
 
+import { type ApiJobs } from './services/jobs.ts';
 import { type TurnstileVerifier } from './services/turnstile.ts';
 
 export interface Clock {
@@ -17,6 +19,10 @@ export interface AppDeps {
   prisma: PrismaClient;
   redis: Redis;
   turnstile: TurnstileVerifier;
+  /** Report evidence and sampled frames (MinIO / S3). */
+  objects: ObjectStore;
+  /** Background jobs for the worker (BullMQ). */
+  jobs: ApiJobs;
   clock?: Clock;
   logger?: Logger;
 }

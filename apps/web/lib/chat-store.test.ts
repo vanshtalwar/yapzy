@@ -119,6 +119,10 @@ describe('chat state machine', () => {
     s().ackMessage('c1', { id: '01SERVER', at: '2026-10-31T12:00:01.000Z' });
     expect(s().entries.at(-1)).toMatchObject({ status: 'sent', id: '01SERVER', clientMsgId: 'c1' });
 
+    s().addOutgoing('holy shit', 'c0');
+    s().ackMessage('c0', { id: '01MASKED', at: '2026-10-31T12:00:01.500Z', text: 'holy ****' });
+    expect(s().entries.at(-1)).toMatchObject({ status: 'sent', text: 'holy ****' });
+
     s().addOutgoing('lost', 'c2');
     s().failMessage('c2', 'SERVICE_UNAVAILABLE');
     expect(s().entries.at(-1)).toMatchObject({ status: 'failed' });

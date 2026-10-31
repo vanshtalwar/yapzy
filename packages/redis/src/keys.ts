@@ -147,6 +147,8 @@ export interface SessionKeys {
   participants: string;
   /** LIST: transcript ring buffer (last TRANSCRIPT_MAX_MESSAGES). */
   log: string;
+  /** HASH: participantId → JSON { received, lastAt } of moderation frame uploads (D-054). */
+  frames: string;
 }
 
 export function sessionKeys(sessionId: string): SessionKeys {
@@ -156,6 +158,7 @@ export function sessionKeys(sessionId: string): SessionKeys {
     meta: `session:${tag}:meta`,
     participants: `session:${tag}:participants`,
     log: `session:${tag}:log`,
+    frames: `session:${tag}:frames`,
   };
 }
 
@@ -221,6 +224,23 @@ export function banIpKey(ipHash: string): string {
 /** STRING: cached trust score. */
 export function trustKey(visitorId: string): string {
   return `trust:${assertSafeId('visitorId', visitorId)}`;
+}
+
+/** STRING (JSON, see moderation.ts): what the gateway needs to pick a sampling tier. */
+export function riskProfileKey(visitorId: string): string {
+  return `risk:${assertSafeId('visitorId', visitorId)}`;
+}
+
+/** STRING: global frame-budget multiplier (≥ 1), written by the worker (D-054). */
+export const MOD_BUDGET_MULTIPLIER_KEY = 'mod:budget:multiplier';
+
+/** Length of the windows in which accepted moderation frames are counted. */
+export const MOD_FRAMES_WINDOW_SECONDS = 10;
+
+/** STRING: moderation frames accepted in the window starting at `windowStart` (epoch s). */
+export function moderationFramesKey(windowStart: number): string {
+  if (!Number.isInteger(windowStart) || windowStart < 0) throw new Error('Invalid window');
+  return `mod:frames:${String(windowStart)}`;
 }
 
 // --- Rate limits & admin -----------------------------------------------------------------

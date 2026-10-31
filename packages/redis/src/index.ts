@@ -28,4 +28,12 @@ export {
   setJson,
 } from './json.ts';
 export * from './keys.ts';
+export {
+  type FrameStats,
+  frameStatsSchema,
+  RISK_PROFILE_TTL_SECONDS,
+  type RiskProfileEntry,
+  riskProfileEntrySchema,
+  TRUST_CACHE_TTL_SECONDS,
+} from './moderation.ts';
 export * from './ttl.ts';

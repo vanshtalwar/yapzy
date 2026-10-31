@@ -41,6 +41,39 @@ export const turnCredentialsSchema = z.object({
 });
 export type TurnCredentials = z.output<typeof turnCredentialsSchema>;
 
+/** Mirrors the Prisma `ReportReason` enum, most urgent first. */
+export const REPORT_REASONS = [
+  'MINOR_SAFETY',
+  'NUDITY_SEXUAL',
+  'VIOLENCE_SELF_HARM',
+  'HATE',
+  'HARASSMENT',
+  'SPAM_SCAM',
+  'OTHER',
+] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
+/** Text fields of `POST /v1/reports` (multipart; up to 3 JPEG `frames` files alongside). */
+export const reportFieldsSchema = z.object({
+  sessionId: z.uuid(),
+  reportedParticipantId: z.string().regex(/^[A-Za-z0-9_-]{8,32}$/),
+  reason: z.enum(REPORT_REASONS),
+  details: z.string().trim().max(500).optional(),
+});
+export type ReportFields = z.input<typeof reportFieldsSchema>;
+
+export const REPORT_MAX_FRAMES = 3;
+export const REPORT_FRAME_MAX_BYTES = 300 * 1024;
+
+export const reportResponseSchema = z.object({ reportId: z.uuid() });
+export type ReportResponse = z.output<typeof reportResponseSchema>;
+
+/** `POST /v1/moderation/frames?sessionId=…` with an `image/jpeg` body of the own video. */
+export const frameQuerySchema = z.object({ sessionId: z.uuid() });
+export const MODERATION_FRAME_MAX_BYTES = 60 * 1024;
+export const MODERATION_FRAME_MAX_PX = 320;
+export const frameUploadResponseSchema = z.object({ accepted: z.literal(true) });
+
 /** Every API error: `{ error: { code, message, requestId, ...details } }`. */
 export const errorEnvelopeSchema = z.object({
   error: z.looseObject({

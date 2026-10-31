@@ -3,9 +3,11 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { createPrismaClient } from '@app/db';
 import { apiEnv, createEnv, databaseTestEnv } from '@app/env';
 import { createTestRedis } from '@app/redis/testing';
+import { createMemoryObjectStore } from '@app/storage';
 
 import { buildApp } from '../app.ts';
 import { type AppDeps, type Clock } from '../deps.ts';
+import { createRecordingJobs } from '../services/jobs.ts';
 import { TurnstileUnavailableError, type TurnstileVerifier } from '../services/turnstile.ts';
 
 const { DATABASE_URL_TEST } = createEnv(databaseTestEnv, { service: 'api-tests' });
@@ -32,6 +34,8 @@ export const testConfig = createEnv(apiEnv, {
     TURN_PORT: '3478',
     TURN_CREDENTIAL_TTL_SECONDS: '600',
     STUN_URLS: 'stun:stun.test:3478',
+    S3_ACCESS_KEY: 'unused-in-tests',
+    S3_SECRET_KEY: 'unused-in-tests',
   },
 });
 
@@ -71,6 +75,8 @@ export function buildTestApp(overrides: Partial<AppDeps> = {}) {
     prisma,
     redis,
     turnstile: fakeTurnstile,
+    objects: createMemoryObjectStore(),
+    jobs: createRecordingJobs(),
     clock: createFakeClock(),
     ...overrides,
   });

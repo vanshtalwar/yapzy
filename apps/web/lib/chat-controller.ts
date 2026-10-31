@@ -11,6 +11,7 @@ import {
   NOTICE_CODES,
   peerLeftSchema,
   peerPresenceSchema,
+  type ReportFields,
   rtcDescriptionOutSchema,
   rtcIceOutSchema,
   sessionResumedSchema,
@@ -20,6 +21,7 @@ import { type z } from 'zod';
 
 import { ApiError } from './api.ts';
 import { type ChatStore } from './chat-store.ts';
+import { type CallModeration, type CallModerationOptions } from './moderation/call-moderation.ts';
 import { CallManager, type CallManagerOptions } from './rtc/call-manager.ts';
 import { type PeerSummary } from './rtc/types.ts';
 import { clearSession } from './session-token.ts';
@@ -39,6 +41,8 @@ export interface VideoDeps {
   };
   forceRelay: boolean;
   createCall?: (options: CallManagerOptions) => CallManager;
+  /** Trust & safety during calls (Part 8): frame sampling, report evidence, NSFW check. */
+  moderation?: { create(options: CallModerationOptions): CallModeration };
 }
 
 export interface ChatControllerDeps {
@@ -47,6 +51,8 @@ export interface ChatControllerDeps {
   /** Toast / non-blocking notice for the user. */
   notify?: (message: string) => void;
   video?: VideoDeps;
+  /** Sends a report (with evidence frames) to the API. */
+  reports?: { submit(fields: ReportFields, frames: Blob[]): Promise<void> };
   ackTimeoutMs?: number;
   /** Hidden-tab time after which a search is paused (ghost-tab protection). */
   ghostTabMs?: number;
@@ -107,6 +113,7 @@ export function createChatController(deps: ChatControllerDeps) {
   let attached = false;
   let typing = false;
   let call: CallManager | null = null;
+  let callModeration: CallModeration | null = null;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
   let ghostTimer: ReturnType<typeof setTimeout> | undefined;
   let requeueTimer: ReturnType<typeof setTimeout> | undefined;
@@ -133,10 +140,9 @@ export function createChatController(deps: ChatControllerDeps) {
   }
 
   /** Fire-and-forget (signaling, summaries): the server still acks, nobody waits. */
-  function send<E extends 'rtc:offer' | 'rtc:answer' | 'rtc:ice' | 'rtc:summary'>(
-    event: E,
-    payload: Payload<E>,
-  ): void {
+  function send<
+    E extends 'rtc:offer' | 'rtc:answer' | 'rtc:ice' | 'rtc:summary' | 'moderation:signal',
+  >(event: E, payload: Payload<E>): void {
     (socket.emit as (event: string, payload: unknown, ack: () => void) => void)(
       event,
       payload,
@@ -169,6 +175,8 @@ export function createChatController(deps: ChatControllerDeps) {
   }
 
   function endCall(): void {
+    callModeration?.stop();
+    callModeration = null;
     if (call === null) return;
     const ended = call;
     call = null;
@@ -211,6 +219,30 @@ export function createChatController(deps: ChatControllerDeps) {
     };
     call = (video.createCall ?? ((o: CallManagerOptions) => new CallManager(o)))(options);
     store.getState().setCall(call.view());
+
+    const peer = match.peers[0]?.participantId;
+    callModeration =
+      video.moderation?.create({
+        sessionId,
+        localStream: () => video.localMedia.getStream(),
+        remoteStream: () => (peer === undefined ? null : (call?.remoteStream(peer) ?? null)),
+        schedule: match.moderation,
+        signal: (verdict) => {
+          if (peer === undefined) return;
+          send('moderation:signal', {
+            sessionId,
+            about: peer,
+            kind: verdict.kind,
+            score: Math.min(1, verdict.score),
+          });
+        },
+        onRemoteFlagged: () => {
+          store.getState().setRemoteFlagged(sessionId);
+        },
+        onSelfFlagged: () => {
+          notify('Heads up: your camera may be showing something that isn’t allowed here.');
+        },
+      }) ?? null;
   }
 
   /** TURN credentials expire (TTL): refresh before they do, also for a call in progress. */
@@ -446,6 +478,14 @@ export function createChatController(deps: ChatControllerDeps) {
         case NOTICE_CODES.RATE_LIMITED:
           notify("You're going too fast — slow down a little.");
           break;
+        case NOTICE_CODES.MESSAGE_BLOCKED:
+          notify(notice.message);
+          break;
+        case NOTICE_CODES.FRAME_SCHEDULE:
+          if (notice.sessionId !== undefined && notice.sessionId === call?.sessionId) {
+            callModeration?.setSchedule(notice.moderation ?? null);
+          }
+          break;
         case NOTICE_CODES.SERVER_RESTARTING:
           // This node is draining (deploy): move now instead of waiting to be cut off. The
           // session survives (participant `reconnecting`) and resumes on the next node.
@@ -602,6 +642,30 @@ export function createChatController(deps: ChatControllerDeps) {
 
     setAutoRequeue(autoRequeue: boolean): void {
       store.getState().setPreferences({ autoRequeue });
+    },
+
+    /**
+     * Reports the stranger (with their last frames if this is a video call) and moves on:
+     * reporting always ends the chat for the reporter. Throws if the API refused it.
+     */
+    async report(input: { reason: ReportFields['reason']; details?: string }): Promise<void> {
+      const { status, sessionId, peerIds } = state();
+      const peer = peerIds[0];
+      if (deps.reports === undefined || sessionId === null || peer === undefined) return;
+      if (status !== 'matched' && status !== 'ended') return;
+      const frames = callModeration?.evidence() ?? []; // before the call is closed
+      const details = input.details?.trim();
+      await deps.reports.submit(
+        {
+          sessionId,
+          reportedParticipantId: peer,
+          reason: input.reason,
+          ...(details === undefined || details === '' ? {} : { details }),
+        },
+        frames,
+      );
+      notify('Thanks for reporting — our team will review it.');
+      if (state().status === 'matched' && state().sessionId === sessionId) await skip();
     },
 
     /** Remote media of the current call, for `<video>` elements (never put it in state). */

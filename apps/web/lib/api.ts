@@ -4,6 +4,8 @@ import {
   onlineStatsSchema,
   type PublicConfig,
   publicConfigSchema,
+  type ReportFields,
+  reportResponseSchema,
   type SessionRequest,
   type SessionResponse,
   sessionResponseSchema,
@@ -13,6 +15,7 @@ import {
 import { type z } from 'zod';
 
 import { publicConfig } from './config.ts';
+import { type UploadResult } from './moderation/frame-sampler.ts';
 
 /** A failed API call, with the server's error code (or SERVICE_UNAVAILABLE for network). */
 export class ApiError extends Error {
@@ -80,4 +83,47 @@ export const api = {
     request('/v1/turn-credentials', turnCredentialsSchema, {
       headers: { authorization: `Bearer ${token}` },
     }),
+
+  /** Multipart: fields + the stranger's last frames (JPEG) kept in memory for evidence. */
+  report: async (token: string, fields: ReportFields, frames: Blob[]): Promise<string> => {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.append(name, value);
+    frames.forEach((frame, index) => {
+      form.append('frames', frame, `frame-${String(index + 1)}.jpg`);
+    });
+    const { reportId } = await request('/v1/reports', reportResponseSchema, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: form,
+    });
+    return reportId;
+  },
+
+  /** One moderation frame of the own video, at the server-assigned interval (D-054). */
+  uploadFrame: async (token: string, sessionId: string, frame: Blob): Promise<UploadResult> => {
+    let response: Response;
+    try {
+      response = await fetch(
+        `${publicConfig.apiUrl}/v1/moderation/frames?sessionId=${encodeURIComponent(sessionId)}`,
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'image/jpeg' },
+          body: frame,
+        },
+      );
+    } catch {
+      return 'skip';
+    }
+    if (response.ok) return 'ok';
+    // 403: no (more) frames expected in this session; 429: too early or none left.
+    if (response.status === 403) return 'stop';
+    if (response.status === 429) {
+      const body: unknown = await response.json().catch(() => null);
+      const envelope = errorEnvelopeSchema.safeParse(body);
+      return envelope.success && envelope.data.error.message.startsWith('No more')
+        ? 'stop'
+        : 'skip';
+    }
+    return 'skip';
+  },
 };

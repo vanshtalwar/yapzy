@@ -22,6 +22,7 @@ import {
 import { type LeaveReason, type SessionLogJob, sessionLogJobSchema } from '@app/shared/jobs';
 
 import { SocketError } from '../errors.ts';
+import { type GatewayModeration, NO_FRAMES } from '../moderation.ts';
 import { type GatewayServer, type GatewaySocket } from '../types.ts';
 import {
   type Deadline,
@@ -66,6 +67,10 @@ export interface LifecycleDeps {
   nodeId: string;
   config: LifecycleConfig;
   enqueueSessionLog: (job: SessionLogJob) => Promise<void>;
+  /** Trust & safety decisions (Part 8): frame schedules, pools. */
+  moderation: GatewayModeration;
+  /** Current pool of a connected visitor from the ban cache + trust; 'banned' = HARD ban. */
+  resolvePool: (socket: GatewaySocket) => Promise<MatchPool | 'banned'>;
   logger: Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
   now: () => Date;
 }
@@ -156,7 +161,11 @@ export function createLifecycle(deps: LifecycleDeps) {
 
   async function enqueueLog(sessionId: string): Promise<void> {
     try {
-      const [meta, context] = await Promise.all([store.meta(sessionId), store.context(sessionId)]);
+      const [meta, context, frames] = await Promise.all([
+        store.meta(sessionId),
+        store.context(sessionId),
+        store.frameStats(sessionId),
+      ]);
       if (meta === null || context === null) return;
       const iso = (ms: number) => new Date(ms).toISOString();
       const job = sessionLogJobSchema.parse({
@@ -173,6 +182,15 @@ export function createLifecycle(deps: LifecycleDeps) {
           joinedAt: iso(p.joinedAt),
           leftAt: p.leftAt === undefined ? null : iso(p.leftAt),
           leaveReason: p.leaveReason ?? null,
+          ...(p.frameIntervalMs == null
+            ? {}
+            : {
+                frames: {
+                  intervalMs: p.frameIntervalMs,
+                  maxFrames: p.maxFrames ?? null,
+                  received: frames.get(participantId)?.received ?? 0,
+                },
+              }),
         })),
       });
       await deps.enqueueSessionLog(job);
@@ -196,13 +214,19 @@ export function createLifecycle(deps: LifecycleDeps) {
     commonInterests: string[];
   }): Promise<void> {
     const { family, sessionId, tickets, commonInterests } = input;
-    const participants = tickets.map((ticket) => ({
-      participantId: newParticipantId(),
-      visitorId: ticket.visitorId,
-      pool: family.pool,
-      interests: ticket.interests,
-      autoRequeue: ticket.autoRequeue,
-    }));
+    const participants = await Promise.all(
+      tickets.map(async (ticket) => ({
+        participantId: newParticipantId(),
+        visitorId: ticket.visitorId,
+        pool: family.pool,
+        interests: ticket.interests,
+        autoRequeue: ticket.autoRequeue,
+        // Risk-based frame sampling per participant (D-054); never blocks the match.
+        frames: await deps.moderation
+          .scheduleFor(ticket.visitorId, { mode: family.mode })
+          .catch(() => NO_FRAMES),
+      })),
+    );
     const initiator = participants[randomInt(0, participants.length)]?.participantId ?? '';
     const now = clock();
 
@@ -240,7 +264,10 @@ export function createLifecycle(deps: LifecycleDeps) {
         peers: participants
           .filter((other) => other !== receiver)
           .map((other) => roleFor(initiator, receiver.participantId, other.participantId)),
-        moderation: { frameIntervalMs: null }, // risk-based sampling arrives in Part 8
+        moderation: {
+          frameIntervalMs: receiver.frames.frameIntervalMs,
+          maxFrames: receiver.frames.maxFrames,
+        },
         commonInterests,
       });
     }
@@ -548,6 +575,10 @@ export function createLifecycle(deps: LifecycleDeps) {
         } else if (state === 'waiting') {
           throw new SocketError(ErrorCode.INVALID_STATE, 'Cannot join the queue while waiting');
         }
+        // Bans and trust can change while connected: re-evaluate the pool on every join.
+        const pool = await deps.resolvePool(socket);
+        if (pool === 'banned') throw new SocketError(ErrorCode.BANNED, 'Access denied');
+        socket.data.pool = pool;
         socket.data.preferences = preferences;
         await startSearching(searcherOf(socket, preferences));
       });
@@ -691,6 +722,78 @@ export function createLifecycle(deps: LifecycleDeps) {
       if (peer === self[0] || !context.participants.has(peer)) {
         throw new SocketError(ErrorCode.FORBIDDEN, 'Peer is not in this session');
       }
+    },
+
+    /**
+     * A report or client NSFW signal in this session: every present participant whose video
+     * is sampled less often than the `high` tier is raised to it immediately (D-054).
+     */
+    async raiseRisk(sessionId: string): Promise<number> {
+      const context = await store.context(sessionId);
+      if (context?.state !== 'active' || context.mode !== 'video') return 0;
+      const high = await deps.moderation.highRisk();
+      let raised = 0;
+      for (const [participantId, record] of context.participants) {
+        if (record.status === 'left') continue;
+        const current = record.frameIntervalMs ?? null;
+        const sparser =
+          current === null ||
+          record.maxFrames != null ||
+          (high.frameIntervalMs !== null && current > high.frameIntervalMs);
+        if (!sparser || !(await store.setSchedule(sessionId, participantId, high))) continue;
+        raised += 1;
+        emitTo(record.visitorId, 'system:notice', {
+          code: 'FRAME_SCHEDULE',
+          message: 'Frame sampling changed',
+          sessionId,
+          moderation: { frameIntervalMs: high.frameIntervalMs, maxFrames: high.maxFrames },
+        });
+      }
+      return raised;
+    },
+
+    /**
+     * `ban_applied` for a connected visitor. HARD: end the chat, notify, disconnect. SHADOW:
+     * end the chat as if the stranger disconnected (the ban stays silent) and move them to the
+     * shadow pool; a waiting visitor is re-queued there with the same preferences.
+     */
+    applyBan(socket: GatewaySocket, banType: 'HARD' | 'SHADOW'): Promise<void> {
+      const { visitorId } = socket.data;
+      return withVisitorLock(visitorId, async () => {
+        const ref = await store.getSessionRef(visitorId);
+        if (ref !== null) {
+          const outcome = await leaveParticipant(
+            ref.sessionId,
+            ref.participantId,
+            visitorId,
+            'BANNED',
+          );
+          if (banType === 'SHADOW' && outcome.status === 'left') {
+            for (const other of outcome.others) {
+              emitTo(visitorId, 'peer:left', {
+                sessionId: ref.sessionId,
+                participantId: other.participantId,
+                reason: 'disconnected',
+                sessionEnded: outcome.ended,
+              });
+            }
+          }
+          if (outcome.status !== 'left') await store.deleteSessionRef(visitorId, ref.sessionId);
+        }
+        const wasWaiting = await cancelSearch(visitorId, async (sessionId) => {
+          await leaveSession(visitorId, 'BANNED', { expectedSessionId: sessionId });
+        });
+        if (banType === 'HARD') {
+          socket.emit('system:notice', { code: 'BANNED', message: 'Access denied' });
+          socket.disconnect(true);
+          return;
+        }
+        socket.data.pool = 'shadow';
+        const preferences = socket.data.preferences;
+        if (wasWaiting && preferences !== null) {
+          await startSearching(searcherOf(socket, preferences));
+        }
+      });
     },
 
     async inSession(socket: GatewaySocket, sessionId: string): Promise<InSession> {

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createChatController } from './chat-controller.ts';
 import { createChatStore } from './chat-store.ts';
+import { type CallModerationOptions } from './moderation/call-moderation.ts';
 import { type CallManager, type CallManagerOptions } from './rtc/call-manager.ts';
 import { FakeMediaStream } from './rtc/testing.ts';
 import { type RtcSignal } from './rtc/types.ts';
@@ -329,11 +330,26 @@ function setupVideo(opts: { stream?: boolean } = {}) {
   const trackListeners: ((track: MediaStreamTrack) => void)[] = [];
   const stream = opts.stream === false ? null : (new FakeMediaStream() as unknown as MediaStream);
   const target = new EventTarget();
+  const notices: string[] = [];
+  const moderation = {
+    created: [] as CallModerationOptions[],
+    schedules: [] as unknown[],
+    stopped: 0,
+    evidence: [new Blob(['f1']), new Blob(['f2'])],
+  };
+  const reports: { fields: unknown; frames: Blob[] }[] = [];
   const controller = createChatController({
     store,
     socket: socket as unknown as ChatSocket,
     document: Object.assign(new EventTarget(), { hidden: false }) as unknown as Document,
     window: target,
+    notify: (message) => notices.push(message),
+    reports: {
+      submit: (fields, frames) => {
+        reports.push({ fields, frames });
+        return Promise.resolve();
+      },
+    },
     video: {
       localMedia: {
         getStream: () => stream,
@@ -348,6 +364,16 @@ function setupVideo(opts: { stream?: boolean } = {}) {
         refreshInMs: () => 600_000,
       },
       forceRelay: false,
+      moderation: {
+        create: (options) => {
+          moderation.created.push(options);
+          return {
+            setSchedule: (schedule) => moderation.schedules.push(schedule),
+            evidence: () => moderation.evidence,
+            stop: () => (moderation.stopped += 1),
+          };
+        },
+      },
       createCall: (options) => {
         order.push('createCall');
         const fake: FakeCall = {
@@ -406,7 +432,18 @@ function setupVideo(opts: { stream?: boolean } = {}) {
       },
     };
   };
-  return { socket, store, controller, calls, order, trackListeners, target };
+  return {
+    socket,
+    store,
+    controller,
+    calls,
+    order,
+    trackListeners,
+    target,
+    notices,
+    moderation,
+    reports,
+  };
 }
 
 const videoMatch = (sessionId = SESSION): MatchFound => ({ ...match(sessionId), mode: 'video' });
@@ -536,5 +573,73 @@ describe('chat controller — video', () => {
     const track = { kind: 'video' } as MediaStreamTrack;
     for (const listener of trackListeners) listener(track);
     expect(calls[0]!.tracks).toEqual([track]);
+  });
+
+  it('starts moderation with the call and applies schedule changes from the server', async () => {
+    const { socket, controller, moderation } = setupVideo();
+    controller.start();
+    await flush();
+    socket.server('match:found', {
+      ...videoMatch(),
+      moderation: { frameIntervalMs: 30_000, maxFrames: null },
+    });
+    expect(moderation.created).toHaveLength(1);
+    expect(moderation.created[0]).toMatchObject({
+      sessionId: SESSION,
+      schedule: { frameIntervalMs: 30_000 },
+    });
+    socket.server('system:notice', {
+      code: 'FRAME_SCHEDULE',
+      message: 'raised',
+      sessionId: SESSION,
+      moderation: { frameIntervalMs: 20_000, maxFrames: null },
+    });
+    socket.server('system:notice', {
+      code: 'FRAME_SCHEDULE',
+      message: 'stale',
+      sessionId: '0199a3b2-7c4d-7e5f-8a9b-000000000000',
+      moderation: { frameIntervalMs: 1_000 },
+    });
+    expect(moderation.schedules).toEqual([{ frameIntervalMs: 20_000, maxFrames: null }]);
+    // A client NSFW verdict becomes a moderation:signal about the stranger.
+    moderation.created[0]?.signal({ flagged: true, kind: 'porn', score: 0.97 });
+    expect(socket.sent('moderation:signal')).toEqual([
+      { sessionId: SESSION, about: 'pPeer0000001', kind: 'porn', score: 0.97 },
+    ]);
+    await controller.stop();
+    expect(moderation.stopped).toBe(1);
+  });
+
+  it('reports the stranger with the evidence frames, then moves on', async () => {
+    const { socket, controller, reports, notices, moderation } = setupVideo();
+    controller.start();
+    await flush();
+    socket.server('match:found', videoMatch());
+    await controller.report({ reason: 'NUDITY_SEXUAL', details: '  explicit  ' });
+    expect(reports).toEqual([
+      {
+        fields: {
+          sessionId: SESSION,
+          reportedParticipantId: 'pPeer0000001',
+          reason: 'NUDITY_SEXUAL',
+          details: 'explicit',
+        },
+        frames: moderation.evidence,
+      },
+    ]);
+    expect(notices).toContain('Thanks for reporting — our team will review it.');
+    expect(socket.sent('chat:next')).toEqual([{ sessionId: SESSION }]);
+    expect(moderation.stopped).toBe(1);
+  });
+
+  it('shows why a message was blocked', async () => {
+    const { socket, controller, notices } = setupVideo();
+    controller.start();
+    await flush();
+    socket.server('system:notice', {
+      code: 'MESSAGE_BLOCKED',
+      message: 'Links aren’t allowed in chat.',
+    });
+    expect(notices).toEqual(['Links aren’t allowed in chat.']);
   });
 });

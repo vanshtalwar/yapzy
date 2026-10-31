@@ -4,6 +4,7 @@ import {
   Button,
   CallControlButton,
   CallControls,
+  cn,
   QualityBadge,
   Sheet,
   SheetContent,
@@ -14,6 +15,7 @@ import {
   VideoTile,
 } from '@app/ui';
 import {
+  EyeOffIcon,
   FlagIcon,
   MessageSquareIcon,
   MicIcon,
@@ -43,6 +45,7 @@ import { getSession } from '../../lib/session-token.ts';
 import { AgeGate } from '../age-gate.tsx';
 import { BlockedScreen } from '../blocked-screen.tsx';
 import { useConfirmPress } from '../chat/use-confirm-press.ts';
+import { ReportDialog } from '../report/report-dialog.tsx';
 import { ChatPanel } from './chat-panel.tsx';
 import { DeviceSettingsDialog } from './device-settings-dialog.tsx';
 import { LocalVideo, RemoteVideo } from './media-video.tsx';
@@ -133,6 +136,7 @@ export function VideoChatScreen() {
   const [gateDismissed, setGateDismissed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const [seen, setSeen] = useState({ sessionId: null as string | null, count: 0 });
 
   // The camera starts with the pre-join check and stays on across matches; leaving the page
@@ -224,14 +228,48 @@ export function VideoChatScreen() {
               {participants.map((participant) => (
                 <VideoTile
                   key={participant.participantId}
-                  className="rounded-none"
+                  // Client NSFW check flagged this video: keep it blurred (D-054 / Part 8).
+                  className={cn('rounded-none', state.remoteFlagged && '[&_video]:blur-2xl')}
                   placeholder={
-                    participant.trackCount === 0 ? (
+                    state.remoteFlagged ? (
+                      <>
+                        <EyeOffIcon className="size-6" aria-hidden />
+                        <p className="max-w-xs font-medium">
+                          This video may show explicit content, so we blurred it.
+                        </p>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={next.press}>
+                            <SkipForwardIcon aria-hidden /> {next.armed ? 'Really skip?' : 'Next'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              setReportOpen(true);
+                            }}
+                          >
+                            <FlagIcon aria-hidden /> Report
+                          </Button>
+                        </div>
+                      </>
+                    ) : participant.trackCount === 0 ? (
                       <>
                         <Spinner label="Connecting" />
                         <span>Connecting video…</span>
                       </>
                     ) : undefined
+                  }
+                  overlay={
+                    <button
+                      type="button"
+                      aria-label="Report"
+                      className="absolute top-3 right-3 rounded-full bg-stage/60 p-2 text-stage-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden"
+                      onClick={() => {
+                        setReportOpen(true);
+                      }}
+                    >
+                      <FlagIcon className="size-4" aria-hidden />
+                    </button>
                   }
                 >
                   <RemoteVideo
@@ -321,9 +359,11 @@ export function VideoChatScreen() {
           <CallControlButton
             icon={<FlagIcon />}
             label="Report"
-            disabled
-            title="Reporting arrives soon"
+            disabled={!matched}
             className="hidden sm:flex"
+            onClick={() => {
+              setReportOpen(true);
+            }}
           />
           {matched ? (
             <>
@@ -389,6 +429,7 @@ export function VideoChatScreen() {
       </Sheet>
 
       <DeviceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} video />
       {gate}
     </div>
   );

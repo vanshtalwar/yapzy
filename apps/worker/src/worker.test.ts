@@ -9,6 +9,7 @@ import { Queue, QueueEvents } from 'bullmq';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { persistSessionLog } from './jobs/session-log.ts';
+import { moderationDeps } from './test/moderation.ts';
 import { createWorkers } from './worker.ts';
 
 const { DATABASE_URL_TEST } = createEnv(databaseTestEnv, { service: 'worker-tests' });
@@ -78,7 +79,10 @@ describe('session-log job', () => {
   it('persists the session and its participants idempotently', async () => {
     const sessionId = randomUUID();
     const data = job(sessionId, [await newVisitor(), await newVisitor()]);
-    expect(await persistSessionLog(prisma, data, logger)).toEqual({ participants: 2, skipped: 0 });
+    expect(await persistSessionLog(prisma, data, logger)).toMatchObject({
+      participants: 2,
+      skipped: 0,
+    });
     await persistSessionLog(prisma, data, logger); // retry / duplicate delivery
 
     const row = await prisma.chatSessionLog.findUniqueOrThrow({
@@ -99,11 +103,19 @@ describe('session-log job', () => {
       job(sessionId, [await newVisitor(), randomUUID()]),
       logger,
     );
-    expect(result).toEqual({ participants: 1, skipped: 1 });
+    expect(result).toMatchObject({ participants: 1, skipped: 1 });
   });
 
   it('is consumed from the BullMQ queue end to end', async () => {
-    const workers = createWorkers({ redisUrl, prisma, logger, concurrency: 2 });
+    const workers = createWorkers({
+      redisUrl,
+      prisma,
+      logger,
+      concurrency: 2,
+      moderation: moderationDeps(),
+      frameBudgetPerSec: 50,
+      budgetIntervalMs: 0,
+    });
     const queue = new Queue<SessionLogJob>(QUEUE_NAMES.SESSION_LOG, {
       connection: { url: redisUrl },
       prefix: BULLMQ_PREFIX,

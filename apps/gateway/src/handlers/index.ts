@@ -22,6 +22,7 @@ import {
 import { ulid } from 'ulid';
 
 import { SocketError } from '../errors.ts';
+import { type GatewayModeration } from '../moderation.ts';
 import { registerHandler } from '../register-handler.ts';
 import { type RtcStats } from '../rtc-stats.ts';
 import { type InSession, type Lifecycle } from '../sessions/lifecycle.ts';
@@ -58,7 +59,20 @@ export interface HandlerDeps {
   now: () => Date;
   logger: { debug(obj: object, msg: string): void };
   rtcStats: RtcStats;
+  moderation: GatewayModeration;
 }
+
+/** `moderation:signal` is accepted at most this often per socket (low weight, Part 8). */
+export const SIGNAL_MIN_INTERVAL_MS = 5_000;
+/** Client NSFW scores from here raise the session to the `high` sampling tier. */
+export const SIGNAL_HIGH_RISK_SCORE = 0.8;
+
+const BLOCKED_MESSAGES: Record<string, string> = {
+  link: 'Links aren’t allowed in chat.',
+  email: 'Sharing contact details isn’t allowed.',
+  phone: 'Sharing contact details isn’t allowed.',
+  handle: 'Moving the chat to other apps isn’t allowed.',
+};
 
 /** Summaries remembered per socket to drop duplicates (one per peer connection is expected). */
 const MAX_SUMMARIES_PER_SOCKET = 64;
@@ -86,9 +100,10 @@ function recipient(session: InSession, to: string): string {
 }
 
 export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void {
-  const { lifecycle, store, now } = deps;
+  const { lifecycle, store, now, moderation } = deps;
   const lastTyping = { isTyping: false, sentAt: 0 };
   const summarized = new Set<string>();
+  let lastSignalAt = Number.NEGATIVE_INFINITY;
 
   registerHandler(socket, 'ping', pingSchema, (): Pong => ({ serverTime: now().getTime() }), {
     cost: EVENT_COSTS.ping,
@@ -145,15 +160,36 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     chatMessageSchema,
     async ({ sessionId, text }): Promise<ChatMessageAck> => {
       const session = await lifecycle.inSession(socket, sessionId);
+      const verdict = moderation.filterText(text);
+      if (verdict.action === 'block') {
+        const reason = verdict.reasons[0] ?? 'blocked_term';
+        const notice = BLOCKED_MESSAGES[reason] ?? 'That message isn’t allowed.';
+        socket.emit('system:notice', { code: 'MESSAGE_BLOCKED', message: notice });
+        // Recorded off the hot path (worker: ModerationEvent + trust −2).
+        void moderation
+          .recordEvent({
+            visitorId: socket.data.visitorId,
+            sessionId,
+            source: 'TEXT_FILTER',
+            label: reason,
+            score: 1,
+            action: 'MESSAGE_BLOCKED',
+            trustEvent: 'text_violation',
+            at: now().toISOString(),
+          })
+          .catch(() => undefined);
+        throw new SocketError(ErrorCode.MESSAGE_BLOCKED, notice);
+      }
+      const relayed = verdict.action === 'mask' ? (verdict.masked ?? text) : text;
       const from = session.ref.participantId;
       const id = ulid();
       const at = now().toISOString();
-      const message = { sessionId, from, id, text, at };
+      const message = { sessionId, from, id, text: relayed, at };
       await store.appendLog(sessionId, message, TRANSCRIPT_MAX_MESSAGES);
       for (const [, record] of activeOthers(session)) {
         lifecycle.emitTo(record.visitorId, 'chat:message', message);
       }
-      return { id, at };
+      return relayed === text ? { id, at } : { id, at, text: relayed };
     },
     { cost: EVENT_COSTS['chat:message'] },
   );
@@ -228,13 +264,40 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     { cost: EVENT_COSTS['rtc:summary'] },
   );
 
-  // Part 8 (trust & safety) implements client-side moderation signals.
+  /**
+   * Client-side NSFW classifier results. Unverified, so low weight: recorded for review
+   * without trust changes; a high score about the stranger raises the session's frame
+   * sampling to `high` so the server checks for itself (D-054).
+   */
   registerHandler(
     socket,
     'moderation:signal',
     moderationSignalSchema,
-    () => {
-      throw new SocketError(ErrorCode.NOT_IMPLEMENTED, 'moderation:signal is not implemented yet');
+    async ({ sessionId, about, kind, score }) => {
+      const at = now().getTime();
+      if (at - lastSignalAt < SIGNAL_MIN_INTERVAL_MS) {
+        throw new SocketError(ErrorCode.RATE_LIMITED, 'One signal per 5 seconds');
+      }
+      lastSignalAt = at;
+      const session = await lifecycle.inSession(socket, sessionId);
+      const subject =
+        about === 'self'
+          ? socket.data.visitorId
+          : activeOthers(session).find(([participantId]) => participantId === about)?.[1].visitorId;
+      if (subject === undefined) {
+        throw new SocketError(ErrorCode.FORBIDDEN, 'Not a participant of this session');
+      }
+      await moderation.recordEvent({
+        visitorId: subject,
+        sessionId,
+        source: 'CLIENT_NSFW',
+        label: kind,
+        score,
+        action: 'NONE',
+        trustEvent: null,
+        at: new Date(at).toISOString(),
+      });
+      if (about !== 'self' && score >= SIGNAL_HIGH_RISK_SCORE) await lifecycle.raiseRisk(sessionId);
     },
     { cost: EVENT_COSTS['moderation:signal'] },
   );

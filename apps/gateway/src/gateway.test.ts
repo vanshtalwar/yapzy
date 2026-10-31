@@ -108,7 +108,7 @@ describe('events', () => {
     });
   });
 
-  it('acks invalid payloads, stubs and unknown events with the error envelope', async () => {
+  it('acks invalid payloads, out-of-session requests and unknown events with the error envelope', async () => {
     const { socket } = await connectVisitor(nodeA.url);
     expect(await socket.timeout(2_000).emitWithAck('queue:join', { mode: 'audio' })).toEqual({
       ok: false,
@@ -121,7 +121,7 @@ describe('events', () => {
         kind: 'nudity',
         score: 0.5,
       }),
-    ).toMatchObject({ ok: false, error: { code: 'NOT_IMPLEMENTED' } });
+    ).toMatchObject({ ok: false, error: { code: 'NOT_IN_SESSION' } });
     expect(await socket.timeout(2_000).emitWithAck('admin:delete_everything', {})).toMatchObject({
       ok: false,
       error: { code: 'VALIDATION_FAILED', message: 'Unknown event' },

@@ -99,6 +99,16 @@ export const rtcSummarySchema = z.object({
   failed: z.boolean(),
 });
 
+/**
+ * Server-assigned frame sampling for one participant (D-054): upload a downscaled frame of
+ * the own outgoing video every `frameIntervalMs` (null = never), at most `maxFrames` frames
+ * (absent/null = no limit).
+ */
+export const frameScheduleSchema = z.object({
+  frameIntervalMs: z.number().int().positive().nullable(),
+  maxFrames: z.number().int().positive().nullable().optional(),
+});
+
 export const moderationSignalSchema = z.object({
   sessionId: sessionIdSchema,
   about: z.union([participantIdSchema, z.literal('self')]),
@@ -126,8 +136,8 @@ export const matchFoundSchema = z.object({
   maxParticipants: z.number().int().min(2).max(16),
   selfParticipantId: participantIdSchema,
   peers: z.array(peerRoleSchema),
-  /** Server-chosen frame-sampling interval for this participant; null = none (Part 8, D-054). */
-  moderation: z.object({ frameIntervalMs: z.number().int().positive().nullable() }),
+  /** Server-chosen frame sampling for this participant (Part 8, D-054). */
+  moderation: frameScheduleSchema,
   commonInterests: z.array(z.string()),
 });
 
@@ -175,11 +185,19 @@ export const peerLeftSchema = z.object({
 export const systemNoticeSchema = z.object({
   code: z.enum(NOTICE_CODES),
   message: z.string(),
+  /** FRAME_SCHEDULE: the session and its new schedule. */
+  sessionId: sessionIdSchema.optional(),
+  moderation: frameScheduleSchema.optional(),
 });
 
 export const pongSchema = z.object({ serverTime: z.number().int() });
 
-export const chatMessageAckSchema = z.object({ id: z.string().min(1), at: z.iso.datetime() });
+export const chatMessageAckSchema = z.object({
+  id: z.string().min(1),
+  at: z.iso.datetime(),
+  /** The text as relayed, when the filter masked profanity. */
+  text: z.string().optional(),
+});
 
 export const sessionResumedSchema = z.object({
   selfParticipantId: participantIdSchema,

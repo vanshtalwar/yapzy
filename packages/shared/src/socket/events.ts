@@ -43,6 +43,8 @@ export const NOTICE_CODES = {
   BANNED: 'BANNED',
   MESSAGE_BLOCKED: 'MESSAGE_BLOCKED',
   RATE_LIMITED: 'RATE_LIMITED',
+  /** The server changed this participant's frame-sampling schedule (D-054). */
+  FRAME_SCHEDULE: 'FRAME_SCHEDULE',
 } as const;
 
 export type NoticeCode = (typeof NOTICE_CODES)[keyof typeof NOTICE_CODES];

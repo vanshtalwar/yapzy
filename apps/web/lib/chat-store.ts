@@ -75,6 +75,8 @@ export interface ChatData {
   errorMessage: string | null;
   /** Video call of the current session: plain values only, media stays in the CallManager. */
   call: CallView | null;
+  /** The client NSFW check flagged the stranger's video: show it blurred. */
+  remoteFlagged: boolean;
 }
 
 export interface ChatActions {
@@ -104,6 +106,7 @@ export interface ChatActions {
   setError(kind: ErrorKind, message: string): void;
   /** Ignored unless it belongs to the current matched session (or clears the call). */
   setCall(view: CallView | null): void;
+  setRemoteFlagged(sessionId: string): void;
   reset(): void;
 }
 
@@ -121,6 +124,7 @@ const freshSession = {
   lastReceivedId: null,
   resumeCursor: null,
   call: null,
+  remoteFlagged: false,
 } satisfies Partial<ChatData>;
 
 let systemCounter = 0;
@@ -262,7 +266,14 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
       },
 
       ackMessage: (clientMsgId, ack) => {
-        updateSelf(clientMsgId, (entry) => ({ ...entry, id: ack.id, at: ack.at, status: 'sent' }));
+        // `text` is set when the server masked profanity: show what the stranger really got.
+        updateSelf(clientMsgId, (entry) => ({
+          ...entry,
+          id: ack.id,
+          at: ack.at,
+          status: 'sent',
+          text: ack.text ?? entry.text,
+        }));
       },
 
       failMessage: (clientMsgId, code) => {
@@ -370,6 +381,10 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
 
       setCall: (view) => {
         if (view === null || current(view.sessionId)) set({ call: view });
+      },
+
+      setRemoteFlagged: (sessionId) => {
+        if (current(sessionId)) set({ remoteFlagged: true });
       },
 
       reset: () => {

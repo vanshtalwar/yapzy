@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (12 parts, executed one at a time) |
 | Planned group calls | Up to **4 people per video call** via **Janus VideoRoom** (Parts 11–12); 2-person calls stay P2P. Parts 1–10 must stay participant-list based and keep the `CallManager` transport interface |
-| Current status | Parts 1–7 done (text + P2P video chat) — **next: Part 8** (Trust & safety) |
+| Current status | Parts 1–8 done (text + video chat, trust & safety) — **next: Part 9** (Admin & moderation dashboard) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -26,7 +26,7 @@
 | 5 | Matchmaking & chat session lifecycle | ✅ Done (+ follow-up) | 2026-10-31 | Follow-up (D-046…D-049, D-052…D-053) done: resume/ack/deadlines/priority requeue, queue buckets. Bots 50 × 2 min × 2 nodes, ghost 0.1, reconnect 0.1: 0 protocol errors, 0 asymmetric, 0 undelivered; p95 to match 1 289 ms (4 buckets) vs 1 586 ms (1 bucket); gateway restart mid-run: 168 resumes, 0 sessions ended |
 | 6 | Web app & text chat | ✅ Done | 2026-10-31 | Next.js 16.4 + React 19.3 + Tailwind 4; `@app/ui` from 21st.dev; Zustand store + controller. Headless-Chrome smoke (2 browsers): gate → match → chat both ways (HTML shown as text) → typing → Next (auto-requeue rematch) → network drop + resume with missed message → Stop → mobile 390 px, no overflow |
 | 7 | Video chat (WebRTC) | ✅ Done | 2026-10-31 | Headless Chrome, fake camera + synthesized mic: connected ≈ 0.2–0.3 s after both start; rapid Next ×20 → 21 PCs created, 1 open per side, camera acquired once, 2 live local tracks; relay-only → relay↔relay through coturn; gateway restart mid-call → 0 video stalls, same PC kept, text resumed; camera denied → no Start; 390 px layout + chat drawer OK |
-| 8 | Trust & safety | ⬜ Not started | | |
+| 8 | Trust & safety | ✅ Done | 2026-10-31 | Headless Chrome: link blocked (not relayed), profanity masked; text report → Postgres; video report → 2–3 evidence frames in MinIO; DEV_FORCE_FLAG → first sampled frame (≈ 5 s with fast intervals) flagged → auto report + trust 30 + live SHADOW ban; afterwards matched only with a low-trust (shadow-pool) visitor, never the waiting normal one |
 | 9 | Admin & moderation dashboard | ⬜ Not started | | |
 | 10 | Hardening, observability, testing & DX | ⬜ Not started | | |
 | 11 | Janus SFU & call topology switch | ⬜ Not started | | After 1–10 |
@@ -87,8 +87,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/server.ts    entry: env, logger, redis, prisma singleton, listen, graceful SIGTERM/SIGINT
 │     ├─ src/app.ts       buildApp(deps) — plugins, rate limit, auth, routes (DI: config, prisma, redis, turnstile, clock, logger)
 │     ├─ src/plugins/     auth.ts (Bearer JWT → request.visitor), error-handler.ts (envelope, 404)
-│     ├─ src/routes/      health.ts, config.ts, session.ts, turn.ts, stats.ts
-│     ├─ src/services/    turnstile.ts, bans.ts (ban checker + Redis cache), turn.ts (coturn creds), online.ts
+│     ├─ src/routes/      health.ts, config.ts, session.ts, turn.ts, stats.ts, reports.ts (multipart), frames.ts
+│     ├─ src/services/    turnstile.ts, turn.ts (coturn creds), online.ts, jobs.ts (BullMQ producers),
+│     │                   session-state.ts (read gateway session keys, frame-accept Lua), images.ts (sharp)
 │     ├─ src/test/        helpers.ts (test config, fakes, Redis DB 14); src/**/*.test.ts
 │  │  └─ tsup.config.ts   bundles @app/* into dist/server.js; npm deps stay external
 │  ├─ gateway/            Socket.io gateway (port 4001; second node 4011)
@@ -101,13 +102,17 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/sessions/    store.ts (refs, session create/leave Lua, context, transcript), lifecycle.ts
 │     │                   (queue → match → session → leave orchestration, per-visitor locks, timers)
 │     ├─ src/sweeper.ts   stale-ticket sweeper (30 s, SET NX PX lock)
+│     ├─ src/moderation.ts  createGatewayModeration: text filter, pools, frame schedules (Redis caches only)
 │     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts,
 │     │   rtc-stats.ts (node-local counters from rtc:summary, exported as metrics in Part 10)
 │     ├─ src/test/        helpers.ts (2 real nodes on random ports, Redis DB 13, unique channels)
 │  │  └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
-│  ├─ worker/             BullMQ consumers: src/worker.ts (createWorkers), src/jobs/session-log.ts, src/server.ts
+│  ├─ worker/             BullMQ consumers: src/worker.ts (createWorkers: session-log, classify-frame, moderation-event,
+│  │                      report-filed + 10 s budget timer), src/jobs/session-log.ts, src/moderation/ (classify-frame,
+│  │                      moderation-event, report-filed, session-trust, budget, deps), src/server.ts
 │  └─ web/                Next.js 16 App Router (port 3000)
 │     ├─ next.config.mjs  env via @app/env `webEnv` (validated at start), security headers + CSP, transpilePackages
+│     ├─ scripts/         prepare-nsfw-model.mjs (NSFWJS MobileNetV2 → public/models/nsfw/, gitignored; run by dev/build)
 │     ├─ app/             layout.tsx (Toaster, theme colours), page.tsx (landing), chat/page.tsx (/chat?mode=),
 │     │                   terms|privacy|guidelines/page.tsx (placeholder legal), globals.css, icon.svg
 │     ├─ components/      age-gate.tsx (consents + Turnstile → POST /v1/session), turnstile.tsx, blocked-screen.tsx,
@@ -122,6 +127,8 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │                         rtc/: types.ts (CallTransport, views), peer-session.ts, mesh-transport.ts,
 │                         call-manager.ts, local-media.ts, ice-servers.ts, stats.ts, use-audio-level.ts,
 │                         testing.ts (fakes: RTCPeerConnection, MediaStream, tracks)
+│                         moderation/: frame-grabber, frame-sampler (server schedule), frame-buffer (report
+│                         evidence ring buffer), nsfw (lazy NSFWJS watcher), call-moderation (per call)
 ├─ packages/
 │  ├─ config/             tsconfig.base/node/nextjs/react.json, eslint.config.base.js (createEslintConfig({ react, next })),
 │  │                      prettier.config.js
@@ -138,7 +145,12 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  │                      src/client.ts (createPrismaClient), src/prisma.ts (singleton), src/ban.ts, src/generated/ (gitignored)
 │  ├─ matchmaking/        lua.ts (ENQUEUE_OR_MATCH, CANCEL_TICKET, DROP_TICKETS_IF_UNCHANGED), matchmaker.ts
 │  │                      (createMatchmaker: enqueueOrMatch, promoteToAny, cancelTicket, getTicket, sweepStale), ticket.ts
-│  ├─ moderation/         bans.ts: createBanChecker (shared by api + gateway); text filter etc. arrive in Part 8
+│  ├─ moderation/         bans.ts (createBanChecker), ban-service.ts (BanService.apply/revoke → Postgres + cache +
+│  │                      ban_applied), text-filter.ts (obscenity + link/contact detectors), classifier.ts
+│  │                      (ImageClassifier, MockImageClassifier), hash-matcher.ts (HashMatcher, Noop), trust.ts
+│  │                      (TrustRules), sampling.ts (risk tiers, frame schedules, budget multiplier), stores.ts
+│  │                      (trust store, risk profiles), reports.ts (priority, evidence retention)
+│  ├─ storage/            `@app/storage`: createObjectStore (S3 client, MinIO in dev, path-style), createMemoryObjectStore
 │  ├─ ui/                 `@app/ui` React kit (TS source, no build): src/styles.css (theme tokens, `@theme inline`),
 │  │                      src/lib/cn.ts, src/components/ (button, card, badge, input, label, checkbox, switch, dialog,
 │  │                      select, sheet, toaster, spinner, status-dot, tag-input, consent-gate, chat/*, video/*:
@@ -236,6 +248,17 @@ Conventions established in Part 6:
 - **UI:** `/chat?mode=video` → pre-join (preview, device pickers, mic meter via Web Audio analyser, mute/camera toggles, "Start video chat" only when media is ready; denied / no device / busy / insecure-context messages with "Try again" and a link to text chat) → age gate if there is no session token → call screen: stage with remote tiles (`VideoGrid`, ready for 1–3 remote tiles), mirrored local PiP, quality badge, "Reconnecting to RandomChat…" / "Stranger's connection is unstable…" banners, searching / ended / paused overlays over a dimmed local preview, controls bar (Mute, Camera, Chat with unread badge on phones, Settings dialog, Report disabled until Part 8, Next with confirm / Esc×2, Stop / New chat), text chat as a side panel (≥ md) or bottom sheet (phones). Autoplay refused → plays muted with "Tap to unmute". The camera stays on across matches and is released (deferred 250 ms) when leaving the page.
 - **Page/network events:** `pagehide` → close the call and send `chat:end` (or `queue:leave`) immediately (D-077); `SERVER_RESTARTING` notice → disconnect and reconnect after 250–500 ms to another node (D-076).
 
+### Trust & safety design (Part 8)
+- **Text** (gateway, before relaying): `createTextFilter` → `block` for links/domains (incl. `w w w . x . c o m`, `x dot com`, `x (dot) com`, `hxxp://`), emails (incl. `(at)` / "name at gmail"), phone numbers (7–15 digits), handle solicitation ("add me on snap", "my insta is …", `@handle`, `name#1234`), self-harm encouragement ("kys", "kill yourself") and slurs; `mask` (asterisks) for other profanity (obscenity English dataset with leetspeak); `allow` otherwise. Blocked → ack `MESSAGE_BLOCKED` + `system:notice MESSAGE_BLOCKED` (reason-specific text) + `moderation-event` job (TEXT_FILTER, trust −2); nothing is relayed or stored. Masked → relayed and stored masked; the ack carries the masked `text`, shown in the sender's bubble.
+- **Reports** (`POST /v1/reports`, multipart, 10/h per visitor): fields + ≤ 3 JPEG frames (≤ 300 KB, magic bytes checked, re-encoded with sharp: rotated, ≤ 1280 px, **metadata stripped**). Reporter and reported must be participants of the session (keys kept 1 h after the end); reported visitor resolved server-side; transcript snapshot (roles reporter/reported/other) in `Report.transcript`; frames → MinIO `evidence/reports/<reportId>/<n>.jpg` + `Evidence` (FRAME, sha256, expires +90 d); priority = reason base (MINOR_SAFETY 100, NUDITY_SEXUAL 80, VIOLENCE_SELF_HARM 70, HATE 60, HARASSMENT 50, SPAM_SCAM 30, OTHER 10) + 10 per other report against them in 24 h (max +30); `report-filed` job. The client ends the chat after reporting (`chat:next`).
+- **Frame sampling** (D-054): at match time the gateway computes each video participant's tier from `trust:<id>` + `risk:<id>`: `high` (trust < 40, flagged/reported within 24 h, group call) → `new` (first seen < 24 h ago, or unknown) → `trusted` (trust ≥ 70 and no report in 7 d) → `normal`. Schedules (`MOD_FRAME_INTERVALS_MS`): high 20 s, new 30 s, normal 120 s for `MOD_NORMAL_SAMPLE_RATE` (30 %) of participants, trusted: one spot-check frame (`maxFrames: 1`, 10 s) for `MOD_TRUSTED_SPOTCHECK_RATE` (10 %). Sent in `match:found.moderation { frameIntervalMs, maxFrames }` and stored in the participant record. The client uploads its own frame (≤ 320 px JPEG) first at a random point in the first interval, then every 0.85–1.2 × interval; `POST /v1/moderation/frames` accepts only with a gap ≥ 80 % of the assigned interval and within `maxFrames` (Lua on `session:{id}:frames`), else 429; non-video / unsampled → 403.
+- **Raising risk:** a client NSFW signal with score ≥ 0.8 about the stranger raises every present participant whose schedule is sparser than `high` to `high` immediately (participant record + `system:notice FRAME_SCHEDULE { sessionId, moderation }`). Reports flag the reported visitor (`risk.flaggedUntil` = +24 h) for future sessions.
+- **Budget:** the API counts accepted frames per 10 s window (`mod:frames:<window>`); every 10 s the worker computes `next = prev × sqrt(observed/budget)` (×1.5 if the classify backlog > 30 s of budget), clamps to 1–64 and writes `mod:budget:multiplier` (60 s TTL); gateways read it (5 s cache) and stretch intervals: normal/trusted × m (spot-check probability ÷ m), new × m/2, high × min(2, m/4).
+- **Worker:** `classify-frame` → HashMatcher, then ImageClassifier (flag ≥ 0.8). Clean → frame deleted at once. Flagged → frame copied to `evidence/auto/<eventId>.jpg`, `ModerationEvent` (SERVER_CLASSIFIER / HASH_MATCH), automatic `Report` (reporterId null, reason by label, priority +20 or 1000 for hash matches) with transcript, `Evidence` (AUTO_FLAG_FRAME; 90 d, none for hash matches), trust −20, high tier for 24 h; score ≥ `MOD_AUTO_SHADOW_SCORE` → SHADOW ban (`MOD_AUTO_BAN_HOURS`, visitor + device); hash match → permanent HARD ban + ESCALATED. `report-filed` → trust −10, risk flag 24 h, `MOD_REPORT_THRESHOLD` distinct reporters in 24 h → SHADOW ban + REPORT_THRESHOLD event. `moderation-event` → row + trust change (text −2; client signals none). `session-log` → +1 trust for clean stays ≥ 60 s; < 50 % of ≥ 2 expected frames → −5 and high tier for 24 h.
+- **Bans:** `BanService.apply` (worker today, admin in Part 9) writes the row, drops the identifiers' cache keys and re-reads (most severe ban wins), publishes `ban_applied` (device bans resolved to the visitor). Every gateway node acts on its own sockets of that visitor (or IP hash): HARD → chat ends (others see "left"), `system:notice BANNED`, disconnect; SHADOW → chat ends silently (the banned visitor sees "Stranger has disconnected"), pool → shadow, a waiting search is re-queued there. The pool is re-evaluated on every `queue:join` (ban cache + `trust:<id>` < `TRUST_SHADOW_BELOW`) and at the handshake.
+- **Client NSFW** (web, video only): NSFWJS MobileNetV2 (self-hosted `/models/nsfw/`, tfjs loaded lazily on the first call), stranger every 2 s, own video every 5 s, inference in `requestIdleCallback`. Stranger flagged (≥ 0.85; "sexy" × 0.6) → video blurred with Next / Report and `moderation:signal` (≤ 1 per 5 s); own video flagged → warning toast (≤ 1 per 30 s).
+- **Privacy / retention:** chat text lives only in the Redis ring buffer (≤ 100 messages, 24 h live / 1 h after the end) and in reports (`Report.transcript`). The stranger's frames stay in the reporter's browser memory (last ~9 s, 3 frames) and are uploaded only with a report. Moderation frames: frames bucket, deleted after classification when clean, 1-day lifecycle otherwise; flagged ones become evidence (90 days; hash matches kept for the legal process). Client NSFW sends scores only, never images. ModerationEvent rows hold labels and scores, no content. `risk:<id>` (first seen, flags) lives 8 days in Redis; trust in Postgres + 1 h cache.
+
 ### Matchmaking & session design (Part 5 + follow-up)
 - **Buckets (D-052, D-056):** a queue family `(region, pool, mode, lang)` has `MM_BUCKETS_BY_QUEUE["<mode>:<lang>"] ?? MM_BUCKETS` buckets, each its own hash tag `{mm:<region>:<pool>:<mode>:<lang>:<bucket>}`. Join: `chooseBucket` samples up to `BUCKET_CHOICES` = 4 random buckets in one pipelined call (LLEN of `q:any` + the ticket's interest queues) and takes the one with the most waiters (random among ties). Interest matching and recent-pair avoidance are per bucket (a rematch across buckets is possible but negligible in busy queues; small queues use 1 bucket).
 - **Hopping:** a waiting ticket's node timer fires every `MM_BUCKET_HOP_MS` (jittered 75–125 %, D-059): `hop` = cancel-if-waiting in the old bucket (a concurrent match wins) → choose another bucket → enqueue with **priority** (LPUSH, head of queue), same ticketId/createdAt/phase; the visitor ref moves to the new bucket only if it still names the ticket (else the new ticket is cancelled). A ticket id may be re-enqueued into a bucket where it is `cancelled` (hopping back).
@@ -278,6 +301,8 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | Button, Card, Badge, Input/Textarea, Label, Checkbox, Switch, Dialog, NativeSelect, Toaster, Spinner, SystemMessage | `packages/ui/src/components/*.tsx` | shadcn/ui-style primitives on `radix-ui` / `sonner`, written for this kit (21st free tier allows only 2 component-code retrievals a day) | own code (shadcn/ui is MIT) |
 | Call controls bar + buttons | `packages/ui/src/components/video/call-controls.tsx` | Design inspired by "Video Call Controls Bar" by cnippet-dev — https://21st.dev/r/cnippet-dev/v-toggle-9 (id 22214) and the "Toolbar" video-call demo by cnippet-dev; only the preview images were used (daily code quota exhausted), written in-house | own code |
 | Video tile, video grid, quality badge, level meter, device fields, sheet | `packages/ui/src/components/video/*.tsx`, `sheet.tsx` | Written in-house (21st search found no fitting component; quota exhausted) | own code |
+| Radio group; report dialog, blur overlay, blocked-message notice (app) | `packages/ui/src/components/radio-group.tsx`, `apps/web/components/report/`, video screen | shadcn-style on `radix-ui`, in-house (21st daily quota exhausted on 2026-10-31) | own code |
+| NSFWJS MobileNetV2 model | `apps/web/public/models/nsfw/` (generated from `nsfwjs`) | infinitered/nsfwjs | MIT |
 
 ### MCP servers for agents
 - `21st` (21st.dev, HTTP `https://21st.dev/api/mcp`): configured twice — in the user's local Claude config (key inline, takes precedence) and in project `.mcp.json` (key from env var `API_KEY_21ST`, **not set** as of 2026-10-31). `.mcp.json` contains no secret and is safe to commit. Used for all frontend UI work (see master prompt → Reference Design → Frontend UI components).
@@ -342,9 +367,9 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | TRUST_PROXY | api, gateway (proxy-addr) | Proxies trusted for X-Forwarded-For: empty = none, hop count, or IP/CIDR list; `true` rejected (new, not in master design) | empty |
 | NEXT_PUBLIC_API_URL, NEXT_PUBLIC_GATEWAY_URL | web (`webEnv`, inlined at build; also used for the CSP `connect-src`), bots (defaults for `connect`) | Public API / gateway URLs | http://localhost:4000, http://localhost:4001 |
 | NEXT_PUBLIC_FORCE_TURN_RELAY | web (`webEnv` `z.stringbool()`, inlined at build → `publicConfig.forceTurnRelay`) | Relay-only ICE (`iceTransportPolicy: 'relay'`): hides IPs from peers, all media via TURN | false |
-| S3_ACCESS_KEY, S3_SECRET_KEY | docker-compose (MinIO root user/password, minio-init), API/worker later | MinIO creds (password ≥ 8 chars) | randomchat, placeholder |
-| S3_BUCKET_EVIDENCE, S3_BUCKET_FRAMES | docker-compose (minio-init), API/worker later | Bucket names | evidence, frames |
-| S3_ENDPOINT, S3_REGION | (Part 8) | S3 client | http://localhost:9000, us-east-1 |
+| S3_ACCESS_KEY, S3_SECRET_KEY | docker-compose (MinIO root user/password, minio-init), api, worker (`s3Env`), storage tests | MinIO creds (password ≥ 8 chars) | randomchat, placeholder |
+| S3_BUCKET_EVIDENCE, S3_BUCKET_FRAMES | docker-compose (minio-init), api, worker | Bucket names | evidence, frames |
+| S3_ENDPOINT, S3_REGION | api, worker (`@app/storage`, path-style) | S3 client | http://localhost:9000, us-east-1 |
 | INTEREST_FALLBACK_MS, RECENT_PAIR_TTL_MS | gateway (`gatewayEnv`) | Interest-only wait before the general queue / no-rematch window for a pair (per bucket) | 5000, 60000 |
 | RECONNECT_GRACE_MS | gateway | How long a disconnected participant can `session:resume` (1 s–120 s) | 15000 |
 | MATCH_ACK_TIMEOUT_MS | gateway | Time to `match:ack` before the participant leaves with MATCH_TIMEOUT | 5000 |
@@ -357,6 +382,12 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | RATE_LIMIT_DISABLED | api, gateway (token bucket + abuse guard) | Disables rate limits **only if NODE_ENV=development** (ignored + warning otherwise); parsed with `z.stringbool()` | false |
 | SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD | `db:seed` (`seedEnv`: email, password ≥ 12 chars) | Dev admin login (password: see your `.env`) | admin@randomchat.local, placeholder |
 | ADMIN_SESSION_TTL_SECONDS | (Part 9) | Admin session lifetime | 28800 |
+| TRUST_SHADOW_BELOW, TRUST_HIGH_RISK_BELOW, TRUST_TRUSTED_FROM | gateway, worker (`trustEnv`) | Trust thresholds: shadow pool / `high` sampling tier / `trusted` tier (new, not in master design) | 10, 40, 70 |
+| MOD_FRAME_INTERVALS_MS | gateway | JSON per risk tier (`trusted: 0` = spot checks only); each ≥ 5000 except trusted | {"high": 20000, "new": 30000, "normal": 120000, "trusted": 0} |
+| MOD_NORMAL_SAMPLE_RATE, MOD_TRUSTED_SPOTCHECK_RATE | gateway | Share of normal participants sampled / of trusted ones spot-checked | 0.3, 0.1 |
+| MOD_FRAME_BUDGET_PER_SEC | gateway, worker | Global frames/s target for server-side checks (budget multiplier) | 50 |
+| MOD_AUTO_SHADOW_SCORE, MOD_REPORT_THRESHOLD, MOD_AUTO_BAN_HOURS | worker | Classifier score that also shadow-bans / distinct reporters in 24 h that shadow-ban / automatic ban length (new) | 0.9, 3, 168 |
+| DEV_FORCE_FLAG_VISITOR_IDS | worker (development only; ignored + warning otherwise) | Comma list of visitor ids the mock classifier always flags | empty |
 
 ## 9. Commands
 
@@ -449,15 +480,19 @@ Builders in `packages/redis/src/keys.ts` (functions/constants in parentheses). B
 
 `createRedis(url, { connectionName, lazyConnect, logger, redisOptions })`: RESP2, `maxRetriesPerRequest` 3 (pass `{ maxRetriesPerRequest: null }` for BullMQ), jittered exponential reconnect capped at 2 s, reconnect on `READONLY`. Subscribers need a dedicated connection.
 
+
+Part 8 keys: `trust:<visitorId>` (STRING score, 1 h; API at session start, worker on changes), `risk:<visitorId>` (JSON `{ firstSeenAt, flaggedUntil, lastReportedAt }`, 8 days), `session:{<id>}:frames` (HASH participantId → `{ received, lastAt }`, same tag as the session, 24 h live / 1 h after the end), `mod:frames:<windowStart>` (accepted frames per 10 s window, 120 s), `mod:budget:multiplier` (STRING ≥ 1, 60 s). Participant records gained `frameIntervalMs`, `maxFrames`, `tier`. BullMQ queues (prefix `{bull}`): `classify-frame`, `moderation-event`, `report-filed` (jobId = reportId).
 ## 12. REST endpoints (implemented)
 
 | Method | Path | Auth | Rate limit | Purpose |
 |---|---|---|---|---|
 | GET | `/health` | — | — | Liveness `{ status: 'ok' }` (no dependencies) |
 | GET | `/ready` | — | — | Readiness: `SELECT 1` + Redis `PING` (2 s timeout each) → 200 `{ status: 'ready', checks }` or 503 `{ status: 'unavailable', checks: { postgres, redis: 'ok'\|'fail' } }` |
-| GET | `/v1/config` | — | — | `{ tosVersion, maxMessageLength, maxInterests, supportedLangs, features: { video: true, reports: false } }`, `cache-control: public, max-age=60` |
-| POST | `/v1/session` | Turnstile | 10/min per IP hash | Body `{ turnstileToken, ageConfirmed, tosVersion, deviceId (uuid) }` → `{ token, visitorId, expiresAt }`. Errors: 400 `AGE_NOT_CONFIRMED`, 409 `TOS_OUTDATED` (+`tosVersion`), 403 `TURNSTILE_FAILED`, 503 `SERVICE_UNAVAILABLE` (Cloudflare unreachable), 403 `BANNED` (+`expiresAt`, HARD bans only) |
+| GET | `/v1/config` | — | — | `{ tosVersion, maxMessageLength, maxInterests, supportedLangs, features: { video: true, reports: true } }`, `cache-control: public, max-age=60` |
+| POST | `/v1/session` (also caches `trust:` + `risk:` for the visitor) | Turnstile | 10/min per IP hash | Body `{ turnstileToken, ageConfirmed, tosVersion, deviceId (uuid) }` → `{ token, visitorId, expiresAt }`. Errors: 400 `AGE_NOT_CONFIRMED`, 409 `TOS_OUTDATED` (+`tosVersion`), 403 `TURNSTILE_FAILED`, 503 `SERVICE_UNAVAILABLE` (Cloudflare unreachable), 403 `BANNED` (+`expiresAt`, HARD bans only) |
 | GET | `/v1/turn-credentials` | Bearer | 30/min per visitor | `{ iceServers: [{ urls: STUN_URLS }, { urls: [turn:H:P?transport=udp, …tcp], username: '<expiryUnix>:<visitorId>', credential: base64(HMAC-SHA1(TURN_SECRET, username)) }], ttlSeconds }`, `cache-control: no-store` |
+| POST | `/v1/reports` | Bearer | 10/h per visitor | Multipart: `sessionId`, `reportedParticipantId`, `reason` (ReportReason), `details?` ≤ 500 + ≤ 3 `frames` (JPEG ≤ 300 KB). 201 `{ reportId }`; 403 not a participant / self; 400 invalid fields or image; 413 too large / too many files |
+| POST | `/v1/moderation/frames?sessionId=` | Bearer | 30/min per visitor | Body `image/jpeg` ≤ 60 KB, ≤ 320 px (own video). 202 `{ accepted: true }`; 403 not a sampled participant of an active video session; 429 faster than 80 % of the assigned interval or `maxFrames` reached; 400 not a JPEG / too big; 415 other content types |
 | GET | `/v1/stats/online` | — | — | `{ online }` = Σ `presence:node:<id>` over `presence:nodes` (expired nodes count 0); cached 2 s in memory, `cache-control: public, max-age=2` |
 
 Request/response schemas live in `@app/shared` (`rest.ts`: `sessionRequestSchema`, `sessionResponseSchema`, `publicConfigSchema`, `turnCredentialsSchema`, `onlineStatsSchema`, `errorEnvelopeSchema`), shared by the API routes, the web client (validates every response) and the bots.
@@ -484,14 +519,14 @@ Contract: `packages/shared/src/socket/` (names, Zod schemas, types). Acks: `{ ok
 | C→S | `session:resume` | ✅ | `{ sessionId, lastMessageId? }` on any node → ack `{ selfParticipantId, peers, missedMessages }` or `SESSION_NOT_RESUMABLE` |
 | C→S | `queue:leave` | ✅ | waiting only (`INVALID_STATE` otherwise) |
 | C→S | `chat:next` / `chat:end` | ✅ | current `sessionId` only (`NOT_IN_SESSION` otherwise); next = leave (SKIP) + requeue with the socket's last preferences; `chat:next { reason: 'rtc_failed' }` (video) = leave as RTC_FAILED, others count as innocent (priority requeue if early); end = leave (STOP) → idle |
-| C→S | `chat:message` | ✅ | ack `{ ok: true, data: { id, at } }`; `NOT_IN_SESSION` for stale/ended sessions |
+| C→S | `chat:message` | ✅ | text filter first: blocked → `MESSAGE_BLOCKED` ack + notice; ack `{ ok: true, data: { id, at, text? } }` (`text` = masked version when profanity was masked); `NOT_IN_SESSION` for stale/ended sessions |
 | C→S | `chat:typing` | ✅ | relayed on change, repeats ≤ 1 per 2 s |
 | C→S | `rtc:offer` / `rtc:answer` / `rtc:ice` | ✅ | video sessions only (`INVALID_STATE`), `to` must be an active other participant (`FORBIDDEN`) |
 | C→S | `rtc:summary` | ✅ | accepted from any participant of the video session, also after it ended (≤ 1 h); `peer` must be another participant (`FORBIDDEN`); duplicates per socket dropped; node-local counters (`rtc-stats.ts`), debug log |
-| C→S | `moderation:signal` | 🟨 stub | validated, ack `NOT_IMPLEMENTED` (Part 8) |
+| C→S | `moderation:signal` | ✅ | `{ sessionId, about: participantId \| 'self', kind, score }`; ≤ 1 per 5 s per socket (`RATE_LIMITED`); recorded as CLIENT_NSFW event (no trust change); score ≥ 0.8 about the stranger raises the session to the `high` tier |
 | C→S | any other event | ✅ | ack `VALIDATION_FAILED "Unknown event"` + abuse strike |
-| S→C | `system:notice` | ✅ `SESSION_REPLACED`, `SERVER_RESTARTING`, `RATE_LIMITED` | `BANNED`, `MESSAGE_BLOCKED` codes defined, used from Part 5/8 |
-| S→C | `queue:waiting`, `match:found` (+ `moderation: { frameIntervalMs: null }`), `chat:message`, `chat:typing`, `rtc:offer`, `rtc:answer`, `rtc:ice`, `peer:reconnecting`, `peer:resumed`, `peer:left` | ✅ | always delivered via `visitor:<id>` rooms (cross-node) |
+| S→C | `system:notice` | ✅ `SESSION_REPLACED`, `SERVER_RESTARTING`, `RATE_LIMITED`, `BANNED` (live HARD ban), `MESSAGE_BLOCKED` (reason text), `FRAME_SCHEDULE` (+`sessionId`, `moderation`) | |
+| S→C | `queue:waiting`, `match:found` (+ `moderation: { frameIntervalMs, maxFrames }` per participant, D-054), `chat:message`, `chat:typing`, `rtc:offer`, `rtc:answer`, `rtc:ice`, `peer:reconnecting`, `peer:resumed`, `peer:left` | ✅ | always delivered via `visitor:<id>` rooms (cross-node) |
 | S→C | `participant:joined`, `call:topology` | ⬜ | Parts 11–12 (`participant:joined` is typed with the old Part 11 shape; Part 12 changes it) |
 | handshake | `connect_error` | ✅ | `data.code`: `UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED` (+`expiresAt`), `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`; bad Origin → plain websocket error |
 
@@ -581,6 +616,18 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-078 | 2026-10-31 | `agentRules: false` in `next.config.mjs` | Next 16.4's dev server writes an `AGENTS.md` into the app; this repo's agent instructions are CLAUDE.md + CONTEXT.md |
 | D-079 | 2026-10-31 | Video components (tile, grid, controls, quality badge, level meter, device fields, sheet) written in-house in `@app/ui`; new theme tokens `--stage` / `--stage-foreground` for the always-dark video surface | 21st free tier: daily code quota already used by Part 6; preview images of the 21st "Video Call Controls Bar" served as design reference |
 | D-080 | 2026-10-31 | The web client validates every server event and ack payload with the shared Zod schemas and drops malformed ones | Global rule "Zod at every boundary"; a version-mismatched or buggy server can't put the client into an impossible state |
+| D-081 | 2026-10-31 | Text filter: block links, contact details, handle solicitation, self-harm encouragement and a curated slur list; mask other profanity (the sender sees the masked text); blocked text is never stored | Moving victims off-platform is the classic abuse path; masking keeps casual swearing from killing conversations |
+| D-082 | 2026-10-31 | Client NSFW signals carry **no** trust penalty; they only raise the session's server sampling to `high` | A malicious client could otherwise lower anyone's trust; the server verifies with its own frames |
+| D-083 | 2026-10-31 | `Report.reporterId` nullable (migration `report_reporter_optional`): automatic reports from the classifier have no reporter | The spec's auto-created reports need a row without a visitor reporter |
+| D-084 | 2026-10-31 | Trust and risk for the hot path come from Redis (`trust:<id>` 1 h, `risk:<id>` 8 d) written by the API at session creation and by the worker; the gateway never queries Postgres for pools or sampling | Matching latency and DB load at scale (D-007) |
+| D-085 | 2026-10-31 | Report evidence frames are re-encoded with sharp (EXIF/GPS stripped, ≤ 1280 px) and expire after 90 days; the stranger's frames exist only in the reporter's memory until a report | Privacy: no metadata leaks, nothing uploaded without a report |
+| D-086 | 2026-10-31 | `match:found.moderation` gains optional `maxFrames` (spot checks); the API enforces the schedule atomically (Lua on `session:{id}:frames`, min gap 80 % of the interval); the client jitters 0.85–1.2× | One-frame spot checks for trusted users need a cap; the asymmetric jitter keeps honest clients clear of the 80 % floor despite network variance |
+| D-087 | 2026-10-31 | Frame budget: API counts accepted frames per 10 s window; the worker publishes a smoothed multiplier (60 s TTL, so a dead worker means no stretching); gateways cache it 5 s | Global control loop without a hot key per frame upload in the gateway |
+| D-088 | 2026-10-31 | Missing uploads are judged at session end by the worker from the session-log job (frames assigned vs received): < 50 % of ≥ 2 expected → trust −5 + `high` for 24 h | Blocking uploads must not be a way to avoid checks; per-session evaluation needs no extra timers |
+| D-089 | 2026-10-31 | Shadow bans are silent: the banned visitor's chat ends as "Stranger has disconnected", others see "left"; pools re-evaluated at every `queue:join` | Telling abusers they are shadow-banned defeats the purpose; bans must apply without reconnecting |
+| D-090 | 2026-10-31 | New `@app/storage` package (S3 client, path-style for MinIO) with an in-memory store for tests | API and worker share one small object-store interface; tests don't need MinIO (except the storage package's own integration test) |
+| D-091 | 2026-10-31 | `nsfwjs` pinned to 4.3.0 (4.4.0 declares `engines.node: "22.13.0"`, rejected by engineStrict on Node 24); its MobileNetV2 model is converted from the package into `public/models/nsfw/` by `scripts/prepare-nsfw-model.mjs` (dev/build), gitignored; tfjs is imported lazily on the first video call | Self-hosted model (CSP `connect-src 'self'`), no binary blobs in git, no CDN, chat pages don't pay for the ML bundle |
+| D-092 | 2026-10-31 | `BanService` invalidates the identifiers' cache keys and re-reads from Postgres (most severe active ban wins) instead of writing the new ban blindly; device bans are resolved to the current visitor for `ban_applied` | A new SHADOW ban must not overwrite a cached HARD ban; gateways only know visitor ids and IP hashes |
 
 ## 15. Known issues / TODOs / production gaps
 
@@ -617,7 +664,13 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - **Video:** headless Chrome on macOS hangs when capturing (even fake) audio; the browser checks synthesize the microphone with Web Audio (real browsers are unaffected).
 - **Video:** skipping faster than about once every 2 s is throttled by the gateway's token bucket (by design); the client retries the skip (D-075). The online count can lag ~15 s (10 s poll + 5 s presence + 2 s cache).
 - **Video:** `rtc:summary` counters are in-memory per gateway node (Part 10 exports them; they reset on restart).
+- **Trust & safety (Part 8):** the worker uses the mock classifier and the no-op hash matcher in every environment (a warning is logged in production); real providers plug into `ImageClassifier` / `HashMatcher` (see `hash-matcher.ts` doc comment; checklist in Part 10).
+- **Trust & safety:** evidence has `expiresAt` (90 days) but no purge job deletes expired objects/rows yet, and `Report.transcript` has no automatic expiry (Part 9/10).
+- **Trust & safety:** "report received" lowers trust immediately even for false reports (mitigated by the distinct-reporter threshold and human review in Part 9). The `new` tier uses first-seen < 24 h only (the "first 10 sessions" rule needs a session counter — not implemented).
+- **Trust & safety:** a report does not raise the sampling of a still-running session (1:1 chats end on report; matters for group calls, Part 12). Blocked chat messages count as violations even when the user was only sharing a harmless link.
+- **Client NSFW:** the model (2.6 MB) and tfjs (~1 MB) download on the first video call; inference uses WebGL (CPU fallback on devices without it); thresholds are untuned defaults. Headless Chrome: works with SwiftShader.
 - **21st.dev licenses** of the adapted components (theme, Chat Messages, consent gate) were not returned by the MCP — verify on each component page before production (listed in §6 "UI components list").
+- Redis test DBs: worker moderation tests use DB 9 (the session-log tests use DB 10 for BullMQ in parallel).
 - The Part 6 browser smoke test (two Chrome contexts via playwright-core, network drop simulated by proxying the gateway WebSocket with `routeWebSocket`, because Chrome's offline emulation does not close open WebSockets) lived outside the repo; Part 10 adds Playwright e2e tests to the repo.
 - Production-only items (tracked fully in `docs/PRODUCTION_CHECKLIST.md` from Part 10): legal review, age-assurance vendor, CSAM hash matching + NCMEC reporting process, human moderation staffing, bare-metal TURN with `denied-peer-ip`, Kubernetes, Redis Cluster, PgBouncer, multi-region, CDN/WAF/DDoS.
 
@@ -639,3 +692,4 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | 2026-10-31 | 5 (follow-up) | Session resilience + scale fixes: `match:ack` with sharded Redis ack deadlines, reconnect grace + `session:resume` on any node (missed messages), participant statuses, deadline processor (exactly-once via ZREM), fair priority requeue, shutdown keeps sessions; queue buckets with region in the tag, `chooseBucket` (4 choices) + jittered priority hops, sharded match counters; `MATCH_TIMEOUT` enum migration; new env vars (resilience + `MM_*`, shards). Bots: `--ghost-rate`, `--reconnect-rate`, forced reconnect on restart, per-message delivery tracking. Acceptance (50 bots, 2 min, 2 nodes, ghost/reconnect 0.1): 0 protocol errors, 0 asymmetric, 0 undelivered; p95 1 289 ms (4 buckets) vs 1 586 ms (1 bucket); restart mid-run → 168 resumes, 0 sessions ended; ghost sessions ended ≤ 6.0 s. Bugs found by the bots and fixed: resume cut-off lost messages (D-057), lockstep hops (D-059), 2-choice bucket misses (D-056). Tests: 134. Decisions D-056…D-060. Also committed the concurrent plan update separately and removed an accidentally committed transcript. |
 | 2026-10-31 | 6 | Web app & text chat: `apps/web` (Next.js 16.4, React 19.3, Tailwind 4) with landing (mode cards, language, interests, auto-requeue, live online count), age gate (consents + Turnstile → `/v1/session`, banned screen), `/chat` (state machine store + socket controller: match ack, resume with drop-time cursor + dedupe, stale-session filtering, optimistic messages with retry/blocked, typing, Next confirm/Esc×2, Stop, auto-requeue, ghost-tab pause, single-tab handling), placeholder legal pages, security headers/CSP; `packages/ui` (`@app/ui`, shadcn-style kit adapted from 21st.dev: theme, chat components, consent gate); shared REST schemas in `@app/shared`; `webEnv`; ESLint react/next presets and `tsconfig.react.json`. Tests: 9 store + 7 controller (fake socket) + 3 HTML-escaping component tests; headless-Chrome two-browser smoke passed. |
 | 2026-10-31 | 7 | Video chat (WebRTC): `lib/rtc` (LocalMedia, PeerSession with perfect negotiation, candidate queuing, restart policy, 800 kbps cap, stats/quality, summaries; MeshTransport behind a `CallTransport` interface; CallManager; TURN credential cache with refresh), controller integration (call follows the store, ack after the call exists, rtc signal routing, `rtc_failed`, throttled-skip retry, `pagehide`/`online`, `SERVER_RESTARTING` reconnect, Zod-validated server payloads), `/chat?mode=video` (pre-join check, call screen, device settings, mobile chat drawer, autoplay fallback), Video enabled on the landing page; `@app/ui` video components + sheet + stage tokens; gateway: `chat:next` reason `rtc_failed`, `rtc:summary` membership check + counters; `NEXT_PUBLIC_FORCE_TURN_RELAY` in `webEnv`; `docs/LAN_TESTING.md`; `agentRules: false`. Tests: PeerSession (16), CallManager (7), stats (3), ICE cache (2), LocalMedia (5), controller video (7) + throttle/restart/validation (4), gateway (3). |
+| 2026-10-31 | 8 | Trust & safety: `@app/moderation` (text filter with obfuscation handling, MockImageClassifier/NoopHashMatcher interfaces, TrustRules, risk tiers + frame schedules + budget multiplier, BanService, trust store, risk profiles, report priority), `@app/storage` (S3/MinIO + memory store), API `POST /v1/reports` (multipart, sharp re-encode, participant check, transcript snapshot, priority, MinIO evidence) and `POST /v1/moderation/frames` (schedule-enforcing Lua), trust/risk caching at session start, `features.reports`; worker jobs classify-frame / moderation-event / report-filed, session trust + missing-frame penalty, budget publisher; gateway text filter, `moderation:signal`, `ban_applied` (HARD/SHADOW across nodes), pool from ban + trust on handshake and every join, per-participant frame schedules in `match:found`, FRAME_SCHEDULE notices; web report dialog + buttons, evidence ring buffer, own-frame sampler, lazy NSFWJS watcher with blur overlay, blocked/masked message UX; migration `report_reporter_optional`; env `s3Env`, `trustEnv`, MOD_* + DEV_FORCE_FLAG_VISITOR_IDS. Tests: moderation 23, storage 2, API +6, worker +8, gateway +7, web +10, env +2. |

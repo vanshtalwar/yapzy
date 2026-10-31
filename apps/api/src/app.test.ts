@@ -95,6 +95,7 @@ describe('health & config', () => {
   it('fails readiness when Redis is down', async () => {
     const brokenRedis = {
       ping: () => Promise.reject(new Error('connection refused')),
+      defineCommand: () => undefined, // Lua scripts are registered while the app is built
     } as unknown as Redis; // only ping() is reachable with rate limiting disabled
     const devConfig = {
       ...testConfig,
@@ -121,7 +122,7 @@ describe('health & config', () => {
       maxMessageLength: 500,
       maxInterests: 5,
       supportedLangs: expect.arrayContaining(['en']) as unknown,
-      features: { video: true, reports: false },
+      features: { video: true, reports: true },
     });
   });
 });

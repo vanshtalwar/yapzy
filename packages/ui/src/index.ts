@@ -35,6 +35,7 @@ export {
 } from './components/dialog.tsx';
 export { fieldClasses, Input, Textarea } from './components/input.tsx';
 export { Label } from './components/label.tsx';
+export { RadioGroup, RadioGroupItem } from './components/radio-group.tsx';
 export { NativeSelect } from './components/select.tsx';
 export {
   Sheet,

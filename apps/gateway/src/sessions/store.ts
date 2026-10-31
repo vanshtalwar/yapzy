@@ -1,7 +1,10 @@
 import { randomBytes } from 'node:crypto';
 
+import { type FrameSchedule, RISK_TIERS } from '@app/moderation';
 import {
   deadlineShardOf,
+  type FrameStats,
+  frameStatsSchema,
   type MatchPool,
   type Redis,
   sessionDeadlinesKey,
@@ -25,10 +28,18 @@ import { z } from 'zod';
 
 declare module 'ioredis' {
   interface RedisCommander<Context> {
+    gwSessionSchedule(
+      participants: string,
+      participantId: string,
+      frameIntervalMs: string,
+      maxFrames: string,
+      tier: string,
+    ): Result<unknown, Context>;
     gwSessionLeave(
       meta: string,
       participants: string,
       log: string,
+      frames: string,
       participantId: string,
       reason: string,
       nowMs: number,
@@ -75,7 +86,7 @@ const LIVE_TTL_SECONDS = 24 * 60 * 60;
 // (reconnecting ↔ active) → left. "Present" = any status except left.
 
 /**
- * KEYS: meta, participants, log   ARGV: participantId, reason, nowMs, ttlSeconds, requireStatus
+ * KEYS: meta, participants, log, frames   ARGV: participantId, reason, nowMs, ttlSeconds, requireStatus
  * Marks the participant left (idempotent). With `requireStatus`, only if the participant is
  * still in that status (deadline handlers must not remove someone who acked/resumed since).
  * If fewer than 2 participants remain present, the session ends: the rest are marked left (no
@@ -118,13 +129,29 @@ if #others / 3 < 2 and state ~= 'ended' then
     redis.call('HSET', KEYS[2], pid, cjson.encode(p))
   end
   redis.call('HSET', KEYS[1], 'state', 'ended', 'endedAt', now)
-  for i = 1, 3 do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[4])) end
+  for i = 1, 4 do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[4])) end
   ended = 1
 end
 
 local result = {'left', ended, redis.call('HGET', KEYS[1], 'startedAt') or '0'}
 for _, value in ipairs(others) do result[#result + 1] = value end
 return result
+`;
+
+/**
+ * KEYS: participants   ARGV: participantId, frameIntervalMs ('' = none), maxFrames ('' = none),
+ * tier. Sets the participant's frame schedule unless they left. Returns 1 if updated.
+ */
+const SESSION_SCHEDULE = `
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+if not raw then return 0 end
+local p = cjson.decode(raw)
+if p.status == 'left' then return 0 end
+p.frameIntervalMs = ARGV[2] ~= '' and tonumber(ARGV[2]) or cjson.null
+p.maxFrames = ARGV[3] ~= '' and tonumber(ARGV[3]) or cjson.null
+p.tier = ARGV[4]
+redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(p))
+return 1
 `;
 
 /** KEYS: meta, participants   ARGV: participantId, nowMs → 'acked'|'already'|'left'|'not_found' */
@@ -255,6 +282,10 @@ const participantRecordSchema = z.object({
   pool: z.enum(['normal', 'shadow']),
   interests: stringList,
   autoRequeue: z.boolean(),
+  // Moderation frame sampling (D-054); read by the API's frame upload endpoint.
+  frameIntervalMs: z.number().int().positive().nullable().optional(),
+  maxFrames: z.number().int().positive().nullable().optional(),
+  tier: z.enum(RISK_TIERS).optional(),
 });
 export type ParticipantRecord = z.output<typeof participantRecordSchema>;
 
@@ -264,6 +295,7 @@ export interface NewParticipant {
   pool: MatchPool;
   interests: string[];
   autoRequeue: boolean;
+  frames: FrameSchedule;
 }
 
 export interface PresentParticipant {
@@ -325,7 +357,8 @@ const deadlineMemberSchema = z
   .pipe(z.tuple([z.enum(['ack', 'grace']), z.uuid(), participantIdSchema]));
 
 export function createSessionStore(redis: Redis, options: { deadlineShards: number }) {
-  redis.defineCommand('gwSessionLeave', { numberOfKeys: 3, lua: SESSION_LEAVE });
+  redis.defineCommand('gwSessionLeave', { numberOfKeys: 4, lua: SESSION_LEAVE });
+  redis.defineCommand('gwSessionSchedule', { numberOfKeys: 1, lua: SESSION_SCHEDULE });
   redis.defineCommand('gwSessionAck', { numberOfKeys: 2, lua: SESSION_ACK });
   redis.defineCommand('gwSessionDisconnect', { numberOfKeys: 2, lua: SESSION_DISCONNECT });
   redis.defineCommand('gwSessionResume', { numberOfKeys: 2, lua: SESSION_RESUME });
@@ -423,6 +456,9 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           pool: p.pool,
           interests: p.interests,
           autoRequeue: p.autoRequeue,
+          frameIntervalMs: p.frames.frameIntervalMs,
+          maxFrames: p.frames.maxFrames,
+          tier: p.frames.tier,
         };
         multi.hset(keys.participants, p.participantId, JSON.stringify(record));
       }
@@ -453,6 +489,7 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
         keys.meta,
         keys.participants,
         keys.log,
+        keys.frames,
         participantId,
         reason,
         now,
@@ -551,6 +588,33 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
         maxParticipants: Number(raw.maxParticipants ?? '2'),
         commonInterests: z.array(z.string()).parse(JSON.parse(raw.commonInterests ?? '[]')),
       };
+    },
+
+    /** Changes a present participant's frame schedule (e.g. raised to the high tier). */
+    async setSchedule(
+      sessionId: string,
+      participantId: string,
+      schedule: FrameSchedule,
+    ): Promise<boolean> {
+      const updated = await redis.gwSessionSchedule(
+        sessionKeys(sessionId).participants,
+        participantId,
+        schedule.frameIntervalMs === null ? '' : String(schedule.frameIntervalMs),
+        schedule.maxFrames === null ? '' : String(schedule.maxFrames),
+        schedule.tier,
+      );
+      return updated === 1;
+    },
+
+    /** Moderation frames received per participant (`session:{id}:frames`, D-054). */
+    async frameStats(sessionId: string): Promise<Map<string, FrameStats>> {
+      const flat = await redis.hgetall(sessionKeys(sessionId).frames);
+      const stats = new Map<string, FrameStats>();
+      for (const [participantId, json] of Object.entries(flat)) {
+        const parsed = frameStatsSchema.safeParse(JSON.parse(json));
+        if (parsed.success) stats.set(participantId, parsed.data);
+      }
+      return stats;
     },
 
     /** Appends to the transcript ring buffer (last `maxMessages`). */

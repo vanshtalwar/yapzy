@@ -2,7 +2,7 @@
 
 import { MAX_MESSAGE_LENGTH } from '@app/shared';
 import { Button, ChatComposer, ChatShell, Label, Spinner, Switch } from '@app/ui';
-import { HomeIcon, PlayIcon, SquareIcon, WifiOffIcon } from 'lucide-react';
+import { FlagIcon, HomeIcon, PlayIcon, SquareIcon, WifiOffIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useId, useState } from 'react';
 
@@ -12,6 +12,7 @@ import { LANGUAGE_NAMES } from '../../lib/languages.ts';
 import { getSession } from '../../lib/session-token.ts';
 import { AgeGate } from '../age-gate.tsx';
 import { BlockedScreen } from '../blocked-screen.tsx';
+import { ReportDialog } from '../report/report-dialog.tsx';
 import { ChatEntries } from './chat-entries.tsx';
 import { NextButton } from './next-button.tsx';
 
@@ -47,6 +48,7 @@ export function ChatScreen() {
   const state = useChat((s) => s);
   const [draft, setDraft] = useState('');
   const [gateDismissed, setGateDismissed] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const autoRequeueId = useId();
 
   // Start (or re-attach to) the chat on mount; leave it on unmount. Without a session token
@@ -186,6 +188,17 @@ export function ChatScreen() {
         actions={
           matched ? (
             <>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Report"
+                onClick={() => {
+                  setReportOpen(true);
+                }}
+              >
+                <FlagIcon aria-hidden />
+                <span className="hidden sm:inline">Report</span>
+              </Button>
               <NextButton
                 onNext={() => {
                   void controller().next();
@@ -252,6 +265,7 @@ export function ChatScreen() {
           <ChatEntries entries={state.entries} peerTyping={matched && state.peerTyping} />
         )}
       </ChatShell>
+      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} video={false} />
       {gate}
     </>
   );

@@ -43,6 +43,32 @@ export type SeedEnv = z.output<typeof seedEnv>;
 
 const port = z.coerce.number().int().min(1).max(65_535);
 
+/** S3-compatible object storage (MinIO in development): report evidence and sampled frames. */
+export const s3Env = baseEnv.extend({
+  S3_ENDPOINT: z.url().default('http://localhost:9000'),
+  S3_REGION: z.string().min(1).default('us-east-1'),
+  S3_ACCESS_KEY: z.string().min(1),
+  S3_SECRET_KEY: z.string().min(8),
+  S3_BUCKET_EVIDENCE: z.string().min(3).default('evidence'),
+  S3_BUCKET_FRAMES: z.string().min(3).default('frames'),
+});
+export type S3Env = z.output<typeof s3Env>;
+
+const rate = z.coerce.number().min(0).max(1);
+
+/** Trust-score thresholds (0–100) shared by the gateway (pool, sampling) and the worker. */
+export const trustEnv = z.object({
+  /** Below this, a visitor is matched only within the shadow pool. */
+  TRUST_SHADOW_BELOW: z.coerce.number().int().min(0).max(100).default(10),
+  /** Below this, video is sampled at the `high` risk tier. */
+  TRUST_HIGH_RISK_BELOW: z.coerce.number().int().min(0).max(100).default(40),
+  /** From this (and no recent reports), video is only spot-checked (`trusted` tier). */
+  TRUST_TRUSTED_FROM: z.coerce.number().int().min(0).max(100).default(70),
+});
+
+/** Global cap on frames per second sent for server-side checks (D-054). */
+const frameBudget = z.coerce.number().min(1).max(100_000).default(50);
+
 const commaList = z.string().transform((value) =>
   value
     .split(',')
@@ -92,6 +118,7 @@ export const apiEnv = baseEnv.extend({
   TURN_PORT: port.default(3478),
   TURN_CREDENTIAL_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
   STUN_URLS: commaList.pipe(z.array(z.string().regex(/^stuns?:/, 'must start with stun:')).min(1)),
+  ...s3Env.shape,
 });
 
 export type ApiEnv = z.output<typeof apiEnv>;
@@ -150,6 +177,33 @@ export const gatewayEnv = baseEnv.extend({
   MM_BUCKET_HOP_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
   DEADLINE_SHARDS: z.coerce.number().int().min(1).max(1_024).default(16),
   STATS_COUNTER_SHARDS: z.coerce.number().int().min(1).max(1_024).default(16),
+  // --- Trust & safety (Part 8, D-054) ---
+  ...trustEnv.shape,
+  /** Frame-sampling interval per risk tier; `trusted: 0` = only spot checks. */
+  MOD_FRAME_INTERVALS_MS: z
+    .string()
+    .default('{"high": 20000, "new": 30000, "normal": 120000, "trusted": 0}')
+    .transform((value, context) => {
+      try {
+        return JSON.parse(value) as unknown;
+      } catch {
+        context.addIssue({ code: 'custom', message: 'must be JSON, e.g. {"high": 20000, ...}' });
+        return z.NEVER;
+      }
+    })
+    .pipe(
+      z.object({
+        high: z.number().int().min(5_000),
+        new: z.number().int().min(5_000),
+        normal: z.number().int().min(5_000),
+        trusted: z.number().int().min(0),
+      }),
+    ),
+  /** Share of `normal`-tier participants whose video is sampled at all. */
+  MOD_NORMAL_SAMPLE_RATE: rate.default(0.3),
+  /** Share of `trusted`-tier participants that get one spot-check frame. */
+  MOD_TRUSTED_SPOTCHECK_RATE: rate.default(0.1),
+  MOD_FRAME_BUDGET_PER_SEC: frameBudget,
 });
 
 export type GatewayEnv = z.output<typeof gatewayEnv>;
@@ -158,6 +212,20 @@ export const workerEnv = baseEnv.extend({
   DATABASE_URL: postgresUrl,
   REDIS_URL: redisUrl,
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
+  ...s3Env.shape,
+  ...trustEnv.shape,
+  MOD_FRAME_BUDGET_PER_SEC: frameBudget,
+  /** Classifier score from which an automatic flag also shadow-bans the visitor. */
+  MOD_AUTO_SHADOW_SCORE: rate.default(0.9),
+  /** Distinct reporters within 24 h that shadow-ban a visitor automatically. */
+  MOD_REPORT_THRESHOLD: z.coerce.number().int().min(1).max(100).default(3),
+  /** Length of automatic shadow bans. */
+  MOD_AUTO_BAN_HOURS: z.coerce.number().int().min(1).max(8_760).default(168),
+  /**
+   * Development only: the mock image classifier flags every frame of these visitors (comma
+   * list of visitor ids) so the moderation pipeline can be exercised without real content.
+   */
+  DEV_FORCE_FLAG_VISITOR_IDS: commaList.default([]),
 });
 
 export type WorkerEnv = z.output<typeof workerEnv>;

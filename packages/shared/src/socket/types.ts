@@ -44,6 +44,7 @@ export type PeerLeft = z.output<typeof schemas.peerLeftSchema>;
 export type PeerPresence = z.output<typeof schemas.peerPresenceSchema>;
 export type SessionResumed = z.output<typeof schemas.sessionResumedSchema>;
 export type SystemNotice = z.output<typeof schemas.systemNoticeSchema>;
+export type FrameSchedulePayload = z.output<typeof schemas.frameScheduleSchema>;
 export type Pong = z.output<typeof schemas.pongSchema>;
 /** Ack data for `chat:message`: the server-assigned id and timestamp of the stored message. */
 export type ChatMessageAck = z.output<typeof schemas.chatMessageAckSchema>;
