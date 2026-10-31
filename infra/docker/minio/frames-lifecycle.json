@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-frames-1d",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "Expiration": { "Days": 1 }
+    }
+  ]
+}

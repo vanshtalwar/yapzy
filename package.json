@@ -1,0 +1,36 @@
+{
+  "name": "randomchat",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=12"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml up -d --wait postgres redis coturn minio && docker compose --env-file .env -f infra/docker/docker-compose.yml run --rm minio-init",
+    "infra:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml down",
+    "infra:logs": "docker compose --env-file .env -f infra/docker/docker-compose.yml logs -f --tail=100",
+    "infra:ps": "docker compose --env-file .env -f infra/docker/docker-compose.yml ps",
+    "infra:reset": "docker compose --env-file .env -f infra/docker/docker-compose.yml down -v --remove-orphans",
+    "db:generate": "echo 'db:generate is implemented in Part 2' && exit 1",
+    "db:migrate": "echo 'db:migrate is implemented in Part 2' && exit 1",
+    "db:deploy": "echo 'db:deploy is implemented in Part 2' && exit 1",
+    "db:reset": "echo 'db:reset is implemented in Part 2' && exit 1",
+    "db:seed": "echo 'db:seed is implemented in Part 2' && exit 1",
+    "db:studio": "echo 'db:studio is implemented in Part 2' && exit 1"
+  },
+  "devDependencies": {
+    "@app/config": "workspace:*",
+    "prettier": "catalog:",
+    "turbo": "catalog:"
+  }
+}

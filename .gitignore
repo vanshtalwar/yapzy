@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+
+# env files (only the example is committed)
+.env
+.env.*
+!.env.example
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# tooling caches
+.turbo/
+.eslintcache
+coverage/
+
+# playwright
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json

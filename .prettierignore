@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+node_modules
+dist
+.next
+.turbo
+coverage
+# Planning docs are hand-formatted; keep them out of format churn.
+MASTER_IMPLEMENTATION_PROMPT.md
+CONTEXT.md
+CLAUDE.md
