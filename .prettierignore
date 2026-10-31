@@ -8,3 +8,5 @@ coverage
 MASTER_IMPLEMENTATION_PROMPT.md
 CONTEXT.md
 CLAUDE.md
+**/generated
+**/prisma/migrations

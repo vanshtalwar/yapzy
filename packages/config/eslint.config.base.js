@@ -14,7 +14,9 @@ import tseslint from 'typescript-eslint';
  */
 export function createEslintConfig({ tsconfigRootDir }) {
   return defineConfig(
-    { ignores: ['**/dist/**', '**/.next/**', '**/coverage/**', '**/.turbo/**'] },
+    {
+      ignores: ['**/dist/**', '**/.next/**', '**/coverage/**', '**/.turbo/**', '**/generated/**'],
+    },
     js.configs.recommended,
     tseslint.configs.strictTypeChecked,
     tseslint.configs.stylisticTypeChecked,

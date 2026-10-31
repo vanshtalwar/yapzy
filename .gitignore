@@ -30,3 +30,6 @@ playwright/.cache/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# generated code (Prisma client: `pnpm db:generate`, also run by turbo before lint/typecheck/test/build)
+**/src/generated/

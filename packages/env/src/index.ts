@@ -9,8 +9,17 @@ export { applyEnvFileContent, findWorkspaceRoot, loadRootEnvFile } from './load-
 export {
   type BaseEnv,
   baseEnv,
+  type DatabaseEnv,
+  databaseEnv,
+  databaseTestEnv,
+  hashPepperEnv,
   LOG_LEVELS,
   type LogLevel,
   NODE_ENVS,
   type NodeEnv,
+  type RedisEnv,
+  redisEnv,
+  redisTestEnv,
+  type SeedEnv,
+  seedEnv,
 } from './schemas.ts';

@@ -21,12 +21,13 @@
     "infra:logs": "docker compose --env-file .env -f infra/docker/docker-compose.yml logs -f --tail=100",
     "infra:ps": "docker compose --env-file .env -f infra/docker/docker-compose.yml ps",
     "infra:reset": "docker compose --env-file .env -f infra/docker/docker-compose.yml down -v --remove-orphans",
-    "db:generate": "echo 'db:generate is implemented in Part 2' && exit 1",
-    "db:migrate": "echo 'db:migrate is implemented in Part 2' && exit 1",
-    "db:deploy": "echo 'db:deploy is implemented in Part 2' && exit 1",
-    "db:reset": "echo 'db:reset is implemented in Part 2' && exit 1",
-    "db:seed": "echo 'db:seed is implemented in Part 2' && exit 1",
-    "db:studio": "echo 'db:studio is implemented in Part 2' && exit 1"
+    "db:generate": "pnpm --filter @app/db generate",
+    "db:migrate": "pnpm --filter @app/db migrate",
+    "db:migrate:test": "pnpm --filter @app/db migrate:test",
+    "db:deploy": "pnpm --filter @app/db migrate:deploy",
+    "db:reset": "pnpm --filter @app/db reset",
+    "db:seed": "pnpm --filter @app/db seed",
+    "db:studio": "pnpm --filter @app/db studio"
   },
   "devDependencies": {
     "@app/config": "workspace:*",

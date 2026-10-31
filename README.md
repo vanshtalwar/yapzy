@@ -19,6 +19,8 @@ Turborepo, TypeScript everywhere.
 pnpm install
 cp .env.example .env    # then replace the "dev-only" secrets, e.g. `openssl rand -hex 32`
 pnpm infra:up           # Postgres, Redis, coturn, MinIO (+ bucket bootstrap)
+pnpm db:migrate         # apply migrations to the dev database
+pnpm db:seed            # dev admin + sample visitors, reports, a shadow ban
 ```
 
 If port 5432 is already used (e.g. Homebrew Postgres), set `POSTGRES_PORT=5433` in `.env` and
@@ -28,19 +30,20 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 
 ## Scripts
 
-| Command                        | What it does                                                   |
-| ------------------------------ | -------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (apps arrive from Part 3)           |
-| `pnpm build`                   | Build all apps                                                 |
-| `pnpm lint`                    | ESLint (type-aware) in every package                           |
-| `pnpm typecheck`               | `tsc` in every package                                         |
-| `pnpm test`                    | Vitest in every package                                        |
-| `pnpm format` / `format:check` | Prettier write / check                                         |
-| `pnpm infra:up`                | Start infrastructure, wait until healthy, create MinIO buckets |
-| `pnpm infra:down`              | Stop infrastructure (keeps data)                               |
-| `pnpm infra:reset`             | Stop infrastructure and **delete all data volumes**            |
-| `pnpm infra:logs` / `infra:ps` | Follow logs / show container status                            |
-| `pnpm db:*`                    | Database scripts (Part 2)                                      |
+| Command                        | What it does                                                        |
+| ------------------------------ | ------------------------------------------------------------------- |
+| `pnpm dev`                     | Run all apps in watch mode (apps arrive from Part 3)                |
+| `pnpm build`                   | Build all apps                                                      |
+| `pnpm lint`                    | ESLint (type-aware) in every package                                |
+| `pnpm typecheck`               | `tsc` in every package                                              |
+| `pnpm test`                    | Vitest in every package                                             |
+| `pnpm format` / `format:check` | Prettier write / check                                              |
+| `pnpm infra:up`                | Start infrastructure, wait until healthy, create MinIO buckets      |
+| `pnpm infra:down`              | Stop infrastructure (keeps data)                                    |
+| `pnpm infra:reset`             | Stop infrastructure and **delete all data volumes**                 |
+| `pnpm infra:logs` / `infra:ps` | Follow logs / show container status                                 |
+| `pnpm db:migrate` / `db:seed`  | Apply migrations / load idempotent dev data (`db:studio` to browse) |
+| `pnpm db:generate`             | Regenerate the Prisma client after editing the schema               |
 
 Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 
@@ -48,7 +51,7 @@ Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnp
 
 ```
 apps/        user-facing and backend services (from Part 3)
-packages/    config, env, logger, shared (+ db, redis, matchmaking, moderation later)
+packages/    config, env, logger, shared, db (Prisma), redis (+ matchmaking, moderation later)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init
 tools/ e2e/  bots and end-to-end tests (later parts)
 ```

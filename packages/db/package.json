@@ -1,0 +1,39 @@
+{
+  "name": "@app/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:test": "DB_TARGET=test prisma migrate deploy",
+    "reset": "prisma migrate reset --force",
+    "seed": "prisma db seed",
+    "studio": "prisma studio",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "pnpm run migrate:test && vitest run"
+  },
+  "dependencies": {
+    "@app/env": "workspace:*",
+    "@prisma/adapter-pg": "catalog:",
+    "@prisma/client": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@app/config": "workspace:*",
+    "@app/logger": "workspace:*",
+    "@app/shared": "workspace:*",
+    "@node-rs/argon2": "catalog:",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "prisma": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

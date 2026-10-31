@@ -1,0 +1,325 @@
+// RandomChat data model. Postgres holds metadata, reports, bans, moderation and admin data
+// only: chat content is never stored here except as report evidence (Report.transcript).
+// Naming: PascalCase models/camelCase fields in TypeScript, snake_case in SQL (@@map/@map).
+// Extra CHECK constraints live in the migration SQL (Prisma can't express them).
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  runtime             = "nodejs"
+  moduleFormat        = "esm"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------------------
+
+enum ChatMode {
+  TEXT
+  VIDEO
+
+  @@map("chat_mode")
+}
+
+/// MESH = P2P between all participants. SFU reserved for 4+ participants (D-011).
+enum SessionTopology {
+  MESH
+  SFU
+
+  @@map("session_topology")
+}
+
+enum LeaveReason {
+  SKIP
+  STOP
+  DISCONNECT
+  RTC_FAILED
+  REPORTED
+  BANNED
+  SERVER_RESTART
+
+  @@map("leave_reason")
+}
+
+enum ReportReason {
+  NUDITY_SEXUAL
+  MINOR_SAFETY
+  HARASSMENT
+  HATE
+  SPAM_SCAM
+  VIOLENCE_SELF_HARM
+  OTHER
+
+  @@map("report_reason")
+}
+
+enum ReportStatus {
+  OPEN
+  IN_REVIEW
+  ACTIONED
+  DISMISSED
+
+  @@map("report_status")
+}
+
+enum EvidenceType {
+  FRAME
+  TRANSCRIPT
+  AUTO_FLAG_FRAME
+
+  @@map("evidence_type")
+}
+
+enum ModerationSource {
+  CLIENT_NSFW
+  SERVER_CLASSIFIER
+  TEXT_FILTER
+  HASH_MATCH
+  REPORT_THRESHOLD
+
+  @@map("moderation_source")
+}
+
+enum ModerationAction {
+  NONE
+  MESSAGE_BLOCKED
+  TRUST_DECREASED
+  SHADOW_BANNED
+  BANNED
+  ESCALATED
+
+  @@map("moderation_action")
+}
+
+/// HARD = cannot use the service. SHADOW = only matched with other shadow-pool visitors.
+enum BanType {
+  HARD
+  SHADOW
+
+  @@map("ban_type")
+}
+
+enum AdminRole {
+  ADMIN
+  MODERATOR
+
+  @@map("admin_role")
+}
+
+// ---------------------------------------------------------------------------------------
+// Visitors & sessions
+// ---------------------------------------------------------------------------------------
+
+/// Anonymous user. Identified by HMAC(deviceId); raw device IDs and IPs are never stored.
+model Visitor {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  deviceIdHash   String    @unique @map("device_id_hash") @db.Char(64)
+  lastIpHash     String?   @map("last_ip_hash") @db.Char(64)
+  firstSeenAt    DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  ageConfirmedAt DateTime? @map("age_confirmed_at") @db.Timestamptz(3)
+  tosVersion     String?   @map("tos_version") @db.VarChar(32)
+  /// 0–100; lower = riskier. Cached in Redis (`trust:<visitorId>`).
+  trustScore     Int       @default(50) @map("trust_score")
+  /// ISO 3166-1 alpha-2, derived from IP at session creation (never the IP itself).
+  country        String?   @db.Char(2)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  participations   SessionParticipant[]
+  reportsFiled     Report[]             @relation("ReportReporter")
+  reportsReceived  Report[]             @relation("ReportReported")
+  moderationEvents ModerationEvent[]
+  bans             Ban[]
+
+  @@index([lastIpHash])
+  @@map("visitors")
+}
+
+/// Metadata of one chat session (id = gateway sessionId). Never contains messages.
+model ChatSessionLog {
+  id              String          @id @db.Uuid
+  mode            ChatMode
+  topology        SessionTopology @default(MESH)
+  maxParticipants Int             @default(2) @map("max_participants")
+  commonInterests String[]        @default([]) @map("common_interests")
+  startedAt       DateTime        @map("started_at") @db.Timestamptz(3)
+  endedAt         DateTime?       @map("ended_at") @db.Timestamptz(3)
+
+  participants SessionParticipant[]
+
+  @@index([startedAt])
+  @@map("chat_session_logs")
+}
+
+/// One visitor's membership in a session. N per session, so 3-person calls need no redesign.
+model SessionParticipant {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  sessionId     String       @map("session_id") @db.Uuid
+  visitorId     String       @map("visitor_id") @db.Uuid
+  /// Random per-session id shown to other participants instead of the visitor id.
+  participantId String       @map("participant_id") @db.VarChar(32)
+  joinedAt      DateTime     @map("joined_at") @db.Timestamptz(3)
+  leftAt        DateTime?    @map("left_at") @db.Timestamptz(3)
+  leaveReason   LeaveReason? @map("leave_reason")
+
+  session ChatSessionLog @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  visitor Visitor        @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, participantId])
+  @@index([visitorId])
+  @@map("session_participants")
+}
+
+// ---------------------------------------------------------------------------------------
+// Trust & safety
+// ---------------------------------------------------------------------------------------
+
+model Report {
+  id                    String       @id @default(uuid(7)) @db.Uuid
+  /// No FK: the session log is written asynchronously and may not exist yet.
+  sessionId             String       @map("session_id") @db.Uuid
+  reporterId            String       @map("reporter_id") @db.Uuid
+  /// Resolved server-side from reportedParticipantId; never sent by the client.
+  reportedId            String       @map("reported_id") @db.Uuid
+  reportedParticipantId String       @map("reported_participant_id") @db.VarChar(32)
+  reason                ReportReason
+  details               String?      @db.VarChar(500)
+  status                ReportStatus @default(OPEN)
+  /// Higher = review sooner (e.g. MINOR_SAFETY, repeat offenders).
+  priority              Int          @default(0)
+  /// Evidence snapshot of the Redis transcript ring buffer at report time.
+  transcript            Json?
+  assignedToId          String?      @map("assigned_to_id") @db.Uuid
+  resolvedAt            DateTime?    @map("resolved_at") @db.Timestamptz(3)
+  resolutionNote        String?      @map("resolution_note") @db.VarChar(2000)
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  reporter   Visitor    @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported   Visitor    @relation("ReportReported", fields: [reportedId], references: [id], onDelete: Cascade)
+  assignedTo AdminUser? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  evidence   Evidence[]
+
+  @@index([status, priority(sort: Desc), createdAt])
+  @@index([reportedId, createdAt])
+  @@index([reporterId, createdAt])
+  @@index([sessionId])
+  @@map("reports")
+}
+
+/// Pointer to an object in MinIO (bucket per type). Belongs to a report or a moderation event.
+model Evidence {
+  id                String       @id @default(uuid(7)) @db.Uuid
+  reportId          String?      @map("report_id") @db.Uuid
+  moderationEventId String?      @map("moderation_event_id") @db.Uuid
+  type              EvidenceType
+  storageKey        String       @map("storage_key") @db.VarChar(512)
+  sha256            String       @db.Char(64)
+  expiresAt         DateTime?    @map("expires_at") @db.Timestamptz(3)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  report          Report?          @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  moderationEvent ModerationEvent? @relation(fields: [moderationEventId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([moderationEventId])
+  @@index([expiresAt])
+  @@map("evidence")
+}
+
+model ModerationEvent {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  visitorId   String           @map("visitor_id") @db.Uuid
+  sessionId   String?          @map("session_id") @db.Uuid
+  source      ModerationSource
+  label       String           @db.VarChar(64)
+  score       Float
+  actionTaken ModerationAction @default(NONE) @map("action_taken")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  visitor  Visitor    @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  evidence Evidence[]
+
+  @@index([visitorId, createdAt])
+  @@index([createdAt])
+  @@map("moderation_events")
+}
+
+/// At least one of visitorId / deviceIdHash / ipHash is required (CHECK + assertBanHasTarget).
+model Ban {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  visitorId        String?   @map("visitor_id") @db.Uuid
+  deviceIdHash     String?   @map("device_id_hash") @db.Char(64)
+  ipHash           String?   @map("ip_hash") @db.Char(64)
+  type             BanType
+  reason           String    @db.VarChar(500)
+  /// null = automated ban.
+  createdByAdminId String?   @map("created_by_admin_id") @db.Uuid
+  /// null = permanent.
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz(3)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedByAdminId String?   @map("revoked_by_admin_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  visitor        Visitor?   @relation(fields: [visitorId], references: [id], onDelete: SetNull)
+  createdByAdmin AdminUser? @relation("BanCreatedBy", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  revokedByAdmin AdminUser? @relation("BanRevokedBy", fields: [revokedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([visitorId])
+  @@index([deviceIdHash])
+  @@index([ipHash])
+  @@index([expiresAt])
+  @@map("bans")
+}
+
+// ---------------------------------------------------------------------------------------
+// Admin
+// ---------------------------------------------------------------------------------------
+
+model AdminUser {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  /// Always stored lowercased (CHECK constraint); compare with a lowercased input.
+  email        String    @unique @db.VarChar(254)
+  /// argon2id PHC string.
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  role         AdminRole @default(MODERATOR)
+  /// Encrypted at rest from Part 9.
+  totpSecret   String?   @map("totp_secret") @db.VarChar(255)
+  totpEnabled  Boolean   @default(false) @map("totp_enabled")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
+  disabledAt   DateTime? @map("disabled_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  assignedReports Report[]
+  bansCreated     Ban[]      @relation("BanCreatedBy")
+  bansRevoked     Ban[]      @relation("BanRevokedBy")
+  auditLogs       AuditLog[]
+
+  @@map("admin_users")
+}
+
+/// Append-only record of every admin action.
+model AuditLog {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  adminId    String   @map("admin_id") @db.Uuid
+  action     String   @db.VarChar(64)
+  targetType String   @map("target_type") @db.VarChar(32)
+  targetId   String?  @map("target_id") @db.VarChar(128)
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@index([adminId, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

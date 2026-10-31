@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import { createEnv, EnvValidationError } from './create-env.ts';
 import { applyEnvFileContent, findWorkspaceRoot } from './load-env-file.ts';
-import { baseEnv } from './schemas.ts';
+import { baseEnv, databaseEnv, redisEnv } from './schemas.ts';
 
 const serviceEnv = baseEnv.extend({
   JWT_SECRET: z.string().min(32),
@@ -73,5 +73,27 @@ describe('findWorkspaceRoot', () => {
     const nested = join(root, 'apps', 'api', 'src');
     mkdirSync(nested, { recursive: true });
     expect(findWorkspaceRoot(nested)).toBe(root);
+  });
+});
+
+describe('service schemas', () => {
+  it('accepts postgres and redis URLs', () => {
+    expect(
+      createEnv(databaseEnv, {
+        source: { DATABASE_URL: 'postgresql://app:app@localhost:5432/app' },
+      }).DATABASE_URL,
+    ).toContain('postgresql://');
+    expect(
+      createEnv(redisEnv, { source: { REDIS_URL: 'redis://localhost:6379/15' } }).REDIS_URL,
+    ).toBe('redis://localhost:6379/15');
+  });
+
+  it('rejects URLs with the wrong scheme', () => {
+    expect(() =>
+      createEnv(databaseEnv, { source: { DATABASE_URL: 'mysql://localhost/app' } }),
+    ).toThrow(/DATABASE_URL: must be a postgresql:\/\/ URL/);
+    expect(() => createEnv(redisEnv, { source: { REDIS_URL: 'http://localhost' } })).toThrow(
+      /REDIS_URL/,
+    );
   });
 });
