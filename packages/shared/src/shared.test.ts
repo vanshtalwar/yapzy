@@ -47,17 +47,19 @@ describe('error codes', () => {
 
 describe('schemas', () => {
   it('normalizes interests and drops duplicates', () => {
-    expect(interestsSchema.parse([' Music', 'music', 'Indie Games'])).toEqual([
+    expect(interestsSchema.parse([' Music', 'music', 'Indie Games', 'indie_games!'])).toEqual([
       'music',
-      'indie games',
+      'indie-games',
     ]);
+    expect(interestSchema.parse('  C++ / Rust  ')).toBe('c-rust');
   });
 
-  it('rejects too many, too long, empty or symbol-only interests', () => {
+  it('rejects too many, too long, empty or symbol-only interests and strips markup', () => {
     expect(interestsSchema.safeParse(['a', 'b', 'c', 'd', 'e', 'f']).success).toBe(false);
     expect(interestSchema.safeParse('x'.repeat(MAX_INTEREST_LENGTH + 1)).success).toBe(false);
     expect(interestSchema.safeParse('   ').success).toBe(false);
-    expect(interestSchema.safeParse('<script>').success).toBe(false);
+    expect(interestSchema.safeParse('{}:!!').success).toBe(false);
+    expect(interestSchema.parse('<script>')).toBe('script');
   });
 
   it('accepts non-latin interests', () => {

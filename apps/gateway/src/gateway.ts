@@ -4,11 +4,14 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { type PrismaClient } from '@app/db';
 import { type GatewayEnv } from '@app/env';
 import { type Logger } from '@app/logger';
+import { createMatchmaker } from '@app/matchmaking';
 import { createBanChecker } from '@app/moderation';
 import { createRedis, GW_CONTROL_CHANNEL, subscribeControl } from '@app/redis';
 import { NOTICE_CODES } from '@app/shared';
+import { BULLMQ_PREFIX, QUEUE_NAMES, type SessionLogJob } from '@app/shared/jobs';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import { createShardedAdapter } from '@socket.io/redis-adapter';
+import { Queue } from 'bullmq';
 import { createClient } from 'redis';
 import { Server } from 'socket.io';
 
@@ -17,7 +20,10 @@ import { createClientIpResolver } from './client-ip.ts';
 import { registerHandlers } from './handlers/index.ts';
 import { startPresence } from './presence.ts';
 import { attachGuards, type GuardOptions, markSocketReady } from './register-handler.ts';
+import { createLifecycle } from './sessions/lifecycle.ts';
+import { createSessionStore } from './sessions/store.ts';
 import { createSingleSocketPolicy } from './single-socket.ts';
+import { startTicketSweeper } from './sweeper.ts';
 import { type GatewayServer } from './types.ts';
 
 export const GATEWAY_DEFAULTS = {
@@ -28,6 +34,7 @@ export const GATEWAY_DEFAULTS = {
   drainTimeoutMs: 10_000,
   bucket: { capacity: 20, refillPerSecond: 5 },
   abuse: { capacity: 30, refillPerSecond: 0.5 },
+  sweepIntervalMs: 30_000,
 } as const;
 
 export interface GatewayOptions {
@@ -37,6 +44,9 @@ export interface GatewayOptions {
   presenceIntervalMs?: number;
   drainTimeoutMs?: number;
   bucket?: GuardOptions['bucket'];
+  /** Defaults to INTEREST_FALLBACK_MS. */
+  interestFallbackMs?: number;
+  sweepIntervalMs?: number;
 }
 
 export interface GatewayDeps {
@@ -44,7 +54,7 @@ export interface GatewayDeps {
   nodeId: string;
   prisma: PrismaClient;
   logger: Logger;
-  /** Redis URL for app data (presence, socket keys, ban cache); defaults to REDIS_URL. */
+  /** Redis URL for app data (presence, sessions, queues, jobs); defaults to REDIS_URL. */
   redisUrl?: string;
   now?: () => Date;
   options?: GatewayOptions;
@@ -179,6 +189,42 @@ export async function createGateway(deps: GatewayDeps) {
     logger,
   });
 
+  const store = createSessionStore(redis);
+  const matchmaker = createMatchmaker(redis, { recentPairTtlMs: config.RECENT_PAIR_TTL_MS });
+  const sessionLogQueue = new Queue<SessionLogJob>(QUEUE_NAMES.SESSION_LOG, {
+    connection: { url: deps.redisUrl ?? config.REDIS_URL },
+    prefix: BULLMQ_PREFIX,
+    defaultJobOptions: {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 1_000 },
+      removeOnComplete: { age: 3_600, count: 10_000 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  const lifecycle = createLifecycle({
+    io,
+    redis,
+    store,
+    matchmaker,
+    nodeId,
+    interestFallbackMs: options.interestFallbackMs ?? config.INTEREST_FALLBACK_MS,
+    // jobId = sessionId: a duplicate enqueue for the same session is ignored by BullMQ.
+    enqueueSessionLog: async (job) => {
+      await sessionLogQueue.add(QUEUE_NAMES.SESSION_LOG, job, { jobId: job.sessionId });
+    },
+    logger,
+    now,
+  });
+  const sweeper = startTicketSweeper({
+    redis,
+    matchmaker,
+    nodeId,
+    intervalMs: options.sweepIntervalMs ?? GATEWAY_DEFAULTS.sweepIntervalMs,
+    logger,
+  });
+  // First hook: end sessions and cancel tickets of local visitors before they are told to leave.
+  shutdownHooks.push(() => lifecycle.endAllLocal());
+
   io.on('connection', (socket) => {
     const { visitorId } = socket.data;
     // Listeners first (synchronously) so no early event is lost while we await Redis below.
@@ -188,25 +234,34 @@ export async function createGateway(deps: GatewayDeps) {
       abuse: GATEWAY_DEFAULTS.abuse,
       logger,
     });
-    registerHandlers(socket, now);
+    registerHandlers(socket, { lifecycle, store, now, logger });
 
     socket.on('disconnect', (reason) => {
       logger.debug({ visitorId, socketId: socket.id, reason }, 'socket disconnected');
-      singleSocket.release(socket).catch((error: unknown) => {
-        logger.warn({ err: error, visitorId }, 'failed to release socket key');
+      // During shutdown the hook has already cleaned up and Redis is about to close.
+      if (draining) return;
+      (async () => {
+        await lifecycle.onDisconnect(socket); // needs the socket key, so before release
+        await singleSocket.release(socket);
+      })().catch((error: unknown) => {
+        logger.warn({ err: error, visitorId }, 'disconnect clean-up failed');
       });
     });
 
-    const claimed = singleSocket.claim(socket).then(
-      () => {
-        logger.debug({ visitorId, socketId: socket.id, pool: socket.data.pool }, 'connected');
-      },
-      (error: unknown) => {
-        logger.error({ err: error, visitorId }, 'failed to register socket; disconnecting');
-        socket.disconnect(true);
-        throw error;
-      },
-    );
+    // Claim the visitor (kick older sockets), then drop whatever the previous socket left behind.
+    const claimed = singleSocket
+      .claim(socket)
+      .then(() => lifecycle.reconcile(socket))
+      .then(
+        () => {
+          logger.debug({ visitorId, socketId: socket.id, pool: socket.data.pool }, 'connected');
+        },
+        (error: unknown) => {
+          logger.error({ err: error, visitorId }, 'failed to register socket; disconnecting');
+          socket.disconnect(true);
+          throw error;
+        },
+      );
     // Handlers that await `claimed` see the rejection; this only prevents an unhandled one.
     claimed.catch(() => undefined);
     markSocketReady(socket, claimed);
@@ -236,12 +291,14 @@ export async function createGateway(deps: GatewayDeps) {
     while (io.of('/').sockets.size > 0 && Date.now() < deadline) await sleep(100);
 
     io.local.disconnectSockets(true);
+    sweeper.stop();
     await unsubscribeControl().catch(() => undefined);
     await presence.stop().catch((error: unknown) => {
       logger.warn({ err: error }, 'presence cleanup failed');
     });
     await io.close(); // closes the HTTP server and the adapter
     await Promise.allSettled([
+      sessionLogQueue.close(),
       redis.quit(),
       controlSubscriber.quit(),
       adapterPub.close(),
@@ -255,6 +312,8 @@ export async function createGateway(deps: GatewayDeps) {
     httpServer,
     nodeId,
     presence,
+    sweeper,
+    sessionLogQueue,
     listen(port: number, host?: string): Promise<number> {
       return new Promise((resolve, reject) => {
         httpServer.once('error', reject);

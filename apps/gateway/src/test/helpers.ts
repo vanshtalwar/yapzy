@@ -43,7 +43,10 @@ export const appRedis = createRedis(appRedisUrl, { connectionName: 'gateway-test
 const runId = randomUUID().slice(0, 8);
 export const CONTROL_CHANNEL = `test:gw:control:${runId}`;
 
-export function startGateway(name: string, options: { drainTimeoutMs?: number } = {}) {
+export function startGateway(
+  name: string,
+  options: { drainTimeoutMs?: number; interestFallbackMs?: number } = {},
+) {
   return (async (): Promise<{ gateway: Gateway; port: number; url: string }> => {
     const gateway = await createGateway({
       config: testConfig,
@@ -56,6 +59,7 @@ export function startGateway(name: string, options: { drainTimeoutMs?: number } 
         adapterChannelPrefix: `test-io-${runId}`,
         presenceIntervalMs: 200,
         drainTimeoutMs: options.drainTimeoutMs ?? 300,
+        interestFallbackMs: options.interestFallbackMs ?? 300,
       },
     });
     const port = await gateway.listen(0, '127.0.0.1');

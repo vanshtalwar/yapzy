@@ -150,3 +150,5 @@ export const systemNoticeSchema = z.object({
 });
 
 export const pongSchema = z.object({ serverTime: z.number().int() });
+
+export const chatMessageAckSchema = z.object({ id: z.string().min(1), at: z.iso.datetime() });

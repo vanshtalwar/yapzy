@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (10 parts + optional future Part 11, executed one at a time) |
 | Planned future feature | Add a 3rd random person to a running video call (Part 11) — Parts 1–10 must stay participant-list based |
-| Current status | Parts 1–4 done — **next: Part 5** (Matchmaking & chat session lifecycle) |
+| Current status | Parts 1–5 done — **next: Part 6** (Web app & end-to-end text chat) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -23,7 +23,7 @@
 | 2 | Database & shared server packages | ✅ Done | 2026-10-31 | Prisma 7.10.1 (driver adapter), CHECK constraints in migration SQL, ioredis 6 pinned to RESP2 (D-019) |
 | 3 | REST API service | ✅ Done | 2026-10-31 | Fastify 5; TURN creds verified against live coturn; real Turnstile siteverify call in dev |
 | 4 | Real-time gateway core | ✅ Done | 2026-10-31 | Two nodes verified live (stats 3+2=5); sharded adapter on node-redis (D-031); `VALIDATION_FAILED` used instead of spec's `VALIDATION_ERROR` (D-034) |
-| 5 | Matchmaking & chat session lifecycle | ⬜ Not started | | |
+| 5 | Matchmaking & chat session lifecycle | ✅ Done | 2026-10-31 | Bots: 50 clients × 2 min × 2 nodes → 2 342 sessions, 0 asymmetric, 0 protocol errors, 8 202/8 202 messages delivered, p50 13 ms / p95 2.5 s to match |
 | 6 | Web app & text chat | ⬜ Not started | | |
 | 7 | Video chat (WebRTC) | ⬜ Not started | | |
 | 8 | Trust & safety | ⬜ Not started | | |
@@ -60,7 +60,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Real-time | Socket.io + `@socket.io/redis-adapter` (sharded) | socket.io 4.8.4 (+ socket.io-client 4.8.4), @socket.io/redis-adapter 8.3 `createShardedAdapter` (`subscriptionMode: 'dynamic'`) on **node-redis 6.3** (adapter only; D-031), proxy-addr 2 |
 | Database | PostgreSQL + Prisma ORM | Postgres 18.6 (image `postgres:18.6-alpine`); Prisma **7.10.1** (`prisma-client` generator, `@prisma/adapter-pg` driver adapter, pinned exactly — D-020) |
 | Cache / queues / matchmaking | Redis (≥ 7.2) + ioredis + Lua | Redis 8.10.3 (`redis:8.10.3-alpine`); ioredis **6.0** (RESP2 forced — D-019) |
-| Background jobs | BullMQ (`apps/worker`) | TBD |
+| Background jobs | BullMQ (`apps/worker`) | BullMQ 6.5 (queue prefix `{bull}`), connection by URL; ulid 3 for message ids |
 | Object storage | MinIO (S3-compatible) | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, `pgsty/mc:RELEASE.2026-10-26T00-00-00Z` (D-014) |
 | Media | WebRTC (P2P) + coturn (TURN/STUN) | coturn 4.18 (`coturn/coturn:4.18-alpine`) |
 | Auth | `jose` JWT (visitors), argon2id + TOTP (admins) | jose 6.2 (HS256 visitor tokens, `@app/shared/visitor-token`); `@node-rs/argon2` 2.2 (argon2id default) |
@@ -89,16 +89,20 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/services/    turnstile.ts, bans.ts (ban checker + Redis cache), turn.ts (coturn creds), online.ts
 │     ├─ src/test/        helpers.ts (test config, fakes, Redis DB 14); src/**/*.test.ts
 │  │  └─ tsup.config.ts   bundles @app/* into dist/server.js; npm deps stay external
-│  └─ gateway/            Socket.io gateway (port 4001; second node 4011)
+│  ├─ gateway/            Socket.io gateway (port 4001; second node 4011)
 │     ├─ src/server.ts    entry: env, node id, logger, prisma singleton, listen, SIGTERM/SIGINT → shutdown()
 │     ├─ src/gateway.ts   createGateway(deps): HTTP /health /ready, Socket.io + sharded adapter, origin check,
 │     │                   handshake, single-socket policy, presence, onShutdown hooks, shutdown()
 │     ├─ src/auth.ts      handshake middleware (JWT, ban check, socket.data)
 │     ├─ src/register-handler.ts  attachGuards / registerHandler / markSocketReady (validation, token bucket, abuse)
-│     ├─ src/handlers/    index.ts: EVENT_COSTS, ping, NOT_IMPLEMENTED stubs (replaced in Part 5)
+│     ├─ src/handlers/    index.ts: EVENT_COSTS + all client events (moderation:signal still a stub)
+│     ├─ src/sessions/    store.ts (refs, session create/leave Lua, context, transcript), lifecycle.ts
+│     │                   (queue → match → session → leave orchestration, per-visitor locks, timers)
+│     ├─ src/sweeper.ts   stale-ticket sweeper (30 s, SET NX PX lock)
 │     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts
 │     ├─ src/test/        helpers.ts (2 real nodes on random ports, Redis DB 13, unique channels)
-│     └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
+│  │  └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
+│  └─ worker/             BullMQ consumers: src/worker.ts (createWorkers), src/jobs/session-log.ts, src/server.ts
 ├─ packages/
 │  ├─ config/             tsconfig.base/node/nextjs.json, eslint.config.base.js (createEslintConfig), prettier.config.js
 │  ├─ env/                createEnv(schema), EnvValidationError, root .env loader; schemas: baseEnv, databaseEnv,
@@ -106,10 +110,13 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ logger/             createLogger({ service, level, nodeEnv, destination }), REDACT_PATHS
 │  ├─ shared/             constants.ts, errors.ts (ErrorCode), schemas.ts, socket/ (events.ts names + NOTICE_CODES,
 │  │                      schemas.ts payload Zod schemas both directions, types.ts event maps/acks/SocketData);
-│  │                      server-only subpaths `@app/shared/crypto` (hmacHash),
+│  │                      server-only subpaths `@app/shared/crypto` (hmacHash), `@app/shared/jobs`
+│  │                      (QUEUE_NAMES, BULLMQ_PREFIX, LEAVE_REASONS, sessionLogJobSchema),
 │  │                      `@app/shared/visitor-token` (createVisitorTokenService: issue/verify visitor JWTs)
 │  ├─ db/                 prisma.config.ts, prisma/schema.prisma, prisma/migrations/, prisma/seed.ts,
 │  │                      src/client.ts (createPrismaClient), src/prisma.ts (singleton), src/ban.ts, src/generated/ (gitignored)
+│  ├─ matchmaking/        lua.ts (ENQUEUE_OR_MATCH, CANCEL_TICKET, DROP_TICKETS_IF_UNCHANGED), matchmaker.ts
+│  │                      (createMatchmaker: enqueueOrMatch, promoteToAny, cancelTicket, getTicket, sweepStale), ticket.ts
 │  ├─ moderation/         bans.ts: createBanChecker (shared by api + gateway); text filter etc. arrive in Part 8
 │  └─ redis/              src/client.ts (createRedis), keys.ts (ALL key builders), json.ts (Zod JSON helpers),
 │                         control.ts (gw:control pub/sub), bans.ts (ban cache schema + TTLs), ttl.ts,
@@ -120,7 +127,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ postgres/init/01-create-test-db.sql   (creates app_test on first boot)
 │  └─ minio/init.sh, minio/frames-lifecycle.json
 ├─ tools/
-│  └─ bots/               `pnpm --filter @app/bots connect [--count N] [--gateway URL,URL] [--api URL]`
+│  └─ bots/               `connect` (hold N connections) and `bots` (full chat-flow load test; `pnpm bots -- …`)
 ├─ package.json  pnpm-workspace.yaml (workspaces + version catalog)  turbo.json
 ├─ prettier.config.js  .prettierignore  .editorconfig  .nvmrc  .npmrc  .gitignore
 └─ .env.example  README.md  CONTEXT.md  CLAUDE.md  MASTER_IMPLEMENTATION_PROMPT.md
@@ -159,6 +166,25 @@ Conventions established in Part 4:
 - Never emit to a socket id across nodes; emit to `visitorRoom(visitorId)` (works on any node through the sharded adapter). Use `io.local` only for node-local work (kicks, shutdown).
 - Gateway tests start real gateway instances (`startGateway`) with unique control/adapter channel names per run, so they can run while a dev gateway is up.
 
+Conventions established in Part 5:
+- Visitor state is **derived from Redis on every lifecycle event** (`store.visitorState`): `visitor:<id>:session` → in_session, else `visitor:<id>:ticket` → waiting, else idle. `socket.data.state` is informational only (D-038).
+- All lifecycle changes for a visitor (join, leave, next, end, interest promotion, reconcile, disconnect) run under a per-visitor lock on the node (`withVisitorLock`).
+- Multi-key changes inside one hash tag go through Lua (`@app/matchmaking` for queues, `sessions/store.ts` for sessions); changes spanning tags (visitor refs vs session keys) are ordered so readers never see a ref without its target: write session keys → write session refs → delete ticket refs; on end: clear others' refs → emit `peer:left`.
+- Never send visitor ids to clients; participants are addressed by `participantId` and messages are fanned out by looping over active participants' `visitor:<id>` rooms (works for 2 or 3).
+- Background work is queued with BullMQ (`@app/shared/jobs` contracts, `{bull}` prefix, deterministic `jobId` for idempotence); the worker re-validates payloads.
+- Integration-test Redis DBs: redis 15, api 14, gateway 13, moderation 12, matchmaking 11, worker 10.
+
+### Matchmaking & session design (Part 5)
+- **Tickets** (`{mm:<pool>:<mode>:<lang>}:tickets`): JSON `{ ticketId, visitorId, interests, createdAt, status: waiting|matched|cancelled, nodeId, sessionId? }`. `ENQUEUE_OR_MATCH` (one Lua call): phase `interest` scans the ticket's `q:int:<i>` queues, phase `any` scans `q:any`; each scan inspects ≤ 50 entries from the head, **drops** dead refs (missing/not waiting/orphaned same-visitor ticket) and **skips but keeps** recent pairs (D-040); match → both tickets `matched` with the caller's pre-generated `sessionId`, pair added to `recent` (pruned by `RECENT_PAIR_TTL_MS`), common interests returned; no match → `RPUSH` into the phase's queues.
+- **Interest fallback:** interest tickets wait in interest queues only; the owning node's timer (`INTEREST_FALLBACK_MS`) calls `promoteToAny` (no-op unless still waiting). Timers live on the node of the waiting socket and are cleared on match/leave/disconnect.
+- **Match → session** (done by whichever node ran the matching script): random `participantId` per visitor (`p` + 12 base64url chars) → `session:{id}:meta` + `:participants` (MULTI) → `visitor:<id>:session` refs → delete both ticket refs (compare-and-delete) → `INCR stats:matches:<minute>` → `match:found` to both visitor rooms; one random initiator per pair (`initiator: true, polite: false` for it; the other gets the opposite).
+- **Leave** (`gwSessionLeave` Lua over `{sessionId}` keys): marks the participant left (idempotent: `already_left`), returns the still-active others; if < 2 remain → remaining participants marked left (no reason), `state=ended`, `endedAt`, 1 h TTL on meta/participants/log — exactly one caller sees `ended`. That caller clears the others' refs, emits `peer:left { participantId, reason: left|disconnected, sessionEnded }` and enqueues the `session-log` job (`jobId = sessionId`). Reasons: chat:next → SKIP, chat:end/queue:leave → STOP, disconnect/reconcile → DISCONNECT, shutdown → SERVER_RESTART; clients only see `left`/`disconnected`.
+- **Match vs. cancel race:** `cancelTicket` on an already-matched ticket returns its `sessionId`; the canceller polls (≤ 20 × 50 ms) until its session ref appears, then leaves it (D-039).
+- **Reconnect = fresh start:** on connect, after claiming the visitor, the gateway abandons any ticket/session left by the visitor's previous socket (no session resume). A disconnecting socket only cleans up if it still owns `visitor:<id>:socket`.
+- **In-session events** (`lifecycle.inSession`): session ref must name the payload's `sessionId`, session `active`, sender not left → else `NOT_IN_SESSION`. `chat:message`: ulid id + ISO `at`, appended to `session:{id}:log` (LTRIM to last 100), fanned out to active others, ack `{ id, at }`. `chat:typing`: relayed on change, repeats at most every 2 s. `rtc:offer|answer|ice`: video sessions only (`INVALID_STATE` otherwise); `to` must be another active participant (`FORBIDDEN` otherwise); relayed only to that participant with server-set `from`. `rtc:summary`: membership-checked and logged (metrics only). `moderation:signal`: still `NOT_IMPLEMENTED` (Part 8).
+- **Sweeper:** every 30 s the node holding `lock:mm:sweep` (SET NX PX 29 s) sweeps all 64 tags: settled tickets > 2 min, waiting tickets > 30 min or whose `nodeId` has no presence key; deletion is compare-and-delete (unchanged since read). Queue refs to deleted tickets are dropped lazily by later scans.
+- **Shutdown hook:** `lifecycle.endAllLocal()` (SERVER_RESTART for sessions, cancel tickets) runs before `SERVER_RESTARTING` is sent; disconnect handlers are skipped while draining.
+
 ### Gateway design (Part 4)
 - **Transport:** plain `node:http` server; Socket.io with `transports: ['websocket']`, `perMessageDeflate: false`, `maxHttpBufferSize` 32 KB, ping 25 s / timeout 20 s, `serveClient: false`. `GET /health` (liveness) and `GET /ready` (Redis app client + adapter client + Postgres; 503 while draining).
 - **Origin check:** `allowRequest` rejects any `Origin` not in `CORS_ORIGINS` (CORS doesn't protect WebSockets); requests without `Origin` (bots/tests) are allowed but still need a JWT. Also rejects everything while draining.
@@ -190,7 +216,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | admin | 3001 | TBD | not built |
 | api | 4000 (`API_HOST`, default 0.0.0.0) | `pnpm --filter @app/api dev` (tsx watch) · `build` (tsup) · `start` (`node dist/server.js`) | ✅ running in dev; graceful shutdown verified |
 | gateway | 4001 (+4011 via `dev:multi`), `GATEWAY_HOST` default 0.0.0.0 | `pnpm --filter @app/gateway dev` · `dev:multi` · `build` (tsup) · `start` | ✅ two nodes verified; graceful drain verified |
-| worker | — | TBD | not built |
+| worker | — (no HTTP) | `pnpm --filter @app/worker dev` · `build` · `start` | ✅ processed 4 600+ session-log jobs in the bot runs; graceful shutdown waits for in-flight jobs |
 | PostgreSQL | 5432 (host port = `POSTGRES_PORT`; **5433 on this machine**), bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; dbs `app`, `app_test` |
 | Redis | 6379, bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; AOF and RDB off |
 | coturn | 3478 udp/tcp, 49160–49200/udp, bound to 0.0.0.0 (LAN testing) | `pnpm infra:up` | ✅ healthy; HMAC auth + relay↔relay verified |
@@ -218,11 +244,11 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | NODE_ENV | `@app/env` baseEnv | `development` \| `test` \| `production` | development |
 | LOG_LEVEL | `@app/env` baseEnv | pino level incl. `silent` | debug (schema default `info`) |
 | POSTGRES_PORT | docker-compose | Host port for Docker Postgres (new, not in master design) | 5432 (`.env` here: 5433) |
-| DATABASE_URL | `@app/db` (prisma singleton, prisma.config.ts, seed), api, gateway (ban fallback) | Postgres URL (validated: `postgres(ql)://`) | postgresql://app:app@localhost:5432/app |
+| DATABASE_URL | `@app/db` (prisma singleton, prisma.config.ts, seed), api, gateway (ban fallback), worker | Postgres URL (validated: `postgres(ql)://`) | postgresql://app:app@localhost:5432/app |
 | DATABASE_URL_TEST | `@app/db` tests, `db:migrate:test` (via `DB_TARGET=test`) | Integration-test DB | postgresql://app:app@localhost:5432/app_test |
 | DB_TARGET | `packages/db/prisma.config.ts` | Not in .env: `test` makes Prisma CLI use `DATABASE_URL_TEST` (set by the `migrate:test` script) | unset |
-| REDIS_URL | api, gateway (app client, control subscriber, adapter pub/sub) | Redis URL (validated: `redis(s)://`) | redis://localhost:6379 |
-| REDIS_URL_TEST | integration tests (`createTestRedis`; DB index overridden per package: redis 15, api 14, gateway 13, moderation 12) | Integration-test Redis; must select a non-zero DB (new, not in master design) | redis://localhost:6379/15 |
+| REDIS_URL | api, gateway (app client, control subscriber, adapter pub/sub, BullMQ producer), worker (BullMQ) | Redis URL (validated: `redis(s)://`) | redis://localhost:6379 |
+| REDIS_URL_TEST | integration tests (`createTestRedis`; DB index overridden per package: redis 15, api 14, gateway 13, moderation 12, matchmaking 11, worker 10) | Integration-test Redis; must select a non-zero DB (new, not in master design) | redis://localhost:6379/15 |
 | JWT_SECRET, JWT_TTL_SECONDS | api (issue), gateway (verify; TTL unused there) | Visitor JWT HS256 secret (≥ 32 chars) / lifetime (60 s – 7 d) | placeholder, 43200 |
 | IP_HASH_PEPPER, DEVICE_HASH_PEPPER | seed, api; gateway reads IP_HASH_PEPPER only (`hashPepperEnv`, min 16 chars) | HMAC peppers — rotating one invalidates all stored hashes (bans by device/IP) | placeholders |
 | TOS_VERSION | api (`/v1/config`, session check); web in Part 6 | Current ToS version clients must accept | 2026-10-dev |
@@ -242,7 +268,8 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | S3_ACCESS_KEY, S3_SECRET_KEY | docker-compose (MinIO root user/password, minio-init), API/worker later | MinIO creds (password ≥ 8 chars) | randomchat, placeholder |
 | S3_BUCKET_EVIDENCE, S3_BUCKET_FRAMES | docker-compose (minio-init), API/worker later | Bucket names | evidence, frames |
 | S3_ENDPOINT, S3_REGION | (Part 8) | S3 client | http://localhost:9000, us-east-1 |
-| INTEREST_FALLBACK_MS, RECENT_PAIR_TTL_MS | (Part 5) | Matchmaking timings | 5000, 60000 |
+| INTEREST_FALLBACK_MS, RECENT_PAIR_TTL_MS | gateway (`gatewayEnv`) | Interest-only wait before the general queue / no-rematch window for a pair | 5000, 60000 |
+| WORKER_CONCURRENCY | worker (`workerEnv`) | Parallel jobs per worker process (1–100; new, not in master design) | 10 |
 | RATE_LIMIT_DISABLED | api, gateway (token bucket + abuse guard) | Disables rate limits **only if NODE_ENV=development** (ignored + warning otherwise); parsed with `z.stringbool()` | false |
 | SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD | `db:seed` (`seedEnv`: email, password ≥ 12 chars) | Dev admin login (password: see your `.env`) | admin@randomchat.local, placeholder |
 | ADMIN_SESSION_TTL_SECONDS | (Part 9) | Admin session lifetime | 28800 |
@@ -270,6 +297,8 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | `pnpm --filter @app/api build` / `start` | tsup bundle → `apps/api/dist/server.js` / run it with node |
 | `pnpm --filter @app/gateway dev` / `dev:multi` | One gateway node (4001) / two nodes gw-4001 + gw-4011 (tsx watch) |
 | `pnpm --filter @app/gateway build` / `start` | tsup bundle → `apps/gateway/dist/server.js` / run it |
+| `pnpm --filter @app/worker dev` / `build` / `start` | BullMQ worker (tsx watch / tsup bundle) |
+| `pnpm bots -- --clients N --gateways URL[,URL] --mode text\|video --lang en --duration S` | Chat-flow load bots; summary + exit 1 on protocol errors/asymmetric matches. Run the API with `RATE_LIMIT_DISABLED=true` for > 10 clients |
 | `pnpm --filter @app/bots connect --count N --gateway URL[,URL]` | N bot visitors (real sessions via the API), round-robin over gateways; Ctrl-C to stop |
 | `pnpm --filter @app/api test` | API integration tests (needs `pnpm infra:up`; turbo `pnpm test` also migrates `app_test` first) |
 | `pnpm --filter @app/<pkg> test` | Run one package's tests |
@@ -304,16 +333,21 @@ Builders in `packages/redis/src/keys.ts` (functions/constants in parentheses). B
 |---|---|---|---|
 | `{mm:<pool>:<mode>:<lang>}:q:any` | LIST | `matchmakingKeys(pool, mode, lang).queueAny` | pool `normal`\|`shadow` (`MATCH_POOLS`) |
 | `{mm:…}:q:int:<interest>` | LIST | `.queueInterest(interest)` | interest must be normalized (lowercase, trimmed, no `{}:`) |
-| `{mm:…}:tickets` | HASH | `.tickets` | ticket JSON schema defined in Part 5 |
+| `{mm:…}:tickets` | HASH | `.tickets` | ticketId → `ticketSchema` JSON (`@app/matchmaking`); `interests` may read back as `{}` from Lua (normalized to []) |
 | `{mm:…}:recent` | ZSET | `.recent`, member `recentPairMember(a, b)` | member `minId\|maxId` |
-| `visitor:<id>:ticket` / `visitor:<id>:session` | STRING | `visitorTicketKey`, `visitorSessionKey` | |
+| `visitor:<id>:ticket` | STRING (JSON) | `visitorTicketKey` | `{ pool, mode, lang, ticketId }` (gateway `ticketRefSchema`), TTL 24 h, compare-and-delete by ticketId |
+| `visitor:<id>:session` | STRING (JSON) | `visitorSessionKey` | `{ sessionId, participantId }` (gateway `sessionRefSchema`) — JSON instead of the plain id in the master design, so handlers know the sender's participantId; TTL 24 h, compare-and-delete by sessionId |
 | `visitor:<id>:socket` | STRING | `visitorSocketKey` | id of the visitor's one live socket (TTL 24 h safety; compare-and-delete on disconnect). New in Part 4 (not in master design) |
 | `visitor:<id>` | Socket.io room | `visitorRoom` | not a key; delivery target |
-| `session:{<id>}:meta` / `:participants` / `:log` | HASH / HASH / LIST | `sessionKeys(sessionId)` | 1 h TTL after end (`SESSION_ENDED_TTL_SECONDS`); log capped at `TRANSCRIPT_MAX_MESSAGES`=100 |
+| `session:{<id>}:meta` | HASH | `sessionKeys(id).meta` | `mode`, `topology`=mesh, `maxParticipants`, `startedAt` (ms), `commonInterests` (JSON), `state` active\|ended, `endedAt` (ms); 1 h TTL after end |
+| `session:{<id>}:participants` | HASH | `.participants` | participantId → `{ visitorId, joinedAt, leftAt?, leaveReason? }` (ms); left participants kept |
+| `session:{<id>}:log` | LIST | `.log` | transcript ring buffer: `{ id (ulid), from (participantId), text, at (ISO) }`, last `TRANSCRIPT_MAX_MESSAGES`=100; 1 h TTL after end |
 | `presence:node:<nodeId>` | STRING | `presenceNodeKey` | local socket count, written every 5 s by each gateway, TTL `PRESENCE_TTL_SECONDS`=15 |
 | `presence:nodes` | SET | `PRESENCE_NODES_KEY` | gateway node ids; dead members pruned by live nodes |
 | `socket.io#…` | sharded PUB/SUB | (adapter) | Socket.io adapter channels (prefix `socket.io`, dynamic per-room channels) |
-| `stats:matches:<yyyyMMddHHmm>` (UTC) | STRING | `statsMatchesKey(date)` | TTL `STATS_MATCHES_TTL_SECONDS`=7200 |
+| `stats:matches:<yyyyMMddHHmm>` (UTC) | STRING | `statsMatchesKey(date)` | INCR per match, TTL `STATS_MATCHES_TTL_SECONDS`=7200 |
+| `lock:mm:sweep` | STRING | `MATCHMAKING_SWEEP_LOCK_KEY` | sweeper lock (node id, PX 29 s) |
+| `{bull}:session-log:*` | BullMQ | `BULLMQ_PREFIX` + `QUEUE_NAMES.SESSION_LOG` | job ids = session ids; completed kept 1 h, failed 7 d |
 | `ban:visitor:<id>`, `ban:device:<hash>`, `ban:ip:<hash>` | STRING (JSON) | `banVisitorKey`, `banDeviceKey`, `banIpKey` | value `banCacheEntrySchema`: `{ banned: false }` (TTL `BAN_CACHE_NEGATIVE_TTL_SECONDS`=60) or `{ banned: true, banId, type: HARD\|SHADOW, expiresAt: ISO\|null }` (TTL = time to expiry, max `BAN_CACHE_MAX_TTL_SECONDS`=3600). Written by the API ban checker |
 | `trust:<visitorId>` | STRING | `trustKey` | |
 | `rl:<scope>:<subject>` | various | `rateLimitKey(scope, subject)` | scope `[a-z0-9:_-]{1,64}` |
@@ -355,11 +389,19 @@ Contract: `packages/shared/src/socket/` (names, Zod schemas, types). Acks: `{ ok
 
 | Direction | Event | Status | Notes |
 |---|---|---|---|
-| C→S | `ping` | ✅ implemented | ack `{ ok: true, data: { serverTime } }` (ms epoch) |
-| C→S | `queue:join`, `queue:leave`, `chat:next`, `chat:end`, `chat:message`, `chat:typing`, `rtc:offer`, `rtc:answer`, `rtc:ice`, `rtc:summary`, `moderation:signal` | 🟨 stub | payload validated and rate-limited, then ack `NOT_IMPLEMENTED` (Part 5 replaces) |
+| C→S | `ping` | ✅ | ack `{ ok: true, data: { serverTime } }` (ms epoch) |
+| C→S | `queue:join` | ✅ | idle only (`INVALID_STATE` otherwise); interests normalized; emits `queue:waiting` or `match:found` |
+| C→S | `queue:leave` | ✅ | waiting only (`INVALID_STATE` otherwise) |
+| C→S | `chat:next` / `chat:end` | ✅ | current `sessionId` only (`NOT_IN_SESSION` otherwise); next = leave (SKIP) + requeue with the socket's last preferences; end = leave (STOP) → idle |
+| C→S | `chat:message` | ✅ | ack `{ ok: true, data: { id, at } }`; `NOT_IN_SESSION` for stale/ended sessions |
+| C→S | `chat:typing` | ✅ | relayed on change, repeats ≤ 1 per 2 s |
+| C→S | `rtc:offer` / `rtc:answer` / `rtc:ice` | ✅ | video sessions only (`INVALID_STATE`), `to` must be an active other participant (`FORBIDDEN`) |
+| C→S | `rtc:summary` | ✅ (log only) | membership-checked, logged; aggregation in Part 7 |
+| C→S | `moderation:signal` | 🟨 stub | validated, ack `NOT_IMPLEMENTED` (Part 8) |
 | C→S | any other event | ✅ | ack `VALIDATION_FAILED "Unknown event"` + abuse strike |
 | S→C | `system:notice` | ✅ `SESSION_REPLACED`, `SERVER_RESTARTING`, `RATE_LIMITED` | `BANNED`, `MESSAGE_BLOCKED` codes defined, used from Part 5/8 |
-| S→C | `queue:waiting`, `match:found`, `participant:joined`, `chat:message`, `chat:typing`, `rtc:*`, `peer:left` | ⬜ typed only | emitted from Part 5 (`participant:joined` Part 11) |
+| S→C | `queue:waiting`, `match:found`, `chat:message`, `chat:typing`, `rtc:offer`, `rtc:answer`, `rtc:ice`, `peer:left` | ✅ | always delivered via `visitor:<id>` rooms (cross-node) |
+| S→C | `participant:joined` | ⬜ typed only | Part 11 |
 | handshake | `connect_error` | ✅ | `data.code`: `UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED` (+`expiresAt`), `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`; bad Origin → plain websocket error |
 
 Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; chat text ≤ 500 after trim; clientMsgId ≤ 64; SDP ≤ 16 KB (`MAX_SDP_BYTES`); ICE candidate string ≤ 1024 (`MAX_ICE_CANDIDATE_LENGTH`); rtc:summary metrics bounded, candidate types host/srflx/prflx/relay/unknown; moderation:signal `kind` `[a-z_]{1,32}`, score 0–1; whole message ≤ 32 KB (`maxHttpBufferSize`).
@@ -405,6 +447,18 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-035 | 2026-10-31 | Ban checking moved to `@app/moderation` (`createBanChecker`), identifiers optional; the gateway checks visitor id + IP hash only (device bans are enforced when the API issues the session token) | One implementation for API and gateway; the gateway has no device id |
 | D-036 | 2026-10-31 | WebSocket Origin allowlist via `allowRequest`; connections without `Origin` allowed (still need a JWT) | Browsers always send Origin, so cross-site WebSocket hijacking is blocked; bots/tests/native clients work |
 | D-037 | 2026-10-31 | Per-socket in-memory token bucket (20 burst, 5/s) + abuse bucket (30 strikes, 0.5/s) instead of Redis-backed socket rate limits | Socket events are per-connection and hot-path; no Redis round trip per event. Cross-connection abuse is bounded by API session rate limits and one-socket-per-visitor |
+| D-038 | 2026-10-31 | **Cross-node socket state is derived from Redis** on every lifecycle event (`visitor:<id>:session` → in_session, `visitor:<id>:ticket` → waiting, else idle); no `gw:control` message for matches | A match made on node B is visible on node A instantly with no extra messages or local state to reconcile; costs 1–2 Redis GETs per lifecycle event |
+| D-039 | 2026-10-31 | The matching script stamps a pre-generated `sessionId` on both tickets; a cancel that lost the race gets that id back and leaves the session once it exists | Closes the "leave/disconnect while being matched" race without cross-slot transactions |
+| D-040 | 2026-10-31 | Queue scans **drop** dead refs but only **skip** recent-pair candidates (deviation from the master text, which says drop) | Dropping a recent-pair entry would erase a waiting stranger's place in line for everyone else |
+| D-041 | 2026-10-31 | `visitor:<id>:session` holds JSON `{ sessionId, participantId }`; the leaving caller clears other participants' refs **before** emitting `peer:left` | Handlers need the sender's participantId; clients may requeue immediately on `peer:left` |
+| D-042 | 2026-10-31 | Reconnect never resumes a session: a new socket abandons the visitor's previous ticket/session (DISCONNECT); old sockets skip clean-up when they no longer own `visitor:<id>:socket` | Simple, race-free semantics with one socket per visitor |
+| D-043 | 2026-10-31 | Interests are normalized by stripping (whitespace/underscore → `-`, other non-alphanumerics removed, Unicode letters kept) instead of rejected | Matches the Part 5 spec; "Indie Games" and "indie_games!" share a queue |
+| D-044 | 2026-10-31 | BullMQ queues use prefix `{bull}` and `jobId = sessionId`; the worker upserts and skips participants whose visitor row is missing | Cluster-safe keys, idempotent retries/duplicates, a deleted visitor can't wedge a job |
+| D-045 | 2026-10-31 | `msgpackr-extract` (BullMQ → msgpackr) install script denied in `allowBuilds` | Its prebuilt native binary ships as a platform package; the script only compiles from source |
+| D-038 | 2026-10-31 | **Sessions survive signaling disconnects:** socket disconnect → participant `reconnecting` for `RECONNECT_GRACE_MS` (15 s); `session:resume` on any node restores it (with missed text messages); gateway shutdown never ends sessions | Media is P2P, so a deploy or gateway crash must not drop live calls (learned from the Harkirat Omegle stream: "even if the server crashes, they can still talk") |
+| D-039 | 2026-10-31 | Match acknowledgement: participants start `pending`, must send `match:ack` within `MATCH_ACK_TIMEOUT_MS` (5 s); client pauses searching after 60 s hidden while waiting. Ack/grace deadlines live in a Redis ZSET `session:deadlines`, claimed with `ZREM` by any node | Ghost/background tabs waste real users' matches; deadlines in Redis survive node restarts and are processed exactly once |
+| D-040 | 2026-10-31 | Fair requeue: early failures (within `EARLY_FAILURE_WINDOW_MS`, 10 s) caused by the peer requeue the innocent participant at the **head** of the queue (`enqueueOrMatch` `{ priority: true }`); normal skips requeue normally | A user shouldn't lose their place because the stranger ghosted or WebRTC failed |
+| D-041 | 2026-10-31 | Video: `queue:join` only after camera/mic granted (pre-join screen). WebRTC lifecycle rules: no `RTCPeerConnection`/streams in React state, handlers attached right after construction, no `setTimeout`/`getTransceivers()` workarounds; one connection with perfect negotiation (not two connections per user) | Prevents matching people who can't send video and the `ontrack` bugs seen in the stream; two connections per user would double ICE/DTLS handshakes and TURN relay cost |
 
 ## 15. Known issues / TODOs / production gaps
 
@@ -419,8 +473,15 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - ESLint pinned below 10.14.0 for now only because 10.14.0 was younger than pnpm's minimum release age at install time; `pnpm update` will pick it up later.
 - `docker compose up -d --wait` without the service list fails on the exited `minio-init` one-shot container — always use `pnpm infra:up`.
 - Turborepo collects anonymous telemetry by default; opt out with `pnpm exec turbo telemetry disable` if desired.
+- **Crashed gateway node:** its visitors' waiting tickets stay matchable until presence expires (15 s) and the sweeper runs (≤ 30 s); a live visitor matched with such a ghost sees a silent partner and must skip. Consider a liveness check before `match:found` (Part 10).
+- `rtc:summary` is only logged; `moderation:signal` is still a stub (Parts 7/8).
+- The participant who stays until a session ends is stored with `leaveReason = null` (the DB enum has no "peer left" value).
+- Queue refs to tickets deleted by the sweeper are removed lazily by later scans of that queue; very rarely used interest queues can keep a few dead ids.
+- A natural disconnect racing a reconnect of the same visitor on another node could, in a tiny window, clean up the new connection's fresh ticket; the client would simply requeue.
+- The bot run needs `RATE_LIMIT_DISABLED=true` on the API for > 10 clients (session rate limit 10/min per IP).
 - Gateway: a device ban created while a visitor is connected does not disconnect them yet (the gateway doesn't know device hashes); Part 8's ban writer must resolve affected visitor ids and publish `ban_applied`/`kick_visitor`. The `ban_applied` message is defined but not handled by the gateway yet.
 - Gateway drain always waits up to 10 s if clients don't reconnect elsewhere (e.g. single-URL bots); the web client (Part 6) should reconnect on `SERVER_RESTARTING`.
+- **Plan update after Part 4 (D-038…D-041, see master prompt → Reference Design → Session resilience):** Part 5 must implement reconnect grace + `session:resume`, `match:ack` + ack deadlines, the `session:deadlines` processor, priority requeue, and a shutdown hook that does **not** end sessions. If Part 5 was already implemented before this update (it was in progress when the plan changed), apply these as a follow-up: `Apply the Session resilience plan update (D-038…D-041) to Part 5 — read CONTEXT.md and the master prompt's Part 5.`
 - `turbo dev` (root `pnpm dev`) runs a single gateway node; use `pnpm --filter @app/gateway dev:multi` for two.
 - Killing only the child of `tsx watch` (e.g. by port) leaves the `tsx watch` parent alive; stop dev servers with Ctrl-C in their terminal.
 - Production-only items (tracked fully in `docs/PRODUCTION_CHECKLIST.md` from Part 10): legal review, age-assurance vendor, CSAM hash matching + NCMEC reporting process, human moderation staffing, bare-metal TURN with `denied-peer-ip`, Kubernetes, Redis Cluster, PgBouncer, multi-region, CDN/WAF/DDoS.
@@ -436,3 +497,5 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | 2026-10-31 | 2 | Database & shared server packages: `@app/db` (Prisma 7.10.1 schema with 9 models + 10 enums, init migration with CHECK constraints, adapter-pg client factory + globalThis singleton, idempotent seed with argon2id dev admin), `@app/redis` (createRedis on RESP2, every Reference Design key builder, Zod JSON helpers, typed `gw:control` pub/sub, ban cache schema), `@app/shared/crypto` (`hmacHash`), env schemas for db/redis/seed. Root `db:*` scripts, turbo `generate` task, `REDIS_URL_TEST`. Tests: 42 (incl. Postgres + Redis integration). Decisions D-019…D-023. Kept the concurrent plan update (D-018, `.mcp.json`). |
 | 2026-10-31 | 3 | REST API (`apps/api`, Fastify 5): `buildApp(deps)` with Zod type provider, CORS allowlist, helmet, Redis rate limits, error envelope + request ids, auth plugin; routes `/health`, `/ready`, `/v1/config`, `/v1/session` (Turnstile, ToS/age, hashed device/IP, visitor upsert, cached ban check, JWT), `/v1/turn-credentials` (coturn REST creds, verified against live coturn), `/v1/stats/online`; graceful shutdown; tsup build. Added `apiEnv`, `@app/shared/visitor-token`, ban cache negative entries, 4 error codes, `API_HOST`, `TRUST_PROXY`, turbo `migrate:test` task. Tests: 72 total (22 API). Decisions D-024…D-030. |
 | 2026-10-31 | 4 | Real-time gateway (`apps/gateway`): typed socket contract in `@app/shared/socket` (names, Zod schemas both directions, event maps with compile-time key check), Socket.io 4.8 on node:http with `/health` `/ready`, sharded Redis adapter (node-redis), Origin allowlist, JWT + ban handshake, one-socket-per-visitor across nodes via `visitor:<id>:socket` + `gw:control`, `registerHandler` (Zod, token bucket, abuse disconnect, always-ack), presence, graceful drain with `onShutdown` hooks, `ping` + `NOT_IMPLEMENTED` stubs, `dev:multi`. New `@app/moderation` (ban checker moved from API), `tools/bots` `connect`, `gatewayEnv`, `GATEWAY_HOST`, `NOT_IMPLEMENTED` code. Verified live: 2 nodes, `/v1/stats/online` = 3 + 2, graceful drain. Tests: 94 total (13 gateway incl. cross-node kick + adapter delivery). Decisions D-031…D-037. |
+| 2026-10-31 | — | Plan update from reviewing the Harkirat Omegle-clone stream: new Reference Design section "Session resilience" (reconnect grace + `session:resume`, `match:ack`, `session:deadlines`, priority requeue, video pre-join); new events `match:ack`, `session:resume`, `peer:reconnecting`, `peer:resumed`; env `RECONNECT_GRACE_MS`, `MATCH_ACK_TIMEOUT_MS`, `EARLY_FAILURE_WINDOW_MS`; Parts 5, 6, 7, 10 updated; WebRTC lifecycle rules in Part 7. Decisions D-038…D-041. |
+| 2026-10-31 | 5 | Matchmaking & sessions: `@app/matchmaking` (Lua enqueue/match/promote/cancel/sweep, bounded scans, recent-pair skip), gateway lifecycle (Redis-derived state, per-visitor locks, session create + atomic idempotent leave Lua, interest fallback timers, match/cancel race handling, reconnect reconcile, sweeper, shutdown hook), real handlers for queue/chat/rtc events, transcript ring buffer, `apps/worker` (BullMQ `session-log` → ChatSessionLog/SessionParticipant), `@app/shared/jobs`, bots load CLI. Bot acceptance (50 clients, 2 min, 2 nodes): 2 342 sessions, 0 asymmetric, 0 protocol errors, 8 202 messages all delivered, TTM p50 13 ms / p95 2.5 s; worker persisted every session. Tests: 120 total (13 matchmaking, 23 gateway, 3 worker). New: `INVALID_STATE`, `WORKER_CONCURRENCY`. Decisions D-038…D-045. |

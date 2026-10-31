@@ -27,7 +27,8 @@
     "db:deploy": "pnpm --filter @app/db migrate:deploy",
     "db:reset": "pnpm --filter @app/db reset",
     "db:seed": "pnpm --filter @app/db seed",
-    "db:studio": "pnpm --filter @app/db studio"
+    "db:studio": "pnpm --filter @app/db studio",
+    "bots": "pnpm --filter @app/bots bots"
   },
   "devDependencies": {
     "@app/config": "workspace:*",

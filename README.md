@@ -32,7 +32,7 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 
 | Command                        | What it does                                                        |
 | ------------------------------ | ------------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (API + one gateway node)                 |
+| `pnpm dev`                     | Run all apps in watch mode (API, one gateway node, worker)          |
 | `pnpm build`                   | Build all apps                                                      |
 | `pnpm lint`                    | ESLint (type-aware) in every package                                |
 | `pnpm typecheck`               | `tsc` in every package                                              |
@@ -46,7 +46,7 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 | `pnpm db:generate`             | Regenerate the Prisma client after editing the schema               |
 
 Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-`@app/db`, `@app/redis`, `@app/moderation`, `@app/api` and `@app/gateway` tests are integration
+`@app/db`, `@app/redis`, `@app/matchmaking`, `@app/moderation`, `@app/api`, `@app/gateway` and `@app/worker` tests are integration
 tests: run `pnpm infra:up` first.
 
 ## REST API (`apps/api`, port 4000)
@@ -95,11 +95,36 @@ curl localhost:4000/v1/stats/online   # {"online":5} within ~5 s; drops when you
 Each bot starts a real session through the API, so more than 10 bots per minute from one IP hit
 the session rate limit unless `RATE_LIMIT_DISABLED=true` (honoured only in development).
 
+## Worker (`apps/worker`)
+
+Consumes BullMQ jobs; today `session-log`, which writes `ChatSessionLog` + `SessionParticipant`
+rows (metadata only, never messages) when a chat ends.
+
+```bash
+pnpm --filter @app/worker dev     # or build + start
+```
+
+## Load bots: full chat flow
+
+With the API, both gateway nodes and the worker running (four terminals):
+
+```bash
+RATE_LIMIT_DISABLED=true pnpm --filter @app/api dev   # lets 50 bots start sessions at once
+pnpm --filter @app/gateway dev:multi
+pnpm --filter @app/worker dev
+pnpm bots -- --clients 50 --gateways http://localhost:4001,http://localhost:4011 --mode text --duration 120
+```
+
+Each bot queues with random interests, chats, then skips or ends, and repeats. The summary lists
+sessions (and any asymmetric matches), message delivery, protocol errors and p50/p95
+time-to-match; the exit code is 1 if anything was wrong. Browse the persisted sessions with
+`pnpm db:studio` → `ChatSessionLog`.
+
 ## Layout
 
 ```
-apps/        api (Fastify REST), gateway (Socket.io); web, admin, worker in later parts
-packages/    config, env, logger, shared, db (Prisma), redis, moderation (bans)
+apps/        api (Fastify REST), gateway (Socket.io), worker (BullMQ); web, admin in later parts
+packages/    config, env, logger, shared, db (Prisma), redis, matchmaking (Lua), moderation (bans)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init
-tools/bots   socket bot clients (`connect`)
+tools/bots   socket bot clients (`connect`, `bots`)
 ```

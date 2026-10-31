@@ -12,14 +12,24 @@ import { ErrorCode } from './errors.ts';
 export const chatModeSchema = z.enum(CHAT_MODES);
 export const langSchema = z.enum(SUPPORTED_LANGS);
 
-/** One interest tag, normalized so "Music " and "music" land in the same queue. */
+/**
+ * One interest tag, normalized so "Indie Games", "indie_games" and " INDIE-games!" all land in
+ * the same queue ("indie-games"): trim, lowercase, whitespace/underscores → "-", strip every
+ * other non-alphanumeric (Unicode letters/digits are kept), collapse and trim dashes.
+ */
 export const interestSchema = z
   .string()
-  .trim()
-  .toLowerCase()
-  .min(1)
-  .max(MAX_INTEREST_LENGTH)
-  .regex(/^[\p{L}\p{N}][\p{L}\p{N} _-]*$/u, 'Use letters, numbers, spaces, - or _');
+  .max(MAX_INTEREST_LENGTH * 4)
+  .transform((raw) =>
+    raw
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-')
+      .replace(/[^\p{L}\p{N}-]/gu, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-|-$/g, ''),
+  )
+  .pipe(z.string().min(1).max(MAX_INTEREST_LENGTH));
 
 export const interestsSchema = z
   .array(interestSchema)

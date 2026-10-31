@@ -111,6 +111,18 @@ export const gatewayEnv = baseEnv.extend({
   CORS_ORIGINS: commaList.pipe(z.array(z.url()).min(1)),
   TRUST_PROXY: trustProxy,
   RATE_LIMIT_DISABLED: z.stringbool().default(false),
+  /** How long an interest ticket waits for a shared interest before joining the general queue. */
+  INTEREST_FALLBACK_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
+  /** A matched pair won't be matched with each other again for this long. */
+  RECENT_PAIR_TTL_MS: z.coerce.number().int().min(0).max(3_600_000).default(60_000),
 });
 
 export type GatewayEnv = z.output<typeof gatewayEnv>;
+
+export const workerEnv = baseEnv.extend({
+  DATABASE_URL: postgresUrl,
+  REDIS_URL: redisUrl,
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
+});
+
+export type WorkerEnv = z.output<typeof workerEnv>;

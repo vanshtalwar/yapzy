@@ -17,12 +17,14 @@
     "@app/db": "workspace:*",
     "@app/env": "workspace:*",
     "@app/logger": "workspace:*",
+    "@app/matchmaking": "workspace:*",
     "@app/moderation": "workspace:*",
     "@app/redis": "workspace:*",
     "@app/shared": "workspace:*",
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
     "@socket.io/redis-adapter": "catalog:",
+    "bullmq": "catalog:",
     "ioredis": "catalog:",
     "jose": "catalog:",
     "pino": "catalog:",
@@ -30,6 +32,7 @@
     "proxy-addr": "catalog:",
     "redis": "catalog:",
     "socket.io": "catalog:",
+    "ulid": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

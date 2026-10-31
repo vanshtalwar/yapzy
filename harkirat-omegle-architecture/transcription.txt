@@ -1,0 +1,3575 @@
+[00:00:02] [Music]
+[00:00:05] hello
+[00:00:06] hello can you guys hear me can you guys
+[00:00:08] see me give me a GM in the chat if you
+[00:00:11] guys can hear me or if you guys can see
+[00:00:14] me let me open chat on my side as well
+[00:00:16] how's it
+[00:00:19] [Music]
+[00:00:21] going sh has released a new album guys
+[00:00:26] playlist let's
+[00:00:28] see
+[00:00:39] can you guys hear me can you guys see
+[00:00:41] [Music]
+[00:00:45] me hello hello hello and welcome to
+[00:00:47] another live
+[00:00:49] stream today we are well the original
+[00:00:52] expectation was something else we might
+[00:00:54] change what we are doing today based on
+[00:00:55] the
+[00:00:57] comments genuinely reply what are we
+[00:01:00] building today do is this too easy to
+[00:01:02] build the Duan assignment for the people
+[00:01:04] who don't know what the Duan assignment
+[00:01:05] is it is oh hold on come here let me
+[00:01:11] close a few things here on my
+[00:01:14] side it's too easy it's too
+[00:01:18] easy all
+[00:01:28] right sensitive
+[00:01:31] all right machine learning road map 845
+[00:01:34] here uh sexy style well thank you
+[00:01:36] appreciate
+[00:01:40] it Ty presser game we'll do a few polls
+[00:01:44] and we'll go from there is this too
+[00:01:46] easy uh we're at a 50/50
+[00:01:52] here I'm seeing that only machine
+[00:01:54] learning to the
+[00:01:55] assignment okay uh boring
+[00:02:02] thanks you're
+[00:02:03] welcome so guys we so this is too easy
+[00:02:09] finalize last call for voting on the
+[00:02:11] poll guys and if this is too easy we'll
+[00:02:13] do something
+[00:02:20] else
+[00:02:22] uh sorry guys I forgot to please don't
+[00:02:24] Super Chat I'll miss your super chat so
+[00:02:26] please don't Super Chat and I don't have
+[00:02:28] any content on python coming anytime
+[00:02:30] soon um all right web 3 bonded labor web
+[00:02:36] RTC project video
+[00:02:39] call too easy build it yesterday okay
+[00:02:41] too easy too easy which basically
+[00:02:44] means a few things are happening the
+[00:02:47] biggest thing that is happening is the
+[00:02:48] thumbnail of the video is
+[00:02:53] [Music]
+[00:02:58] changing
+[00:03:02] all
+[00:03:04] [Music]
+[00:03:07] right video call a lot of people want to
+[00:03:10] build video call we can build video call
+[00:03:11] we can build a basic version of a video
+[00:03:14] call the good thing is we can test this
+[00:03:17] this out together as well which would be
+[00:03:18] nice
+[00:03:20] uh all
+[00:03:26] right all right let's see
+[00:03:35] change Omega lap
+[00:03:37] clone let's do
+[00:03:40] this recently so let's try to make
+[00:03:44] omegal is that good good of an idea I
+[00:03:45] don't hate this idea this pretty good
+[00:03:47] idea we can do omegal we can continue on
+[00:03:49] lead
+[00:03:50] code notion like website that's a little
+[00:03:54] too big to build in in one class let's
+[00:03:56] try this uh let me do a
+[00:03:58] poll what should we build back end is
+[00:04:02] complex pretty complex omegal
+[00:04:06] clone GitHub clone is a little too much
+[00:04:10] uh whiteboard
+[00:04:13] tool omegal
+[00:04:20] omegal G are pretty close
+[00:04:23] um omigle Excel draw white ball tool
+[00:04:26] what else can we be Duan assignment
+[00:04:30] front end
+[00:04:31] only and then last one would be
+[00:04:35] um web 3 project all right guys so we
+[00:04:39] will follow whatever the poll
+[00:04:42] says chess chess is also a good
+[00:04:47] idea
+[00:04:49] [Music]
+[00:04:51] wow all right we have a clear winner I
+[00:04:58] guess
+[00:05:01] zato decentralized
+[00:05:07] Spotify Omega it is guys the good thing
+[00:05:09] about Omega is there is a gap in the
+[00:05:11] market right now what if we are able to
+[00:05:14] fill that Gap and you know become the
+[00:05:15] next omigle because the person
+[00:05:17] who that also require BC that is correct
+[00:05:20] so omigle
+[00:05:21] is we can't do omigle without web RTC
+[00:05:25] the only problem with web RTC is it's
+[00:05:26] been a while since I've done web RTC but
+[00:05:28] that's fine I think I know it enough to
+[00:05:30] build it take I'll discuss the
+[00:05:32] architecture and let's go from
+[00:05:38] there all right guys we charity app
+[00:05:42] using Solana we'll see decentralized
+[00:05:44] lead code by not everything can and
+[00:05:46] should be decentralized including
+[00:05:47] something like lead code what would be
+[00:05:49] the benefit of decentralizing lead code
+[00:05:51] my biggest problem with web 3 protocols
+[00:05:54] is you know people build literally
+[00:05:56] anything I don't think there's any need
+[00:05:58] for uh decentralizing lead code the
+[00:06:01] project that we have finally decided on
+[00:06:03] is omegal clone let me change the title
+[00:06:06] of the video so people are not misguided
+[00:06:08] when they're coming
+[00:06:13] in build clone
+[00:06:16] build and deploy Google me/ Omegle
+[00:06:23] clone all
+[00:06:26] righty thean assignment review we can do
+[00:06:28] at the very end
+[00:06:31] song
+[00:06:32] on I think the problem with the song is
+[00:06:35] the people who really want to learn are
+[00:06:37] unable
+[00:06:39] to songs on yes or no are unable to
+[00:06:43] focus but with that let's get right into
+[00:06:46] it I think I've done everything I need
+[00:06:47] to on my side the title of the video has
+[00:06:49] changed the thumbnail has changed and
+[00:06:52] we're building an omegal clone today why
+[00:06:55] why an omegal clone reason number one
+[00:06:58] omegal closed down apparently the
+[00:07:02] founder of Omegle could not take it it's
+[00:07:05] a very stressful app to build for a few
+[00:07:08] reasons I would not want to be on the
+[00:07:10] end of you know uh an application that
+[00:07:12] has I mean the an application like this
+[00:07:16] is peer to-peer we we will see that very
+[00:07:17] soon but basically you know there's no
+[00:07:19] real moderation you can do because
+[00:07:20] people are connected directly to each
+[00:07:21] other it's very hard for you to moderate
+[00:07:23] an app like this which I think was the
+[00:07:24] reason he got frustrated I don't know
+[00:07:25] but there is a gap I'm sure we can fill
+[00:07:27] this Gap and when we fill this Gap
+[00:07:29] eventually we will also get frustrated
+[00:07:30] at some point until we get frustrated
+[00:07:31] let's try to build it omegal is much
+[00:07:34] easier to build than something like
+[00:07:36] Google meet Google
+[00:07:38] meet
+[00:07:40] omal okay song's on yes okay works for
+[00:07:47] me omegal is much easier to build than
+[00:07:51] Google meet can tell me what can someone
+[00:07:53] tell me
+[00:07:54] why will the chat tell me why is
+[00:07:58] omegal 10 times easier to build than um
+[00:08:02] Google
+[00:08:03] meet low volume songs okay no show as
+[00:08:07] well okay let's
+[00:08:09] change let's listen to
+[00:08:18] amaril authentication sign in that's not
+[00:08:21] the right reason multiple peer
+[00:08:22] connections is the right reason in a
+[00:08:24] Google meet
+[00:08:25] application there are 100 people or you
+[00:08:29] know whatever supports a lot of people
+[00:08:31] versus omegal only has two people in a
+[00:08:34] webc
+[00:08:37] app this is 20 times harder to do than
+[00:08:41] this why because when you're when you
+[00:08:45] only have two people they can talk
+[00:08:46] directly to each other if this is person
+[00:08:48] one this is person two they can talk
+[00:08:50] directly to each other versus if there
+[00:08:53] you have 20 people who all want to talk
+[00:08:56] to each other there are various
+[00:08:58] architectures that have been sort
+[00:09:01] of introduced to solve something like
+[00:09:03] this but high level this is very hard to
+[00:09:05] do this is why you will see even in live
+[00:09:08] matches or even in you know the call
+[00:09:11] that we're currently in webc is not used
+[00:09:13] something else is used mostly live
+[00:09:15] streaming me when you have more than two
+[00:09:17] people it's very hard to do it
+[00:09:21] um exactly plain webc is hble was that
+[00:09:25] it's very hard to do multiple people
+[00:09:26] live streaming which is why for our use
+[00:09:28] case our life will be much easier we
+[00:09:30] just need two people talking to each
+[00:09:32] other directly and a chat on the side we
+[00:09:35] can ignore chat for today I think that's
+[00:09:36] the easy bit you anyone can build it
+[00:09:39] this is the hard bit making two people
+[00:09:40] talk to each other what is the
+[00:09:42] architecture of something like
+[00:09:45] this does anyone already know I mean the
+[00:09:47] architecture is web RTC but how does web
+[00:09:49] RTC even work what even is web
+[00:09:55] RTC it stands for web realtime
+[00:09:58] communication
+[00:09:59] it
+[00:10:00] is a
+[00:10:04] UDP it is a UDP based protocol which
+[00:10:07] basically means you know whenever people
+[00:10:09] are talking to each other packets can be
+[00:10:11] lost and that is fine because in video
+[00:10:13] streaming this is a very common and
+[00:10:15] popular use case okay even if packets
+[00:10:17] are lost when people are talking to each
+[00:10:18] other it is fine you'll just skip a few
+[00:10:20] frames and then you will hear a small
+[00:10:21] Jitter and then it will continue from
+[00:10:23] there web RTC is a protocol that was
+[00:10:25] specifically built for that it has two
+[00:10:26] benefits number one benefit
+[00:10:30] browser
+[00:10:33] support number two
+[00:10:35] benefit
+[00:10:37] UDP can fall
+[00:10:40] back to TCP a bunch of other benefits so
+[00:10:44] browser support basically means that it
+[00:10:48] is sort of part of the spec of creating
+[00:10:51] a browser you should support web RTC as
+[00:10:54] a construct basically your browsers can
+[00:10:57] speak web RTC I'll show you very soon
+[00:10:59] how to do that but there is an easy way
+[00:11:00] for a browser to talk web RTC for you to
+[00:11:02] debug web RTC for you to create a
+[00:11:05] connection with another browser via web
+[00:11:07] RTC there are a lot of things that a
+[00:11:09] browser cannot do for example you know
+[00:11:11] directly connecting to a databas is
+[00:11:12] harder talking some other weird new
+[00:11:14] protocol that might exist is harder your
+[00:11:16] browser can talk
+[00:11:17] HTTP your browser can talk a bunch of
+[00:11:19] other protocols web RTC is one of them
+[00:11:22] and this one specifically is used for
+[00:11:24] live video it's also used for
+[00:11:25] transferring data a lot of times and
+[00:11:27] what is the benefit of web RTC number
+[00:11:28] one UDP based number two um it is it can
+[00:11:33] be used not just for video it can be
+[00:11:35] used for sending um you
+[00:11:37] know what do you call it
+[00:11:40] files audio offline videos a bunch of
+[00:11:43] things and lastly um it is peer to-peer
+[00:11:47] this is the biggest benefit this is the
+[00:11:49] architecture of
+[00:11:52] uh web RTC that makes it sort of made it
+[00:11:55] super popular initially and eventually
+[00:11:57] this is the architect leure that led to
+[00:11:59] its downfall also making it a very hard
+[00:12:01] protocol for doing video calls peer
+[00:12:04] to-peer has its own set of benefits if
+[00:12:07] you have a peer-to-peer call which
+[00:12:08] basically means you know you don't need
+[00:12:10] a server two people can directly talk to
+[00:12:12] each other if you and I are on a video
+[00:12:13] call I send video directly to your
+[00:12:15] browser your browser videos sends video
+[00:12:16] directly to me there's no need of a
+[00:12:18] server in the middle the problem with
+[00:12:20] peer to-peer is if you have a big call 1
+[00:12:23] 2 3 4 five people I will have to send my
+[00:12:26] video to five people or four people and
+[00:12:28] then they will also to send me video
+[00:12:29] back my incoming bandwidth and outgoing
+[00:12:31] bandwidth is going to be screwed this is
+[00:12:33] what makes web RTC a bad choice usually
+[00:12:36] if you use its common architecture of
+[00:12:38] peer-to-peer architecture which is why
+[00:12:39] at scale webc is done a different way
+[00:12:42] what is that way don't worry about that
+[00:12:44] is if and we ever make a g me clone or a
+[00:12:48] zoom clone today what are we building we
+[00:12:49] are building a omegal clone and we know
+[00:12:53] that there are only two people at a time
+[00:12:55] that will talk to each other so this
+[00:12:56] peer-to-peer architecture just works
+[00:12:58] this is the raw AR architecture of web
+[00:13:00] RTC and this is good because people can
+[00:13:03] tly talk to each other skillability is
+[00:13:05] the problem it is the problem for a
+[00:13:08] big video call if 100 people are talking
+[00:13:10] to each other it is not a problem for a
+[00:13:13] two person call which is what we're
+[00:13:14] building today does that mean hirat our
+[00:13:16] platform can platform can only support
+[00:13:18] two people no our platform can support a
+[00:13:20] th000 people but only two
+[00:13:25] can talk to each other I repeat only two
+[00:13:28] people
+[00:13:29] if there'll be 500 rooms basically where
+[00:13:31] two people are directly connected to
+[00:13:32] each other never will all thousand
+[00:13:34] people be connected to each other two at
+[00:13:36] a time but our platform can scale in a
+[00:13:38] you know there are a thousand rooms each
+[00:13:39] one of which has two people okay that's
+[00:13:42] a high level of what we're
+[00:13:43] building um the code is going to be
+[00:13:47] let's
+[00:13:48] see front end let's keep it
+[00:13:52] simple react and some web RTC
+[00:13:57] apis back end we need a realtime server
+[00:14:03] for this I'll share
+[00:14:04] why also called a signaling
+[00:14:09] server which will be written most
+[00:14:11] probably either in node or go we can
+[00:14:13] decide which
+[00:14:14] one um and that is it we don't need a
+[00:14:20] database per se you can add a database
+[00:14:23] we can have an in memory DB to keep
+[00:14:26] things faster the the reason I don't
+[00:14:28] want a datab because I'm sure you can
+[00:14:29] figure this out the hard bit here is you
+[00:14:32] know building the signaling server
+[00:14:33] building these webc apis these two
+[00:14:36] things are hard everything else is the
+[00:14:37] same as another full stack application
+[00:14:40] to we
+[00:14:41] will web socket signaling server which
+[00:14:43] app right this is my this is iPad Notes
+[00:14:46] app and an apple pencil node go node go
+[00:14:50] we'll figure out does not matter it's a
+[00:14:51] very simple server either way has to
+[00:14:53] just relay something called the
+[00:14:55] stdp
+[00:14:57] daisy so so does not matter what you
+[00:14:59] write in it'll be very like less than 20
+[00:15:01] lines of code in the back end front end
+[00:15:05] it will be you know front end will be
+[00:15:07] heavy also front end may you know this
+[00:15:08] is not an easy app to build
+[00:15:10] so the web RTC apis Are highly
+[00:15:13] convoluted um so if you think this is
+[00:15:16] going to be easy it's not in fact it's
+[00:15:17] slightly easier to build if you're
+[00:15:19] building it in a distributed fashion by
+[00:15:21] which I mean if you're building Zoom
+[00:15:22] because you know you can use libraries
+[00:15:24] out there that make the client side API
+[00:15:25] easier here the client side API are
+[00:15:27] going to be a mess but let's kick things
+[00:15:29] off why not use rtis you don't need rtis
+[00:15:30] why do you need rtis no go node go no go
+[00:15:33] let's do a quick poll and then we'll
+[00:15:39] proceed language I'm telling you it does
+[00:15:42] not matter what language we use it's a
+[00:15:44] it'll be less than 20 lines of code you
+[00:15:46] either way the mode of writing you know
+[00:15:48] the thing the place where you learn
+[00:15:49] anything is the front end API calls in
+[00:15:51] web RTC the back end is anyways pretty
+[00:15:53] straightforward oh well the options are
+[00:15:57] a little messed up
+[00:15:59] language yes or no but it I see a bunch
+[00:16:02] of node doesn't matter either way let's
+[00:16:03] go with node let's kick things off get
+[00:16:06] into the code here um let me show you
+[00:16:11] guys where I'll be working let me also
+[00:16:14] first make sure I've closed everything I
+[00:16:15] don't want
+[00:16:25] open all right uh
+[00:16:30] screen let's create an empty project a
+[00:16:32] fresh project I hope you understand the
+[00:16:34] architecture no point diving deeper into
+[00:16:35] it
+[00:16:36] um create a fresh project in your I mean
+[00:16:42] if you feel like following along feel
+[00:16:43] free to create a fresh don't follow
+[00:16:45] along if you've never done web RTC
+[00:16:46] before it's just going to be a
+[00:16:48] mess
+[00:16:49] omegal but
+[00:16:55] better uh
+[00:16:57] weat
+[00:16:59] let's call it
+[00:17:20] um uh
+[00:17:22] npm
+[00:17:27] I
+[00:17:33] file
+[00:17:37] open partc
+[00:17:40] oh let's call it what's it called omegal
+[00:17:43] but better there you go all right I have
+[00:17:46] a project here set up let me push it to
+[00:17:48] GitHub in case you feel like following
+[00:17:50] along
+[00:17:53] uh I keep forgetting which ID I have in
+[00:17:55] from time to
+[00:17:57] time oh mle
+[00:18:00] clone using web DC all
+[00:18:06] right get in
+[00:18:16] it let me stop sharing screen here for a
+[00:18:19] second and let me push this to GitHub so
+[00:18:21] you guys can follow along the code from
+[00:18:23] there if need
+[00:18:27] be
+[00:18:36] vs code is greater than neovim someone
+[00:18:38] said debatable but
+[00:18:45] okay why not en up to set up I'm pretty
+[00:18:49] sure if I do a poll right now 90% of
+[00:18:52] them are going to be let's use vs code
+[00:18:55] um I think it's an easier ID to to
+[00:18:58] follow along cord
+[00:19:00] in um yeah that's the only reason one to
+[00:19:04] one communication stream what does that
+[00:19:06] mean shall I be have no knowledge oftc
+[00:19:09] yeah it we'll go slow I mean we'll go
+[00:19:11] slow but at the same time if you have to
+[00:19:13] build it in 3 hours which is my cut off
+[00:19:15] because I have to leave at 12: to to
+[00:19:17] something um then you know it's not
+[00:19:21] going to
+[00:19:22] be very teachy but I'll try my best to
+[00:19:26] go slow and you know take you all WR all
+[00:19:30] right let's start with a little bit of
+[00:19:33] the front end let's set things up we
+[00:19:34] need to have where's my
+[00:19:40] screen the project has been pushed to
+[00:19:43] GitHub so feel free to go here and look
+[00:19:45] at
+[00:19:47] it why not webstor I mean webstor is
+[00:19:50] literally the worst of both the worlds
+[00:19:53] right you're still using a GUI ID but
+[00:19:55] still mindly complicated the colors are
+[00:19:57] a little weird so people can't follow
+[00:19:58] along so that's why GitHub repo is here
+[00:20:01] sl/
+[00:20:02] omal write it down yourself any bounties
+[00:20:06] n that I can think of at the moment uh I
+[00:20:08] mean the front end could be a bounty
+[00:20:10] frankly the front end isn't the mo of
+[00:20:11] what we're building today anyways um but
+[00:20:14] feel free to create a pool request with
+[00:20:17] cloning the front end of aegle which
+[00:20:19] means two video boxes and a chat on the
+[00:20:21] side and we can see if there's you know
+[00:20:24] need of a bounty all right we have the
+[00:20:27] front end
+[00:20:31] repo
+[00:20:33] uh let's
+[00:20:52] see we need two pages I I'm just writing
+[00:20:55] front
+[00:20:57] end
+[00:20:59] webstor is good to depends on the
+[00:21:01] person's preference can you suggest okay
+[00:21:02] never mind I should not spend my
+[00:21:08] time there because I need to finish this
+[00:21:13] today uh react Dr
+[00:21:27] Tom
+[00:21:57] e
+[00:22:11] I could have had a lot more but you know
+[00:22:13] I took the conscious decision of not
+[00:22:14] getting more in hindsight not a great
+[00:22:20] decision
+[00:22:26] uh
+[00:22:36] all right landing page is
+[00:22:56] done
+[00:23:24] I thought you switch to I did but not
+[00:23:26] for classes do you guys want me to code
+[00:23:29] man I'm happy to do a
+[00:23:31] poll IDE for
+[00:23:39] today new of M PS
+[00:23:43] code all
+[00:23:47] right
+[00:23:56] um
+[00:24:16] route path equal to
+[00:24:24] slash okay P results they we
+[00:24:28] Cod I think it will take a long time for
+[00:24:31] us to migrate India SL the audience on
+[00:24:34] this stream over to you
+[00:24:36] know um but we can try we'll start I Me
+[00:24:39] Slowly we'll go there but let's not do
+[00:24:41] it it's just going to complicate
+[00:24:45] things uh browser out rout spots we
+[00:24:48] appreciate the way you deal with things
+[00:24:50] and love your videos can you please tell
+[00:24:51] me what are you doing I am late
+[00:24:54] oh we building an clone uh
+[00:24:58] oh I should remov
+[00:25:00] this um
+[00:25:02] [Music]
+[00:25:04] in we omal code react and bunch of
+[00:25:07] architectur feel free to go back and
+[00:25:08] there's a repo Link in the description
+[00:25:10] all
+[00:25:26] right
+[00:25:38] why does this always confuse me
+[00:25:43] uh why do I feel that is not wrong but
+[00:25:46] we'll
+[00:25:56] try
+[00:26:24] element okay that's what I was looking
+[00:26:26] for let's see
+[00:26:28] there you go thank you
+[00:26:44] sir okay there you
+[00:26:48] [Music]
+[00:26:51] go what happens on the landing page it
+[00:26:55] asks you for your name name
+[00:27:01] uh and
+[00:27:18] uh change it
+[00:27:26] Qui
+[00:27:31] um what happens when you click on a
+[00:27:34] button it takes you to room but
+[00:27:36] specifically you need to join logic
+[00:27:43] here so what happens in Omega is K
+[00:27:47] people randomly Shuffle and meet each
+[00:27:49] other
+[00:27:51] right this is going to be mildly
+[00:27:54] complicated slightly more complicated
+[00:27:56] than I was initially
+[00:28:21] anticipating all
+[00:28:24] right let's assume you reach room with a
+[00:28:27] query parameter query parameter
+[00:28:31] react that's the oh there is no room ID
+[00:28:33] is there no he just reached the room
+[00:28:35] with the name then I
+[00:28:53] guess
+[00:28:56] uh
+[00:29:12] for
+[00:29:26] ch
+[00:29:56] for
+[00:30:08] cool now when the person comes here we
+[00:30:11] need to create a connection of this
+[00:30:13] person with a server maintain that
+[00:30:16] connection always okay this is one of
+[00:30:17] the users and then shuffle them between
+[00:30:23] participants server logic will be
+[00:30:24] slightly more complicated than I was
+[00:30:25] initially anticipating so let's go to
+[00:30:27] Ser guys let me push what I have until
+[00:30:34] [Music]
+[00:30:55] now so now we're going to to do the same
+[00:30:57] thing we have done many times on this
+[00:30:58] stream which is we are going to create a
+[00:31:00] websocket
+[00:31:02] server
+[00:31:04] uh in this case you can actually get
+[00:31:07] away you don't really need a websocket
+[00:31:09] server you can just do with HTTP as well
+[00:31:12] um but if you want to add chat
+[00:31:14] especially you know as people you need a
+[00:31:16] websocket server never mind I spoke
+[00:31:18] spoke too soon websocket
+[00:31:22] npm there are two libraries one easy one
+[00:31:24] one hard one we tried we've tried both
+[00:31:26] of them now um which was the right one
+[00:31:28] the one which has more downloads I think
+[00:31:29] this one
+[00:31:33] yeah yep the it looks
+[00:31:39] right pull again pull again do we want
+[00:31:42] to use socket I do you want to use
+[00:31:44] standard websocket servers J ji
+[00:31:49] um
+[00:31:51] which liary we want to use socket.io
+[00:31:56] websockets
+[00:32:01] [Music]
+[00:32:07] [Music]
+[00:32:12] still socket
+[00:32:14] [Music]
+[00:32:20] I party K
+[00:32:25] by one love Library no idea use element
+[00:32:30] prop but
+[00:32:34] sure all right uh good to
+[00:32:38] go we are going to use socket
+[00:32:41] I even though it's not never mind it's
+[00:32:44] an okay decision doesn't matter for this
+[00:32:46] app if I'm being honest but generally
+[00:32:49] try to move away from
+[00:32:56] it
+[00:33:17] which is easier socket I is easier
+[00:33:25] so video got blogged but we can't play
+[00:33:28] Kar OA songs unfortunately he block
+[00:33:31] blocked my video last time so I had to
+[00:33:33] remove that section
+[00:33:35] from the code unfortunately like from
+[00:33:38] the library all right what is
+[00:33:41] this
+[00:33:48] uh serving HTML integrating socket
+[00:33:55] I what the
+[00:33:57] hell is this so
+[00:34:12] [Music]
+[00:34:25] Dio
+[00:34:36] Express you need
+[00:34:55] this
+[00:35:25] for
+[00:35:36] [Music]
+[00:35:55] for
+[00:36:25] for
+[00:36:55] say
+[00:37:13] all
+[00:37:13] right anytime a connection happens we
+[00:37:16] have a new
+[00:37:17] user let's create a user
+[00:37:25] manager
+[00:37:43] user name and
+[00:37:50] [Music]
+[00:37:55] socket
+[00:38:07] uh uh okay that's
+[00:38:25] fine
+[00:38:37] name. users of socket
+[00:38:40] ID
+[00:38:51] uh
+[00:38:54] uh what would happen when when one
+[00:38:57] person
+[00:39:00] reaches we need to have like a queue of
+[00:39:02] people who want to you know talk to each
+[00:39:05] other um should it be here let's shove
+[00:39:08] everything here only uh private no
+[00:39:12] should be something else so um in an app
+[00:39:16] like this what you need is um give we
+[00:39:19] people join there could be 30 people
+[00:39:22] let's say and then you need to you know
+[00:39:23] match people two at a time and then when
+[00:39:25] someone clicks next both of those people
+[00:39:27] go back to a queue and then you know get
+[00:39:29] matched with other people so how do you
+[00:39:32] do this how do you make sure people
+[00:39:35] don't get matched to the same person
+[00:39:36] again and you know keep cycling through
+[00:39:39] each other um what you can do is you
+[00:39:44] can two people go out of que and then
+[00:39:46] you know get matched again with each
+[00:39:47] other um you can
+[00:39:53] uh push one to the front and one to the
+[00:39:55] end hm
+[00:39:57] okay let's create a
+[00:39:59] queue of users who want to match with
+[00:40:01] each
+[00:40:02] other
+[00:40:15] um
+[00:40:21] uh and anytime a user joins they'll be
+[00:40:24] part of that Cube
+[00:40:29] and then we need to have a function that
+[00:40:32] keeps you know matching them
+[00:40:34] so match
+[00:40:36] you this dot clear
+[00:40:43] Q this clear queue thingy needs to send
+[00:40:47] both to the tell both the parties okay
+[00:40:49] you've been matched with each other you
+[00:40:50] can now talk to herir can talk to the
+[00:40:52] other side
+[00:40:54] um so
+[00:40:58] let's see
+[00:41:04] uh you basically need to pick people in
+[00:41:06] groups of two and then you know start
+[00:41:07] matching matching them
+[00:41:12] uh yeah it looks fine um so what will
+[00:41:15] this guy do this guy will be like
+[00:41:20] um if this
+[00:41:23] do L is less than
+[00:41:29] to return
+[00:41:55] if
+[00:42:17] we have the two users now we need to
+[00:42:19] tell them to talk to each other for
+[00:42:22] which we need to do the sdp exchange
+[00:42:28] um
+[00:42:29] huh another good question to answer here
+[00:42:32] is when two people match with each other
+[00:42:36] should we create a new webc connection
+[00:42:38] for them to talk or should we just reuse
+[00:42:40] their well they're peer top so we cannot
+[00:42:42] reuse so never mind um we need to
+[00:42:45] basically be like user one do socket.
+[00:42:49] imit um new room and then you know let's
+[00:42:53] maybe create a room where we assign
+[00:42:55] these two people maybe maybe maybe maybe
+[00:42:58] yeah H not even needed even easier um
+[00:43:01] what you can do
+[00:43:03] is user
+[00:43:05] one
+[00:43:07] type send
+[00:43:10] offer room give them a room ID which
+[00:43:14] could
+[00:43:15] be
+[00:43:25] generate
+[00:43:46] uh send offer and this thing and then we
+[00:43:49] need to maintain these are the two users
+[00:43:51] that are part of this room so for that
+[00:43:59] um we need to do
+[00:44:01] a room manager let's create a r
+[00:44:13] manager um this guy needs to create
+[00:44:16] rooms where people can talk to each
+[00:44:17] other
+[00:44:21] uh
+[00:44:23] H create room user one ID string user 2
+[00:44:28] ID
+[00:44:31] string and
+[00:44:37] um I can actually move this logic
+[00:44:42] here this can also maybe
+[00:44:54] be
+[00:45:12] whenever a room is created a room ID is
+[00:45:14] generated for that room and this guy
+[00:45:18] keeps a track of all the rooms here in
+[00:45:22] maybe a map from string to um
+[00:45:27] room
+[00:45:29] which room basically has user one which
+[00:45:33] is a user user two which is a user and
+[00:45:36] then room ID which is a
+[00:45:41] string ID equal to this
+[00:45:44] thing this room equal to new
+[00:45:53] map.
+[00:45:54] set room ID not
+[00:45:58] to
+[00:46:02] string um this room has this user one
+[00:46:05] this user two this room ID all
+[00:46:12] right don't need the room
+[00:46:15] ID um now user one. socket. imit
+[00:46:24] um
+[00:46:26] and
+[00:46:38] offer for this room ID and then whenever
+[00:46:41] the offer comes we do we forward it to
+[00:46:45] the right room all right
+[00:46:50] um on offer room ID
+[00:46:54] string
+[00:46:57] on answer what is this offer and answer
+[00:46:59] is something I'll discuss soon this is
+[00:47:01] the web RTC bit
+[00:47:05] um
+[00:47:16] course user
+[00:47:24] two youit
+[00:47:29] um
+[00:47:32] type offer and
+[00:47:54] STP
+[00:48:00] all right and on answers need to do the
+[00:48:04] same thing for the other
+[00:48:16] side all right uh generate one offer on
+[00:48:19] answer create
+[00:48:22] room and
+[00:48:24] then
+[00:48:27] when user disconnects we remove them
+[00:48:29] from the room
+[00:48:44] and I've tagged you on Shar I will look
+[00:48:47] at it later uh I'm going to forget again
+[00:48:49] just ping
+[00:48:54] rookie
+[00:48:58] uh all
+[00:49:00] right
+[00:49:03] dot create room user one user two there
+[00:49:07] we
+[00:49:09] go
+[00:49:18] um all right we have the room this is
+[00:49:22] good enough this will send across the
+[00:49:24] offer which which will then emit the
+[00:49:30] offer and one important thing here is
+[00:49:33] anytime a user is
+[00:49:37] initialized we need to initialize their
+[00:49:42] handlers this.
+[00:49:48] socket this will be the
+[00:49:54] socket
+[00:50:00] socket do on
+[00:50:04] offer STP
+[00:50:07] um now that we have an STP
+[00:50:11] um room equal to oh needs to send the
+[00:50:14] room ID as
+[00:50:23] well class here is where the difference
+[00:50:27] between a arrow function and a normal
+[00:50:29] function will matter this is something
+[00:50:31] people have been asking in the cohort
+[00:50:32] though took a
+[00:50:35] screenshot room manager dot remove user
+[00:50:39] add
+[00:50:40] user on
+[00:50:45] offer on offer with the the room
+[00:50:49] ID and the
+[00:50:52] STP there we go and then the same thing
+[00:50:56] answer I
+[00:51:10] to all
+[00:51:17] right surve react query Redux or react
+[00:51:21] query which one should I choose by
+[00:51:22] aren't they different things unless I'm
+[00:51:24] missing something obvious here react
+[00:51:27] query what is react
+[00:51:29] query uh oh it is State Management
+[00:51:33] interesting I thought it is for managing
+[00:51:36] forms is that react forms I don't know
+[00:51:38] well basically I'm not equipped to
+[00:51:39] answer this question Redux is the more
+[00:51:41] popular
+[00:51:44] one
+[00:51:46] uh socket
+[00:51:50] socket all right quick checkpoint here
+[00:51:53] guys uh we are halfway there I think the
+[00:51:57] backend is almost done
+[00:51:59] only what have we done until now we have
+[00:52:02] written the code of a basic backend
+[00:52:04] server which I will push also very soon
+[00:52:05] where you can create a websocket
+[00:52:07] connection multiple people can create
+[00:52:09] websocket connections and each one of
+[00:52:11] these users is stored in a user manager
+[00:52:15] class and as people join they are pushed
+[00:52:19] onto a queue okay H by these are the
+[00:52:22] people who are waiting in the queue to
+[00:52:23] match with another person then from time
+[00:52:25] to time we pull
+[00:52:27] out two people from this
+[00:52:33] Cube and then send them to something
+[00:52:36] called the room
+[00:52:39] manager whose job is okay by these two
+[00:52:41] people have come they need to you know
+[00:52:43] they need to match with each other so it
+[00:52:44] sends the first guy something
+[00:52:46] called a message that says ask
+[00:52:49] offer which is the same thing that you
+[00:52:51] see right here if you go to the room
+[00:52:54] manager anytime a room is created the
+[00:52:57] first person is Sent send offer not ask
+[00:53:00] offer send offer it tells the first
+[00:53:02] person can by please send an offer an
+[00:53:04] offer basically is the person telling uh
+[00:53:07] bro create room user one to
+[00:53:12] mistake thank you but create room create
+[00:53:21] room don't worry um this guy tells the
+[00:53:24] user one okay by please give me your web
+[00:53:27] RTC configuration basically and this guy
+[00:53:29] responds back with it web RTC
+[00:53:31] configuration something called the sdp
+[00:53:33] which is called the session description
+[00:53:36] protocol we will see what this is why
+[00:53:38] this is used what it looks like very
+[00:53:40] soon the server when it receives it
+[00:53:43] which is right
+[00:53:47] here it then calls room manager. on
+[00:53:50] offer which what does it do it tells the
+[00:53:52] second user now can by the other first
+[00:53:54] party has sent the offer you now send me
+[00:53:58] the answer so it sends the offer which
+[00:54:00] basically is whatever sdp it got it
+[00:54:02] forwards to the other user and this user
+[00:54:05] pay there will be logic whenever I
+[00:54:06] receive an sdp I respond back with an
+[00:54:08] answer which is again catched where it
+[00:54:11] is
+[00:54:12] catched right here when you receive an
+[00:54:15] answer you then send back to the user
+[00:54:17] one the answer so basically means this
+[00:54:20] sdp will reach back to the end user so
+[00:54:22] what is happening this is user One
+[00:54:24] browser this this is user two browser
+[00:54:26] this is the server whenever we know okay
+[00:54:29] a room has been created or these two
+[00:54:30] people have matched with each other the
+[00:54:32] server sends person one please give me
+[00:54:35] your basically IP port protocol where
+[00:54:37] can you receive video this person sends
+[00:54:39] that to the server server sends that to
+[00:54:41] the second user second user is like okay
+[00:54:43] this is where I can find the first
+[00:54:45] person I have their IP and everything
+[00:54:47] this is my IP and everything please give
+[00:54:48] it to the second user or the first user
+[00:54:50] and then this guy gets the IP of this
+[00:54:52] guy and now they can peer to-peer
+[00:54:54] connect with each other now even if the
+[00:54:56] server crashes does not matter they can
+[00:54:59] talk to each other they can send each
+[00:55:00] other
+[00:55:02] video on
+[00:55:08] offer oh okay okay I see it now
+[00:55:11] appreciate
+[00:55:13] it user to on
+[00:55:16] offeri but so that's a high level of how
+[00:55:18] web RTC happens back end P might seem
+[00:55:20] pretty simple it is pretty simple what
+[00:55:22] is happening is the server in the middle
+[00:55:24] which is what's called the signaling
+[00:55:26] server which is because it's basically
+[00:55:28] signal it's doing nothing taking an
+[00:55:30] offer from one side going to the other
+[00:55:31] side taking the answer from this side
+[00:55:33] sending it back to the first side that's
+[00:55:35] all that it has to do basically let the
+[00:55:38] two
+[00:55:39] parties exchange
+[00:55:41] their IP port protocols that they
+[00:55:45] support uh encodings that they support
+[00:55:49] with each other and once this is shared
+[00:55:51] they can directly talk to each other and
+[00:55:53] send media between them as long as
+[00:55:55] they're not in a very restrictive
+[00:55:56] Network in which case you have to do
+[00:55:58] something
+[00:55:59] called bring in a turn server which we
+[00:56:02] will get to if we need it but for now
+[00:56:03] this is great there might still be a bug
+[00:56:06] we can fix it but for now we're done
+[00:56:09] with the server let's see if it works
+[00:56:10] and then go from there it also push
+[00:56:15] it looks
+[00:56:17] good feel free to look at the code as
+[00:56:23] well
+[00:56:28] I'm going to push it
+[00:56:46] up how to distinguish two users in the
+[00:56:48] front end there what do you mean the
+[00:56:51] socket IDs
+[00:56:53] right all right screen screen oh yeah
+[00:56:56] yeah yeah sorry my bad my bad my bad
+[00:56:57] thank you thank you thank you appreciate
+[00:56:58] it um I did nothing I just pushed the
+[00:57:00] code base um onto GitHub so if you go
+[00:57:03] back to the link in the description you
+[00:57:05] can find all the back end code that I've
+[00:57:08] written in the last half an hour over
+[00:57:09] here feel free to look at it let's also
+[00:57:11] take a small break of 4 minutes and then
+[00:57:14] we will restart at uh
+[00:57:20] 9:45 gives me a copyright
+[00:57:23] strike
+[00:57:31] Gill back in 5 minutes
+[00:57:53] guys
+[00:57:55] [Music]
+[00:58:23] for
+[00:58:24] [Music]
+[00:58:34] [Music]
+[00:58:43] foree
+[00:58:45] fore
+[00:58:47] [Music]
+[00:58:53] fore
+[00:58:56] [Music]
+[00:59:10] right we'll restart in 2
+[00:59:12] [Music]
+[00:59:14] minutes looking at chat in case someone
+[00:59:16] has
+[00:59:18] anything line
+[00:59:23] 46
+[00:59:27] [Music]
+[00:59:33] full stack driver
+[00:59:37] Vibes oh God that's so
+[00:59:41] [Music]
+[00:59:45] funny There is a feature in vs code
+[00:59:47] where we can only Zoom to the editor
+[00:59:49] known as Mouse and wheel Zoom please
+[00:59:50] turn it on there is a feature in vs code
+[00:59:53] where you can only Zoom
+[00:59:55] the editor known as Zoom Mouse wheel
+[01:00:15] [Music]
+[01:00:23] Zoom
+[01:00:28] [Music]
+[01:00:32] preferences
+[01:00:34] [Music]
+[01:00:36] settings High
+[01:00:40] [Music]
+[01:00:45] preferences Zoom the font of the editor
+[01:00:48] when
+[01:00:48] using Mouse wheel
+[01:00:53] oh
+[01:00:57] [Music]
+[01:00:58] 9:45 guys let's start coding
+[01:01:01] again
+[01:01:03] oh pretty good I like
+[01:01:06] it CH G let's continue the back end is
+[01:01:09] done let's go to the front end now the
+[01:01:11] front end needs to initialize a
+[01:01:13] connection with the back
+[01:01:16] end after we initialize the connection
+[01:01:18] with the back end is when um we need to
+[01:01:21] write some front end web RTC logic which
+[01:01:23] is the difficult bit for for today so
+[01:01:25] let's see how close we can get to it
+[01:01:28] let's go to the front end code
+[01:01:30] specifically let's go to components /
+[01:01:33] room. TSX where the person comes
+[01:01:36] whenever they uh join a specific
+[01:01:41] room all right YouTube dashboard
+[01:01:46] clone now that we have this we have
+[01:01:51] to socket IO
+[01:02:04] react error in back end line 46 let me
+[01:02:08] check uh front
+[01:02:12] end back end online back end which file
+[01:02:16] though
+[01:02:18] 46 I don't see anything here what was
+[01:02:21] the other one user manager 46 there we
+[01:02:23] go room equal to this thing room manager
+[01:02:27] user one user
+[01:02:28] two clear
+[01:02:32] cues this clear cues what's the bug
+[01:02:37] here you said in the previous live
+[01:02:39] stream that you're going to create
+[01:02:39] multiplay time because cre able to
+[01:02:42] company my app to yours okay so that I
+[01:02:46] created it so that I will be able to
+[01:02:48] company my app to yours nice would love
+[01:02:51] to see it when we reach it probably in
+[01:02:52] the next live stream all right this is
+[01:02:55] our component that renders yeah we need
+[01:02:56] to create a socket IO connection to the
+[01:02:58] back end
+[01:03:03] so
+[01:03:09] uh let's go back to index.ts iio equal
+[01:03:14] to server
+[01:03:20] comma new
+[01:03:23] server
+[01:03:53] for
+[01:03:56] easy work us is double in second
+[01:03:58] argument let's see 46 user
+[01:04:04] manager oh thank you sir appreciate
+[01:04:11] it
+[01:04:13] uh back
+[01:04:23] here
+[01:04:27] [Music]
+[01:04:53] for
+[01:05:23] for
+[01:05:32] [Music]
+[01:05:39] high power is 75 in either of my
+[01:05:53] eyes
+[01:06:23] for
+[01:06:36] uh offer has sdp and should also have
+[01:06:39] the room ID and same thing for all
+[01:06:43] oh on answer should return
+[01:06:48] answer this should also have the room
+[01:06:52] ID all right
+[01:06:54] right ID on offer we'll get the offer
+[01:06:59] and then alert
+[01:07:02] send answer
+[01:07:06] [Music]
+[01:07:15] [Music]
+[01:07:22] please
+[01:07:24] [Music]
+[01:07:39] [Music]
+[01:07:52] for
+[01:07:54] [Music]
+[01:08:02] hi K I was in Jer 7 experience
+[01:08:04] networking python cubern can you
+[01:08:07] Enlighten what should I start with as a
+[01:08:09] content creator looking for some ideas
+[01:08:13] uh whatever you think is missing on
+[01:08:15] YouTube is the best thing to put on
+[01:08:16] YouTube if you know you want to become a
+[01:08:17] content
+[01:08:20] creator uh so whatever you think you
+[01:08:22] know is there a Gap in people don't know
+[01:08:25] specific thing teach that all new that's
+[01:08:28] fine
+[01:08:31] uh all right
+[01:08:35] done send offer please send answer
+[01:08:38] please all right
+[01:08:43] name
+[01:08:45] uh all
+[01:08:49] right can hi someone wants to start
+[01:08:53] freelance cont track job from Canada
+[01:08:54] while living on the East Coast Canada e
+[01:08:58] what are the ways to attract good
+[01:08:59] clients apart from upwork and top T so I
+[01:09:01] don't have too much idea about the
+[01:09:03] Canadian Market my only idea that I had
+[01:09:05] right now is it's very Dilly dly at the
+[01:09:07] moment especially it um but you said it
+[01:09:10] if you get into top TI the thing is it's
+[01:09:12] much easier to you know charge $50 an
+[01:09:14] hour from Canada than it is from India
+[01:09:16] because you
+[01:09:19] know if people to two people same skills
+[01:09:22] the one with the better time zone will
+[01:09:23] be preferred though unfortunately I
+[01:09:25] don't have a good answer I think you
+[01:09:26] just wasted your $7 um but the answer
+[01:09:29] Remains the Same this is one way the
+[01:09:31] other way is you go
+[01:09:32] independently
+[01:09:34] the so I'm giving you an answer that's
+[01:09:36] what benefit do you get from being from
+[01:09:38] Canada and it is that you get a better
+[01:09:40] time zone but every advice everything
+[01:09:42] else Remains the Same okay you know be
+[01:09:43] very good at something and you know find
+[01:09:44] a person and then connect with them uh
+[01:09:47] up work if I'm being honest is a little
+[01:09:48] too overcrowded especially for your
+[01:09:50] Market you'll be competing with Indian
+[01:09:52] developers who have you know very low
+[01:09:54] hourly so might make sense for you to
+[01:09:57] not go to up topt is a good option uh
+[01:10:00] all right let's try this out guys I
+[01:10:02] think this is done CD front
+[01:10:06] end no K
+[01:10:09] NOA copyright strike oh sorry
+[01:10:22] uh
+[01:10:24] in delete user should it be not equal to
+[01:10:27] in equal to delete user you might be
+[01:10:31] wrong sir you might be right sir delete
+[01:10:34] uh
+[01:10:35] user remove user uh filter this thing is
+[01:10:40] not equal you are right
+[01:10:43] sir all right bount this is a good
+[01:10:50] find uh all right is done let's start
+[01:10:54] the back end as
+[01:10:56] well let's try try this
+[01:10:59] [Music]
+[01:11:13] [Music]
+[01:11:22] out
+[01:11:24] [Music]
+[01:11:32] okay back end is done front end is up
+[01:11:35] let's try this
+[01:11:47] [Music]
+[01:11:52] out
+[01:11:54] [Music]
+[01:12:12] [Music]
+[01:12:22] for
+[01:12:27] okay I
+[01:12:31] yeah
+[01:12:44] oh
+[01:12:49] oh
+[01:12:52] uh
+[01:13:13] [Music]
+[01:13:18] [Music]
+[01:13:22] spe
+[01:13:30] [Music]
+[01:13:37] oh there you
+[01:13:41] go
+[01:13:49] Ser control is reaching
+[01:13:52] here
+[01:14:07] and user name and socket
+[01:14:12] huh let's give it a random name for
+[01:14:18] now user will push them to the users
+[01:14:21] will push them to the queue will call
+[01:14:23] your cues which will find another user
+[01:14:25] and try to match
+[01:14:27] them uh the only other thing
+[01:14:31] is
+[01:14:37] okay do
+[01:14:39] send
+[01:14:42] Lobby basically means you're in in the
+[01:14:45] lobby
+[01:14:47] uh fine and then anytime a user
+[01:14:52] leaves
+[01:15:22] fore
+[01:15:30] um if us is part of a room we need to
+[01:15:33] clear that
+[01:15:37] room create room on off or on on se you
+[01:15:40] need
+[01:15:49] uh uh generate on answer create
+[01:15:54] room C your add uh let me
+[01:16:01] move user
+[01:16:05] left delete
+[01:16:09] room basically means anytime a user
+[01:16:12] leaves we need to remove the room from
+[01:16:16] here which basically
+[01:16:22] means
+[01:16:29] xx. room ID equal to
+[01:16:34] um if
+[01:16:41] not user
+[01:16:44] left
+[01:16:46] uh so we'll get back to the cleanup
+[01:16:49] logic never mind don't need it yet um
+[01:16:51] add user loog Lobby and then this thing
+[01:16:54] this thing this thing all right let's go
+[01:16:55] to room.
+[01:17:00] TSX so on um
+[01:17:22] Lobby
+[01:17:27] waiting
+[01:17:29] to connect you to
+[01:17:32] someone and then either one of these
+[01:17:35] comes you can do a set Lobby
+[01:17:41] fals uh either send offer comes or offer
+[01:17:46] comes
+[01:17:47] or comes right looks good hi this thing
+[01:17:52] and then you have will be two video
+[01:17:53] boxes video width equal
+[01:17:57] to he equal to
+[01:18:01] 400 all right
+[01:18:05] um let's try this
+[01:18:21] out
+[01:18:27] oh sorry wrong
+[01:18:33] one person
+[01:18:37] one join waiting to connect you to
+[01:18:41] someone person to
+[01:18:45] join
+[01:18:51] waai
+[01:19:14] manager first person comes second person
+[01:19:17] comes clear
+[01:19:21] cues
+[01:19:23] inside clear
+[01:19:25] cues and
+[01:19:34] then us one us two
+[01:19:51] right
+[01:19:53] all right waiting to connect to someone
+[01:19:56] twice again inside clear
+[01:20:02] cues if less than two return
+[01:20:08] control uh
+[01:20:21] oh
+[01:20:27] undefined and
+[01:20:35] undefined that users. push
+[01:20:40] socket the Q pop push to the
+[01:20:46] Q good idea
+[01:20:51] huh
+[01:21:06] connected looks
+[01:21:15] decent what am I missing here I'm sure
+[01:21:18] you guys already know
+[01:21:20] but q. does it return the right
+[01:21:30] thing
+[01:21:32] thing us cons Deb is very nice hacker by
+[01:21:37] hacker by you're using angular
+[01:21:42] or users find x. idal to this
+[01:21:51] thing
+[01:21:58] both us are sending offer none is
+[01:22:01] anybody okay uh const id1 equal
+[01:22:21] to
+[01:22:40] oh inside clear cues creating room oh
+[01:22:43] creating room
+[01:22:47] okay if it goes inside creating room
+[01:22:50] user one user two this
+[01:22:53] whatever user send Das
+[01:22:59] offer oh I do see an alert send offer
+[01:23:10] please send offer please
+[01:23:15] off on send
+[01:23:18] offer send the
+[01:23:21] offer
+[01:23:27] basically comes
+[01:23:29] here does it come here though probably
+[01:23:32] does console. log offer
+[01:23:40] received on
+[01:23:43] offer
+[01:23:45] console user to
+[01:23:51] is
+[01:23:55] all right let's try that one more
+[01:24:02] time user two is
+[01:24:06] undefined user two is
+[01:24:08] undefined basically means cannot find
+[01:24:11] the room ID you see that I'm not sending
+[01:24:13] the room
+[01:24:21] ID
+[01:24:33] offed
+[01:24:36] one uh oh wow it's going to
+[01:24:41] be most probably it
+[01:24:48] um Global
+[01:24:51] ID
+[01:25:11] send offer please there you go send
+[01:25:13] answer please connection done all right
+[01:25:16] beautiful try that one more time one
+[01:25:19] more time let's go send offer please
+[01:25:27] connection s
+[01:25:30] answer
+[01:25:33] please okay do
+[01:25:41] this send offer
+[01:25:47] please
+[01:25:51] uh so let me share what has happened
+[01:25:53] until now we're basically getting very
+[01:25:55] close here um we have done everything
+[01:25:58] but the actual exchange of the IPS as I
+[01:26:00] said um when you're creating a web RTC
+[01:26:02] application both the parties need to
+[01:26:05] exchange some information and now we're
+[01:26:07] getting very close to it if I start my
+[01:26:08] backend server here and if I go here in
+[01:26:11] one tab it says waiting for the other
+[01:26:13] person to connect if I go in another tab
+[01:26:15] you will see the first tab says send
+[01:26:18] offer please so this is the back end
+[01:26:20] asking this guy to share their
+[01:26:21] information and then if you look at the
+[01:26:23] other tab it says send answer please
+[01:26:25] this is the back end now telling bro
+[01:26:27] this is the offer from the first person
+[01:26:28] please send the answer and then finally
+[01:26:31] when this guy responds with the answer
+[01:26:32] this guy receives the final thing the
+[01:26:34] connection is done take now is when we
+[01:26:36] will introduce the actual web RTC apis
+[01:26:39] here the actually creating like U
+[01:26:42] sharing your IPS between them what
+[01:26:43] exactly needs to happen in these three
+[01:26:45] call backs basically on the front end so
+[01:26:47] now we're writing the front end code
+[01:26:49] specifically the code where I told you K
+[01:26:51] by
+[01:26:57] um you know the part we need to write
+[01:26:59] some client side webc logic which I said
+[01:27:01] is a little harder and you know might
+[01:27:03] twist your bones if you have not done it
+[01:27:05] before though at this point you should
+[01:27:07] probably read through web RTC um
+[01:27:11] documentation okay it's 10 already we
+[01:27:13] only have two more hours left uh web RTC
+[01:27:16] MD and dos there you go this is the web
+[01:27:18] RTC API that you can use inside your
+[01:27:20] browser now you can do webc see outside
+[01:27:22] the browser as well you can do it on a
+[01:27:23] backend server you can do it on
+[01:27:26] your Raspberry Pi which I had somewhere
+[01:27:29] here you can run web RTC on any device
+[01:27:31] basically um we are running it browser
+[01:27:33] to browser but there are use cases where
+[01:27:35] you know it flows through a server
+[01:27:37] basically your server also talks RTC and
+[01:27:39] over there you won't see this API this
+[01:27:40] API this RTC PR connection object that
+[01:27:43] you're seeing here only exists inside
+[01:27:45] the browser I repeat this only exists
+[01:27:47] inside your browser no shoot there will
+[01:27:50] be another problem
+[01:27:54] uh I certainly remember there will be
+[01:27:57] another thing we need to implement
+[01:27:59] um what I was saying was this RTC
+[01:28:03] Pier connection only exists inside the
+[01:28:04] browser and these are the apis that we
+[01:28:06] need to get comfortable with if you want
+[01:28:07] to write this code um if you want to
+[01:28:09] write the same code on the back end you
+[01:28:10] will write some other you know you will
+[01:28:12] have other classes to access to or you
+[01:28:14] will write you know the web RTC protocol
+[01:28:16] from scratch all right so the other
+[01:28:18] thing we need to do is
+[01:28:20] uh in an case um what might H what you
+[01:28:23] might expect to happen is okay you know
+[01:28:25] this is person one this is person
+[01:28:28] two and they want to share video with
+[01:28:31] each other so they will create a single
+[01:28:34] web RTC Connection in an ideal case
+[01:28:39] unfortunately life isn't ideal and
+[01:28:41] neither is web RTC the protocol if you
+[01:28:43] create a single web RTC connection and
+[01:28:45] both parties try to send video to each
+[01:28:48] other you will face an issue called
+[01:28:51] glaring in web RTC which basically means
+[01:28:54] okay you know there is some sort of race
+[01:28:55] condition whenever you want to send
+[01:28:56] video right you will
+[01:28:58] change
+[01:29:00] your sdp and then you would expect the
+[01:29:02] other person to also respond back with a
+[01:29:05] new
+[01:29:06] answer and if this guy needs to add
+[01:29:08] video this will also want to send an
+[01:29:10] offer so what ends up happening in this
+[01:29:12] case is you know both the parties change
+[01:29:14] the sdp at the same time and basically
+[01:29:16] see no video no audio everything breaks
+[01:29:17] so for that reason what we actually have
+[01:29:20] to do is we have to create two Two web
+[01:29:23] RTC connections I repeat we have to
+[01:29:25] create two webc connections between
+[01:29:27] person one and person two person one
+[01:29:29] will use the first webc connection to
+[01:29:31] send video to this guy person two will
+[01:29:33] use a second webc connection to send
+[01:29:36] video to this guy so this is for
+[01:29:38] receiving this is for
+[01:29:40] sending and this is for sending this is
+[01:29:43] for receiving AB we have assumed you
+[01:29:45] know this is very ideal or AB the code
+[01:29:48] we have written will work if only one
+[01:29:50] party needs to send the other party
+[01:29:51] video but if both of them need to share
+[01:29:53] which is the use case here you will face
+[01:29:55] the issue of what of
+[01:29:57] glaring for which reason we need to add
+[01:30:00] some more code which shouldn't be too
+[01:30:01] difficult to you know have both the
+[01:30:03] parties create offers and both the
+[01:30:04] parties create answers but let's just do
+[01:30:06] one side first and then we can go from
+[01:30:08] there
+[01:30:09] CH let's get comfortable with the RTC
+[01:30:12] Pier connection object what is it what
+[01:30:15] does it do the RTC Pier connection
+[01:30:17] interface represents a web RTC
+[01:30:19] connection between a local computer and
+[01:30:21] a remote Pier it provides the method to
+[01:30:23] connect to a remote Pier maintain and
+[01:30:25] monitor the connection and close the
+[01:30:27] connection once it is no longer leaded
+[01:30:29] which is exactly what we want here
+[01:30:31] whenever you receive a send offer from
+[01:30:34] the server it basically means the server
+[01:30:35] is asking you can by you are connected
+[01:30:37] to someone you need to send them your
+[01:30:39] video and hence send an offer to the
+[01:30:41] other side so that you know you guys can
+[01:30:42] connect and share video so here what
+[01:30:44] does this guy need to do the first thing
+[01:30:45] it needs to do is create a new prer
+[01:30:50] connection which is their you
+[01:30:54] know way of saying I am ready to send
+[01:30:57] video to the other site now when you
+[01:30:58] create a peer
+[01:31:00] connection is when you can when you're
+[01:31:03] sort of when you're ready to send video
+[01:31:05] to the other side and at this point you
+[01:31:07] need to share your IP your codex that
+[01:31:11] your browser supports your uh Port that
+[01:31:13] you want to you know send data from
+[01:31:15] things like these um send video from
+[01:31:16] things like the or receive video on um
+[01:31:18] to the other side which is called the
+[01:31:21] sdp the thing that I've been talking
+[01:31:22] about here after you create a PR
+[01:31:24] connection object you create something
+[01:31:25] called the sdp which what does it stand
+[01:31:28] for session description protocol it
+[01:31:30] basically means you are ready to talk to
+[01:31:32] the other side and if we you will we
+[01:31:34] will log the sdp very soon if you look
+[01:31:35] at the sdp you'll see it it has things
+[01:31:37] like you know I support video
+[01:31:41] h264 I support audio
+[01:31:45] whatever encoding format what are the
+[01:31:47] famous ones I totally forgot
+[01:31:50] uh two three in coding formats for audio
+[01:31:53] um my
+[01:31:54] IP is this which right now since I'm
+[01:31:57] running it on my machine it'll just be
+[01:31:58] this or you know my public IP and my
+[01:32:00] port where I can receive audio send
+[01:32:02] video is whatever 3,000
+[01:32:04] 30,000 plus a bunch of other things we
+[01:32:06] need to generate this sdp for doing that
+[01:32:09] you do this pc.
+[01:32:11] create
+[01:32:13] offer what do you do PR connection that
+[01:32:15] I've created do create offer I'm ready
+[01:32:17] to offer my sdp to the other
+[01:32:20] side I think this is an async function
+[01:32:22] if I'm not wrong yeah so you await on
+[01:32:25] it const um STP equal to
+[01:32:31] this and then I can just send my sdp to
+[01:32:34] the other
+[01:32:36] side and similarly on the other side
+[01:32:39] when I receive this
+[01:32:41] sdp I create a perer connection object I
+[01:32:45] say peer connection object. set remote
+[01:32:48] description I'm telling okay this is my
+[01:32:50] peer connection object the the other
+[01:32:52] side has sent me this
+[01:32:57] sdp remote description description RTC
+[01:33:01] sdp and
+[01:33:03] type sdp and
+[01:33:06] type
+[01:33:07] oh type is offer for this
+[01:33:11] guy
+[01:33:12] type offer and sdp the actual
+[01:33:17] sdp uh which is going to be oh there you
+[01:33:21] go the offer that you get set remote
+[01:33:24] description as this and now this guy
+[01:33:26] will create the
+[01:33:29] answer which needs to respond back this
+[01:33:31] is the most difficult bit that I was
+[01:33:32] talking about K know if you understand
+[01:33:33] this or you won won't most probably
+[01:33:36] understand this because this is the web
+[01:33:38] RTC core API that you need to know of
+[01:33:39] thankfully you only need to need this
+[01:33:41] much is good enough a few more things
+[01:33:42] you will we will discuss something
+[01:33:43] called tric I but in an ideal scenario
+[01:33:48] this will just work this will not work
+[01:33:49] AB because you need for
+[01:33:52] what are called ice candidates to come
+[01:33:53] back what is it we'll see very soon but
+[01:33:55] okay we have the sdp and this guy needs
+[01:33:57] to respond back with this and when you
+[01:33:59] receive the
+[01:34:03] answer sending PC comma set
+[01:34:08] send use
+[01:34:12] State
+[01:34:16] n PC comma
+[01:34:20] set
+[01:34:44] ah
+[01:34:50] shoot
+[01:34:57] H receiving PCS
+[01:35:00] this and then finally when you get the
+[01:35:09] answer pc. set remote description
+[01:35:14] type and and then
+[01:35:16] sdp
+[01:35:20] right
+[01:35:27] okay there you
+[01:35:30] go room ID doesn't really matter answer
+[01:35:33] doesn't
+[01:35:35] matter
+[01:35:42] cool all right let me do a pause and
+[01:35:45] quickly share what all code I've written
+[01:35:47] as I said in your browser whenever
+[01:35:50] you're in your browser you can create
+[01:35:51] something called the RTC Pier connection
+[01:35:53] object const PC equal to new RTC PR
+[01:35:56] connection what does this mean this
+[01:35:58] means I am ready to now send create a
+[01:36:01] web RTC connection to the other side for
+[01:36:03] you to create a webc connection you need
+[01:36:05] to get back an offer the way to do that
+[01:36:08] is
+[01:36:09] this create offer and then if I log the
+[01:36:13] offer here you see the sdp that I've
+[01:36:16] been talking about the very long string
+[01:36:19] which if I you know paste somewhere
+[01:36:22] here in Visual Studio
+[01:36:23] code it says this is the IP that herir
+[01:36:26] is ready to send SL receive on uh and it
+[01:36:29] should be slightly long okay it
+[01:36:30] shouldn't be longer right now it doesn't
+[01:36:32] have too much other than that right now
+[01:36:33] because I have not yet started to send
+[01:36:36] my video when I start to send my video
+[01:36:38] you will see this changes a bit and you
+[01:36:40] know I send more information on the
+[01:36:42] other side let's do that also let's
+[01:36:46] start to write the code that will start
+[01:36:48] to get my camera feed and push data
+[01:36:51] across this peer connection object let
+[01:36:52] me also write the code that I was
+[01:36:54] talking about that takes care of the
+[01:36:55] glaring bit um for that go to I mean
+[01:36:59] thankfully that's very simple I just
+[01:37:00] have to go to room manager and rather
+[01:37:03] than just sending send offer to one side
+[01:37:05] I just need to send it to the to both
+[01:37:06] the sides okay by you send your offer
+[01:37:08] for your sending perer connection and
+[01:37:09] the other side I will send you send your
+[01:37:11] offer for your perer connection and then
+[01:37:13] you know they exchange um information on
+[01:37:17] Two web RTC objects not one all right
+[01:37:19] sending PC receiving PC
+[01:37:24] um con remote
+[01:37:39] track uh what was it
+[01:37:43] called track in
+[01:37:50] but
+[01:37:57] media stream
+[01:38:05] track and maybe the local track as
+[01:38:20] well
+[01:38:22] oh this is just for video we need audio
+[01:38:24] tracks as
+[01:38:26] well local audio tracks at loc audio
+[01:38:30] track
+[01:38:34] then remote audio
+[01:38:40] track all right um the next thing that
+[01:38:43] needs to happen is whenever you are
+[01:38:45] receiving any video which basically
+[01:38:48] means on you'll receive a video on the
+[01:38:50] receiver in PC so receiving
+[01:38:55] PC do on
+[01:39:01] track
+[01:39:02] set if track. type equal
+[01:39:06] to audio
+[01:39:11] set remote audio
+[01:39:16] track I'll
+[01:39:19] set remote video
+[01:39:33] track remote video
+[01:39:44] track uh
+[01:39:50] set
+[01:40:19] uh all right
+[01:40:25] and before we do any of this we need to
+[01:40:27] get the
+[01:40:29] users media stream that is why you'll
+[01:40:31] see on
+[01:40:33] most video calling applications you
+[01:40:35] first reach a check your hair
+[01:40:38] screen if you try to join first you
+[01:40:41] reach a screen where you basically give
+[01:40:42] away your video stream to Google meet
+[01:40:45] and then you click on a button and you
+[01:40:46] get enter stream we need to create
+[01:40:47] something similar there are a few
+[01:40:48] reasons as to why that is always you
+[01:40:50] know sort of done um so let's do that
+[01:40:53] let's create our lobby screen needs to
+[01:40:56] now get the video stream as well but
+[01:40:57] then that won't work because routing so
+[01:41:00] let's not route um let's go to app.
+[01:41:04] TSX in our landing page we need to get
+[01:41:07] the users media
+[01:41:19] streams
+[01:41:23] uh
+[01:41:33] if oh my phone died let me open the
+[01:41:36] stream on the right just to make
+[01:41:40] sure uh I'm not sharing the wrong screen
+[01:41:43] or something
+[01:41:45] uh let's
+[01:41:48] see oh the thumbnail did we we forget to
+[01:41:51] change the thumbnail for today's live
+[01:41:52] seems like we did LOL never
+[01:42:07] mind oh
+[01:42:19] God
+[01:42:31] [Music]
+[01:42:38] [Music]
+[01:42:39] God I'm sorry
+[01:42:48] guys all right I'm sorry I'm I'm sorry
+[01:42:51] I'm
+[01:42:53] sorry let
+[01:42:55] me let me do a quick recap of what I've
+[01:42:58] done in the past 10 15 minutes not done
+[01:42:59] much so thankfully you guys are okay
+[01:43:06] um no screen good right ch um what I've
+[01:43:11] done until now is I've written some let
+[01:43:12] me push the code so you guys can follow
+[01:43:15] along uh I haven't done too much
+[01:43:16] thankfully or maybe I have I don't
+[01:43:19] know right screen share all right so
+[01:43:23] what I have done until now is now my
+[01:43:25] chat is open so I won't this won't
+[01:43:26] happen again hopefully until my laptop's
+[01:43:28] battery tires as well the other B
+[01:43:30] laptops all right uh let me push
+[01:43:35] this change in what I've done was um I
+[01:43:38] was basically saying something very
+[01:43:39] important which was okay you know you
+[01:43:40] have to make sure you have two perer
+[01:43:42] connections which is the code that I've
+[01:43:44] added now so let me take you through
+[01:43:46] that code I've also pushed that code um
+[01:43:49] onto GitHub so let me just explain that
+[01:43:51] on GitHub so that is you guys can
+[01:43:52] basically follow along from there only
+[01:43:54] let's look at the front end code that I
+[01:43:56] wrote in the last 2 minutes 15 minutes
+[01:43:58] when I was not sharing my screen I
+[01:43:59] basically only made changes here um
+[01:44:03] in components SL room. TSX here if you
+[01:44:08] look at it um a few things have changed
+[01:44:10] number one I have added four new tracks
+[01:44:14] here this is basically you yourself um
+[01:44:17] as in you the first two tracks are your
+[01:44:19] video track and your local video track
+[01:44:21] and local audio track depends your audio
+[01:44:23] and video you basically get objects of
+[01:44:24] these that you can send to the other
+[01:44:25] side not objects you actually send real
+[01:44:27] media but a single object in which you
+[01:44:30] get the current volume you can tweak the
+[01:44:31] volume you can
+[01:44:33] get mute the volume things like these um
+[01:44:36] those are stored in tracks and same for
+[01:44:38] the other side the other side will also
+[01:44:40] again the other side doesn't really send
+[01:44:41] me a track the browser gives you a
+[01:44:44] construct like a track which you can you
+[01:44:46] know put in a video HTML video element
+[01:44:49] and uh
+[01:44:51] actually hear audio and and look at the
+[01:44:53] video so these are four state variables
+[01:44:55] that I've created and now if you look at
+[01:44:57] our sending and receiving what do I do I
+[01:45:00] say by
+[01:45:02] whenever I get a send offer from the
+[01:45:04] server the server is basically telling
+[01:45:05] me K by you have joined the room start
+[01:45:08] sending your video to the other side I
+[01:45:10] create a new peer connection object and
+[01:45:14] I create the sdp by running pc. create
+[01:45:18] offer it basically means I creating an
+[01:45:20] offer
+[01:45:21] and this is the sdb that I was trying to
+[01:45:22] show but I probably was not able to um
+[01:45:25] so let me show that one more time I
+[01:45:26] basically said whenever you create
+[01:45:28] this const PC equal to new RTC Pier
+[01:45:32] connection
+[01:45:36] object if you do a pc. create
+[01:45:41] offer UC it creates this and the first
+[01:45:43] thing that you see here the sdp is what
+[01:45:46] what is basically a very big
+[01:45:48] text but it contains some very important
+[01:45:50] information things like you know your IP
+[01:45:52] that you're sending and as I start to
+[01:45:54] add tracks to this specific p connection
+[01:45:55] object this also gives you like an add
+[01:45:57] track
+[01:45:58] function where you can basically start
+[01:46:00] putting video tracks and audio tracks as
+[01:46:02] I add more video and audio tracks you
+[01:46:03] will see this sdp gets changed so the
+[01:46:06] whole exchange of offers and answers
+[01:46:07] happens very often okay you know you
+[01:46:09] send anytime you add a video you remove
+[01:46:11] a video you add an audio remove an audio
+[01:46:13] which things like you you muting
+[01:46:15] yourself on Zoom or you unmuting
+[01:46:16] yourself you keep resending these offers
+[01:46:19] to the server and to the other side um
+[01:46:22] so you will see this sdp object change a
+[01:46:24] lot but for now what have I done I said
+[01:46:27] cons sdp is equal to create offer
+[01:46:28] socket. emit offer STP and room ID so
+[01:46:31] I'm going to send my offer to the other
+[01:46:33] side whenever the other side receives my
+[01:46:35] offer which is basically the other side
+[01:46:37] will this code will run on the other
+[01:46:39] side and what will they do they will
+[01:46:40] also create a peer connection object
+[01:46:42] they will set the remote description
+[01:46:44] okay by is specific peer connection
+[01:46:45] object the other side has this sdp the
+[01:46:48] offer that they have sent
+[01:46:52] this should probably be sdp
+[01:46:55] um and I generate my own answer now the
+[01:47:01] other side what does it generate it
+[01:47:02] generates an answer it looks the same
+[01:47:04] only if I you know
+[01:47:05] ever go here and do a
+[01:47:12] RTC PR connection and do a pc. create
+[01:47:18] answer it also I first have to
+[01:47:23] create set remote description and then
+[01:47:25] create answer it'll just give me a very
+[01:47:26] similar object which has the STP which I
+[01:47:28] can send back to the first side this
+[01:47:31] exchange will happen twice both the
+[01:47:34] sides will initi initialize an offer
+[01:47:36] which is why if you look at it I have a
+[01:47:38] sending PC and a receiving PC every side
+[01:47:40] every browser will have one perer
+[01:47:42] connection through which they're sending
+[01:47:43] video and one pair connection through
+[01:47:45] which they're receiving video and the
+[01:47:46] reason for this is if you don't do this
+[01:47:48] you can actually get away with just a
+[01:47:50] sing single peer connection object in
+[01:47:51] fact that's what happens on Google meet
+[01:47:52] if you go to Google meet you will see
+[01:47:54] you have a single peer connection to the
+[01:47:55] server but if you go to any other
+[01:47:57] application go to hop in go to gather
+[01:47:59] Town go to
+[01:48:02] uh any you know un optimal video call
+[01:48:04] Zoom maybe even teams um you will notice
+[01:48:06] you have one for sending and one for
+[01:48:08] receiving data because it's just easy to
+[01:48:09] do it rather than having a single pair
+[01:48:11] connection the people at Google are
+[01:48:12] really smart they have done it using a
+[01:48:13] single pair connection mostly it's very
+[01:48:15] hard if you want to send data you want
+[01:48:16] to send one data from one peer
+[01:48:18] connection receive data from another
+[01:48:19] peer connection that the only high level
+[01:48:21] code that I've written now the thing
+[01:48:22] that I need to add here is as you can
+[01:48:24] see I've added two video objects I need
+[01:48:26] to add my own stream to the first one I
+[01:48:28] need to add this remote stream to the
+[01:48:29] second one and then maybe a few audio
+[01:48:31] elements as well to you know add the
+[01:48:33] audio for the other person so I can
+[01:48:34] actually hear them um for this what I
+[01:48:37] said was if you go to Google meet or any
+[01:48:39] other application you will see there's a
+[01:48:40] check your hair screen if you ever
+[01:48:42] invite someone if you're the first
+[01:48:43] person here does not matter but if
+[01:48:45] you're not the first person here if you
+[01:48:46] invite someone they first reach a check
+[01:48:48] your hair screen on that screen you
+[01:48:50] check your hair you select your camera
+[01:48:52] select your mic and then click on the
+[01:48:54] join button we're creating a similar
+[01:48:55] screen there are benefits to doing it
+[01:48:56] the benefit is biggest benefit is you
+[01:48:57] get the track before even you the
+[01:48:58] control reaches here so you know you
+[01:49:00] don't have to worry about running this
+[01:49:02] effect after you have access to users
+[01:49:04] video stream that's the only reason
+[01:49:05] we're doing it um so let's first create
+[01:49:07] a check your hair screen for that what
+[01:49:09] did I do I went to The Landing I
+[01:49:10] basically removing all the routing here
+[01:49:12] I'm saying bro there will be a single
+[01:49:14] component called
+[01:49:15] Landing which is our landing
+[01:49:18] page and here
+[01:49:21] I've have added a state variable called
+[01:49:23] joined and here I say we're good now
+[01:49:32] right you guys can now see the screen
+[01:49:34] right we're good to go I I'm pretty sure
+[01:49:36] you can but take just making
+[01:49:38] sure I need to do a window. navigator
+[01:49:43] do what is it uh
+[01:49:46] get
+[01:49:49] media devices. get user
+[01:50:02] media all right that's so funny
+[01:50:19] uh
+[01:50:49] oh
+[01:50:56] all right Set
+[01:51:03] uh uh local video track and local audio
+[01:51:06] track I will probably send from the
+[01:51:16] parent
+[01:51:18] expected
+[01:51:25] uh audio track and
+[01:51:28] then video
+[01:51:32] track to audio track is audio
+[01:51:44] track
+[01:51:48] um this is fine
+[01:51:51] uh should probably show the user their
+[01:51:53] video so
+[01:51:58] video
+[01:52:18] um
+[01:52:30] get video tracks and get audio tracks
+[01:52:32] great question though whenever you look
+[01:52:35] at any video stream for example even
+[01:52:38] this one right here it has an audio it
+[01:52:40] can have an audio and video attached um
+[01:52:42] it can just have video as well and you
+[01:52:44] can have a separate You Know audio track
+[01:52:47] for audio um but high level you get
+[01:52:51] access to this thing called the media
+[01:52:52] stream object in which you can shove
+[01:52:54] multiple audios and videos and whenever
+[01:52:56] you do a window. navigator media
+[01:52:57] devices. get user media and ask it for
+[01:52:59] the users camera and mic you get back
+[01:53:02] a media stream and from this media
+[01:53:05] stream get audio tracks gives you all
+[01:53:06] the tracks on this media stream if you
+[01:53:08] just have a single mic currently if you
+[01:53:10] have multiple mics you whenever you run
+[01:53:11] this you only get access to One mic or
+[01:53:13] one camera um so I'm just getting the
+[01:53:15] first mic track and the first camera
+[01:53:17] track that way I have access to the mic
+[01:53:18] and the camera track for this specific
+[01:53:20] users you know camera on their machine
+[01:53:22] and their mic and then from there I'm
+[01:53:24] just assigning to the
+[01:53:27] video element that I've created here uh
+[01:53:31] Source object equal to New Media
+[01:53:37] stream
+[01:53:41] track track
+[01:53:48] uh
+[01:53:59] um all right let's see if that works um
+[01:54:02] so if I go to my check your hair screen
+[01:54:04] now or whatever my landing
+[01:54:08] page I don't see
+[01:54:13] anything the
+[01:54:15] hell
+[01:54:17] oh oh shoot
+[01:54:24] okay let's go
+[01:54:29] here
+[01:54:32] allow I don't see my
+[01:54:34] video is that because I haven't
+[01:54:38] played document query select
+[01:54:44] video
+[01:54:48] play
+[01:54:58] video oh I need to click with the okay
+[01:55:01] let's TR that one more
+[01:55:17] time New Media remove this okay let's
+[01:55:23] this
+[01:55:26] withy
+[01:55:43] oh there we
+[01:55:45] go though I have my check your hair
+[01:55:49] screen almost done looks okay not great
+[01:55:51] but this
+[01:55:54] is Media
+[01:56:02] stream radio
+[01:56:06] track why does this not
+[01:56:18] work
+[01:56:30] oh there you go get video
+[01:56:45] tracks there you go CH check your hair
+[01:56:48] screen is done l
+[01:56:51] oh thanks guys all right
+[01:56:56] uh this is done now you have the video
+[01:56:59] and the audio track with you on this
+[01:57:01] check your hair screen now when the
+[01:57:03] person clicks on join um I'm just going
+[01:57:05] to you know render the other screen so
+[01:57:08] if
+[01:57:10] not joined you render
+[01:57:16] this
+[01:57:17] else you Rend
+[01:57:20] our room page so
+[01:57:23] basically return
+[01:57:27] room and yeah so let's just send a name
+[01:57:29] as an input name equal to name and then
+[01:57:34] local audio track and video audio
+[01:57:48] track
+[01:58:01] Discord ID JayZ 0 to 100 but have a
+[01:58:03] doubt shared in Discord but couldn't
+[01:58:04] solve it can you DM I don't look at them
+[01:58:07] tan Singh Vaga but you should message
+[01:58:10] rookie and send him a screenshot of the
+[01:58:11] 100 rupees that you've sent I'm sure
+[01:58:13] he'll
+[01:58:15] respond
+[01:58:17] um local your
+[01:58:32] track okay local
+[01:58:35] track and now I don't
+[01:58:38] need both of these things and yeah I
+[01:58:41] will do whenever you on this side um on
+[01:58:46] the offer side sorry send offer side we
+[01:58:49] we'll do a pc. add
+[01:58:51] track local
+[01:58:54] audio and then local video
+[01:59:03] track
+[01:59:07] track
+[01:59:08] okay and now the thing to keep in mind
+[01:59:11] is PC do
+[01:59:13] on Ice candidate is when I need
+[01:59:18] to resend the offer so I need to keep
+[01:59:21] doing this again and
+[01:59:23] again anytime you get what are called
+[01:59:26] ice candidates which I can share what
+[01:59:28] these are basically you ask what's
+[01:59:31] called a stun
+[01:59:33] server there is a lot of jargon could go
+[01:59:35] through if you want to you know learn
+[01:59:37] web RTC at a high level what happens is
+[01:59:39] how do I know what my IP is this is my
+[01:59:42] Mac machine I amirat if I want to ask
+[01:59:45] you okay by send me some video How Will
+[01:59:49] I I tell you this is my IP by please
+[01:59:51] send my video your you know video stream
+[01:59:55] to this specific IP how will you
+[01:59:57] discover your own IP you
+[02:00:00] can't you can't get access to that in
+[02:00:02] the browser unless you hit someone and
+[02:00:06] ask them Viro is rooki V who is Roi oh
+[02:00:10] rooki rooki is anur sorry the moderators
+[02:00:13] in Discord um you have to hit what's
+[02:00:17] called a T server what you can do is
+[02:00:20] basically on the internet hit a server
+[02:00:22] and tell bro what IP did you see of mine
+[02:00:24] please tell me what that is and then the
+[02:00:25] server can tell you you were at 3.1.5
+[02:00:28] do15 and then you can send this IP to
+[02:00:30] someone the one on Ice candidate is a
+[02:00:34] call back that runs whenever you get
+[02:00:36] these ice candidates from the Sun Ser
+[02:00:38] stun server and anytime you get new set
+[02:00:40] of ice candidates you should tell the
+[02:00:42] other side this is my updated offer I
+[02:00:44] got a new IP from the stun server and so
+[02:00:48] here is my new IP try to connect on this
+[02:00:50] if you weren't able to connect before
+[02:00:51] though that is why if you look at the
+[02:00:53] code I've have done pc. on Ice candidate
+[02:00:56] which basically means anytime the stun
+[02:00:58] server tells me how do I find my public
+[02:00:59] IP you can go to you know what's my
+[02:01:03] public IP here and ask a website like
+[02:01:05] this this website will tell me your ip4
+[02:01:09] IP is whatever one to2 or something
+[02:01:11] right similarly you can hit a server
+[02:01:13] called this stun server and when you're
+[02:01:16] creating the peer connection object you
+[02:01:17] can actually give a link to your stun
+[02:01:18] server
+[02:01:19] here somewhere something like this I
+[02:01:21] think stun forgot the API if you don't
+[02:01:24] you get a default
+[02:01:26] one but this is necessary because you
+[02:01:30] need to get your ice candidates and when
+[02:01:31] you get back ice candidates you need to
+[02:01:33] resend the offer which is why I said you
+[02:01:34] know this will keep happening many times
+[02:01:36] will you send your offer to the other
+[02:01:37] side as you get if if you change your
+[02:01:40] Wi-Fi same thing happens right if I
+[02:01:41] change my Wi-Fi my public IP changes
+[02:01:42] which means I need to gather new ice
+[02:01:45] candidates and tell the other side bro
+[02:01:46] these are my new set of ice candidates
+[02:01:47] which is why this is happen happening um
+[02:01:50] there are a few other things that happen
+[02:01:51] when you change your Wi-Fi but let's not
+[02:01:52] get go there yet all right take great
+[02:01:55] start send offer is done and then when
+[02:01:57] you receive an offer from the other side
+[02:02:00] on track is also done I just need
+[02:02:03] to set remote video track set remote
+[02:02:05] audio
+[02:02:07] track remote media stream comma set
+[02:02:12] remote media stream equal to use
+[02:02:17] State media stream
+[02:02:20] or
+[02:02:21] null
+[02:02:27] null and this set remote stream needs to
+[02:02:30] reset here anytime you receive the
+[02:02:37] offer New Media
+[02:02:47] stream
+[02:03:12] and
+[02:03:15] um please Zoom theor oh okay there you
+[02:03:24] go
+[02:03:25] uh equal to remote video
+[02:03:38] ref yeah you need to do
+[02:03:44] a DOT current dot sour
+[02:04:17] is
+[02:04:26] all right
+[02:04:35] uh cool let's proceed on
+[02:04:41] track all you have to do here
+[02:04:47] is
+[02:04:50] do Source
+[02:04:52] object dot add
+[02:04:58] stream sorry add
+[02:05:04] track and then same thing
+[02:05:14] here and then maybe play
+[02:05:17] them
+[02:05:37] um okay m is
+[02:05:47] under
+[02:05:54] all right
+[02:05:58] um seems like we're there um unless I'm
+[02:06:02] missing something let me mute the tab
+[02:06:06] here let me
+[02:06:16] restart so terminal
+[02:06:40] oh okay
+[02:06:43] okay okay person one in lobby person two
+[02:06:46] in lobby person one says hi there and
+[02:06:50] joins and
+[02:06:57] P oh of
+[02:07:11] course will you be using webc p abstract
+[02:07:14] package no packages raw
+[02:07:17] webc uh written from
+[02:07:22] scratch set
+[02:07:24] [Music]
+[02:07:31] joined
+[02:07:47] um
+[02:08:00] join waiting to connect you to someone
+[02:08:02] waiting to connect you to someone maybe
+[02:08:04] you should see your local stream I
+[02:08:08] say
+[02:08:17] uh
+[02:08:47] p
+[02:09:08] send offer
+[02:09:10] me Oh shoot what have I done I got
+[02:09:15] confused
+[02:09:17] um
+[02:09:23] Che and then one thing you should do is
+[02:09:25] the first
+[02:09:37] time if this works right I will do a
+[02:09:39] gambling stream where I can be the
+[02:09:41] dealer and then I will you know deal
+[02:09:44] some cards and then that's a good use
+[02:09:46] case only not only but like a good use
+[02:09:49] case to make money by live video if you
+[02:09:51] have live video create like a I mean
+[02:09:53] there something I always wanted to do
+[02:09:54] this is why the first idea that came to
+[02:09:57] me like we already have real time logic
+[02:09:58] just add some more logic to you know do
+[02:10:00] poker or do Blackjack and then have a
+[02:10:03] live dealer and make them do all of
+[02:10:05] these things I think it's pretty
+[02:10:15] cool hecky send link
+[02:10:23] where's your VM setup bro it is on my
+[02:10:25] machine
+[02:10:29] Lucifer uh language is simple
+[02:10:35] react not just back in keeping things
+[02:10:38] simple and
+[02:10:41] straightforward but before that what do
+[02:10:43] you have to do dot so
+[02:10:47] current
+[02:11:17] h
+[02:11:22] there you go Hi join Loi local video
+[02:11:27] waiting to connect you to
+[02:11:30] someone uh I name video waiting to
+[02:11:34] connect you to someone and then on the
+[02:11:36] other side let's do a Hello join still
+[02:11:40] waiting to connect you to someone let's
+[02:11:41] start the back end
+[02:11:44] again oh is the back end down back end
+[02:11:46] just down makes sense
+[02:11:56] person one
+[02:11:58] join person two
+[02:12:03] join create room inside clear cues
+[02:12:08] zero creating
+[02:12:10] [Music]
+[02:12:13] room room this thing this thing room
+[02:12:16] equal to this thing
+[02:12:19] so now comes the most interesting bit of
+[02:12:21] today which is something I wanted to
+[02:12:23] show you which is oh this screen right
+[02:12:26] here interestingly GitHub is also using
+[02:12:29] web RTC if you ever want to debug web
+[02:12:31] RTC basically figure out what's wrong
+[02:12:34] why something not working you can go to
+[02:12:36] chrome/ webc internal and it'll show you
+[02:12:39] you know what's happening what's the
+[02:12:40] right thing what's the wrong thing you
+[02:12:42] can basically look at the stats here and
+[02:12:45] looking at what I'm seeing here firstly
+[02:12:48] I only see two and I should see four
+[02:12:51] let's start from the top
+[02:12:53] here make this smaller restart the back
+[02:12:59] end I need to log a few things now on
+[02:13:01] the front end or maybe open the
+[02:13:04] inspector here sources um on Ice
+[02:13:14] candidate um let's put a bunch of logs
+[02:13:16] on the server room
+[02:13:20] on
+[02:13:23] offer console
+[02:13:27] log oh I know one thing at least yeah
+[02:13:30] sdp was the
+[02:13:34] input basically should
+[02:13:41] BEP on answer should also be STP anytime
+[02:13:44] you get you get back
+[02:13:50] oh
+[02:13:53] [Music]
+[02:13:58] shoot fine send offer creates the offer
+[02:14:02] and sends sdp as
+[02:14:09] such sdp as remote STP and then use this
+[02:14:14] thing right here I don't think you need
+[02:14:16] the whole thing anything this is good
+[02:14:18] enough because this has the type already
+[02:14:20] and same for this guy when it creates
+[02:14:22] the
+[02:14:22] answer how does it send the sdp like
+[02:14:26] this and when you receive the answer you
+[02:14:31] get it like this and there you
+[02:14:37] go all
+[02:14:39] right this is at least one thing we
+[02:14:41] needed to fix I'm sure there are
+[02:14:45] more uh let's go to the server
+[02:14:48] let's put a few logs on on offer and on
+[02:14:51] answer
+[02:14:53] goal trying to figure out if the right
+[02:14:57] data is being you know passed on both
+[02:14:58] the sides on
+[02:15:04] offer on
+[02:15:06] answer refresh
+[02:15:10] refresh hi there
+[02:15:13] join no real logs right now makes
+[02:15:16] sense
+[02:15:20] there to
+[02:15:22] join inside clearing clue cues nothing
+[02:15:25] else which means this guy never
+[02:15:28] sent both the sides never sent anything
+[02:15:33] why inside clearing cues does
+[02:15:37] what
+[02:15:40] oh seems like it's returned early
+[02:15:45] why oh zero
+[02:15:50] interesting
+[02:15:54] why user this
+[02:15:57] us Lobby clear Q
+[02:16:15] huh that's my only guess here
+[02:16:18] the users are disconnecting from some
+[02:16:20] reason let's
+[02:16:23] see user
+[02:16:26] one inside clear cues one all right user
+[02:16:32] two inside to ID is this thing creating
+[02:16:38] room creating
+[02:16:43] room create room reached here send offer
+[02:16:48] was sent to both user one and user
+[02:17:03] two on send offer control reach
+[02:17:08] P are there any logs that say something
+[02:17:11] bad has happened
+[02:17:13] no on Ice candidate oh
+[02:17:20] [Music]
+[02:17:26] web TC simple test JS fi I'm just most
+[02:17:32] probably missing when to send the offer
+[02:17:34] and um you
+[02:17:36] know answer Kushi raid Kushi kushu
+[02:17:42] kushu
+[02:17:46] kushu
+[02:17:48] kushu
+[02:17:51] raid
+[02:17:53] kushu
+[02:17:57] Google
+[02:18:10] kushu
+[02:18:12] easy all
+[02:18:16] right kushu all right thank you whoever
+[02:18:19] raed uh
+[02:18:22] start
+[02:18:31] laptop
+[02:18:33] uh oh oh oh okay okay I know what
+[02:18:40] happened on Ice
+[02:18:44] candidate PC
+[02:18:46] Dot
+[02:18:55] Kushi
+[02:18:57] raid kushu raid no idea never mind let
+[02:19:00] me Focus uh pc. create offer oh on there
+[02:19:03] you go this is the event that I was
+[02:19:04] looking
+[02:19:06] for zoom out this is a little too much
+[02:19:08] for
+[02:19:09] me uh PC do on neg negotiation needed so
+[02:19:15] this becomes this and yeah goes to pc.
+[02:19:18] on negotiation needed there you
+[02:19:27] go on
+[02:19:31] Ice 60
+[02:19:34] lpaa check kushu
+[02:19:37] please
+[02:19:42] kushu
+[02:19:46] please
+[02:19:50] live this person isn't live whoever this
+[02:19:53] is so pretty sure it is easy rating
+[02:20:02] so all right
+[02:20:07] um on op
+[02:20:12] PC e. candidate all
+[02:20:16] right
+[02:20:23] PC thing pc1 this thing
+[02:20:31] pc1 makes sense
+[02:20:46] um
+[02:20:51] [Music]
+[02:20:53] uh let me finish this guys let's deploy
+[02:20:56] this and let's do our stream later here
+[02:20:59] today if we can we'll see um this is
+[02:21:03] done and
+[02:21:05] then
+[02:21:10] description
+[02:21:16] PC2
+[02:21:25] oh oh
+[02:21:29] Yep this is not it
+[02:21:38] unfortunately so let's try this I
+[02:21:43] think I've fixed what needs to be fixed
+[02:21:47] and I will explain what that is very
+[02:21:53] soon hi there one
+[02:22:03] join bro video
+[02:22:08] wec set remote description failed object
+[02:22:12] expected
+[02:22:16] line
+[02:22:17] set remote description what does it
+[02:22:25] expect okay dot
+[02:22:31] offer H
+[02:22:39] makes
+[02:22:46] sense
+[02:22:47] all right
+[02:23:01] uh
+[02:23:03] join
+[02:23:09] join no ER logs
+[02:23:13] about
+[02:23:15] internals one two three I
+[02:23:19] see there should be more than
+[02:23:23] three new new
+[02:23:27] stable connection State
+[02:23:33] change on negotiation
+[02:23:46] needed
+[02:24:11] because the third user joins it sends
+[02:24:13] the offer to the preious and therefore
+[02:24:15] receives two answers since only
+[02:24:18] one oh
+[02:24:20] interesting
+[02:24:22] uh set remote
+[02:24:31] description sending PC
+[02:24:45] uh
+[02:24:55] breathe in breathe out guys very close
+[02:24:58] these are issues I've seen many times
+[02:24:59] when I used to
+[02:25:01] dotc simple yoga
+[02:25:04] fixes uh
+[02:25:09] 5 all right we have this Hi
+[02:25:15] join
+[02:25:18] let's go to let's just do a quick debug
+[02:25:22] looking at the
+[02:25:25] code this might be needed but that's
+[02:25:27] fine let's go back
+[02:25:37] here let's
+[02:25:43] see start allow
+[02:25:51] happen the only thing that's happening
+[02:25:53] is sending ice cers there something we
+[02:25:54] haven't done yet
+[02:25:56] uh on negotiation
+[02:25:59] needed create offer set local
+[02:26:05] description yes that is something we
+[02:26:07] have completely missed haven't
+[02:26:10] we
+[02:26:14] PC create offer
+[02:26:18] pc. set local description
+[02:26:23] as STP do
+[02:26:33] sdp there we
+[02:26:35] go one bug we found and then remote
+[02:26:39] description create answer okay first set
+[02:26:42] remote description then create answer
+[02:26:44] that looks
+[02:26:45] good
+[02:26:52] and then set local description to that
+[02:26:53] answer which is another thing we have
+[02:26:56] missed pc. set local description to
+[02:27:01] be hp.
+[02:27:15] STP huh
+[02:27:21] you
+[02:27:29] go
+[02:27:35] [Music]
+[02:27:40] you cool makes
+[02:27:45] sense the
+[02:27:55] all
+[02:27:56] right join join on negotiation needed
+[02:28:02] still no videos on either side still the
+[02:28:04] fail to set local description value
+[02:28:07] provided is not of type this thing set
+[02:28:09] local
+[02:28:10] description sdp equal to await pc.
+[02:28:14] create answer okay uh
+[02:28:18] there be
+[02:28:21] yeah um let's go to
+[02:28:25] sources room.
+[02:28:30] DSX
+[02:28:33] refresh join join on negotiation
+[02:28:37] needed there you go let's see
+[02:28:41] sdp sdp looks fine looks okay
+[02:28:47] what is the
+[02:28:52] issue the provided value is not up RTC
+[02:28:57] session description in
+[02:28:59] it at pc.on
+[02:29:11] negotiation all right set local
+[02:29:15] description
+[02:29:25] uh what am I missing here
+[02:29:28] [Music]
+[02:29:29] uh let's
+[02:29:32] see oh it is D a makes
+[02:29:39] sense refresh one more
+[02:29:45] time
+[02:29:47] join join all negotiation needed no bugs
+[02:29:52] I'm hoping nothing in the console so
+[02:29:54] that's a good start how
+[02:29:58] many connections do we have we have one
+[02:30:01] Local Host 1 2 three you still have
+[02:30:04] three you should probably have four what
+[02:30:06] are we
+[02:30:10] missing I
+[02:30:13] candidate
+[02:30:15] uh
+[02:30:45] um
+[02:31:06] Join one join
+[02:31:15] two
+[02:31:24] lead code is not
+[02:31:28] down search
+[02:31:31] option
+[02:31:35] uh by time to focus to
+[02:31:45] uh
+[02:32:01] [Music]
+[02:32:15] e
+[02:32:17] [Music]
+[02:32:33] could be
+[02:32:35] [Music]
+[02:32:41] [Music]
+[02:32:45] up
+[02:33:04] [Music]
+[02:33:10] [Music]
+[02:33:15] it
+[02:33:25] sorry
+[02:33:26] [Music]
+[02:33:45] uh
+[02:33:51] [Music]
+[02:34:15] it if
+[02:34:29] [Music]
+[02:34:40] [Music]
+[02:34:45] go
+[02:34:46] [Music]
+[02:35:02] [Music]
+[02:35:13] [Music]
+[02:35:15] for
+[02:35:36] candidate Fu about D
+[02:35:44] it
+[02:35:50] this looks good and same
+[02:36:14] thing
+[02:36:18] fore
+[02:36:35] fore
+[02:36:37] [Music]
+[02:36:43] [Music]
+[02:36:44] uh
+[02:36:48] [Music]
+[02:36:56] [Music]
+[02:37:14] for
+[02:37:22] [Music]
+[02:37:44] for
+[02:37:48] [Music]
+[02:38:11] [Music]
+[02:38:14] fore
+[02:38:16] [Music]
+[02:38:25] [Music]
+[02:38:34] [Music]
+[02:38:43] [Music]
+[02:38:44] for
+[02:38:57] [Music]
+[02:39:07] [Music]
+[02:39:14] type it sender
+[02:39:22] [Music]
+[02:39:30] [Music]
+[02:39:41] [Music]
+[02:39:44] for
+[02:39:57] [Music]
+[02:40:11] [Music]
+[02:40:14] for
+[02:40:17] [Music]
+[02:40:23] [Music]
+[02:40:29] [Music]
+[02:40:40] [Music]
+[02:40:42] hello
+[02:40:43] [Music]
+[02:40:44] hello
+[02:40:45] [Music]
+[02:40:55] oh okay okay okay not bad audio video is
+[02:41:00] going through guys I think it's just
+[02:41:02] local issues that I need to fix now I
+[02:41:04] think we're getting
+[02:41:06] there uh Local
+[02:41:08] Host out outbound RTP as you can see
+[02:41:13] there's no video going out but is there
+[02:41:16] audio going out there is no audio going
+[02:41:18] out uh
+[02:41:25] outbound very
+[02:41:44] close
+[02:41:49] sending
+[02:41:51] offer receiving I
+[02:41:55] candidate
+[02:42:09] locally sending
+[02:42:14] offer
+[02:42:20] [Music]
+[02:42:44] for
+[02:43:14] for
+[02:43:29] user to this on offer on answer on
+[02:43:34] answer on offer on offer on answer on
+[02:43:41] answer charar receive ice candidate
+[02:43:44] locally
+[02:43:48] [Music]
+[02:44:10] Loop closed twice this shouldn't happen
+[02:44:13] this shouldn't happen
+[02:44:23] for
+[02:44:30] [Music]
+[02:44:44] so
+[02:44:46] for
+[02:45:14] spee
+[02:45:24] [Music]
+[02:45:44] for
+[02:45:48] [Music]
+[02:45:55] all right guys found another bug seems
+[02:46:01] like we're getting there um let's see
+[02:46:05] I'll push the code in as well so you
+[02:46:06] guys can look at it if you want even
+[02:46:08] though it has grown by a lot now so you
+[02:46:11] won't understand it in the first
+[02:46:14] go
+[02:46:16] come on okay no
+[02:46:23] errors no video either Local
+[02:46:28] Host
+[02:46:31] outp
+[02:46:34] video inbound
+[02:46:36] RTP audio very
+[02:46:43] close let me push the code and share
+[02:46:45] what all have
+[02:46:47] done also look at chat for a bit uh oh
+[02:46:51] wow almost
+[02:46:53] 12 done with web
+[02:47:03] TC hello hello how is chat
+[02:47:08] doing need to eat
+[02:47:11] something no one can get Tal
+[02:47:15] C what's tal
+[02:47:19] col what's tal
+[02:47:27] col share this playlist it's a very
+[02:47:29] weirdly automatically created playlist
+[02:47:31] so
+[02:47:32] Bounty bounty we don't have too much
+[02:47:35] time for me to review
+[02:47:39] them we have to leave in like 30 minutes
+[02:47:41] now um so Punjab
+[02:47:53] this song I
+[02:47:55] like love you to brother
+[02:48:00] forc bro by peer connection great
+[02:48:04] question peer connection
+[02:48:06] is a what is
+[02:48:11] document what is document it is
+[02:48:15] something that you have access to right
+[02:48:17] similarly p connection object is
+[02:48:20] something that browser gives access to
+[02:48:27] you is something that browser gives you
+[02:48:29] access
+[02:48:30] to
+[02:48:32] um which you use for web RTC stuff which
+[02:48:36] laptop I on this one
+[02:48:39] right I'm kind of behind on the assign
+[02:48:41] from cot how can you catch up by
+[02:48:43] Saturday I will I'm going to create a
+[02:48:45] video which does all assignments from
+[02:48:47] week three four and five or
+[02:48:50] Mong
+[02:48:52] $15
+[02:48:57] [Music]
+[02:49:01] $15
+[02:49:07] CH I'm good how are
+[02:49:13] you
+[02:49:19] check PR let me
+[02:49:21] check let's see would be
+[02:49:38] nice eight bu request start from the top
+[02:49:41] bottom
+[02:49:43] sorry
+[02:49:48] good PR will have to close it to get
+[02:49:50] fixed
+[02:49:53] already
+[02:50:01] you
+[02:50:06] [Music]
+[02:50:13] nice
+[02:50:22] I like the other one more this is also
+[02:50:24] good this is proper
+[02:50:27] Omega good
+[02:50:30] explanation I'm sure if I'll use
+[02:50:33] this but this is good I like
+[02:50:41] it this one is okay not great slightly a
+[02:50:46] little
+[02:50:47] too
+[02:50:50] you
+[02:50:52] sorry sorry about this
+[02:50:54] [Music]
+[02:50:55] one about add I one know what that
+[02:50:59] is
+[02:51:03] screenshot don't need it but huh thank
+[02:51:05] you appreciate it Bounty goes to our guy
+[02:51:08] here second one from bottom this one
+[02:51:10] this is pretty good if I get the time I
+[02:51:12] will merge this in
+[02:51:15] uh if I'm being honest the other run was
+[02:51:17] a little better but let do
+[02:51:22] [Music]
+[02:51:26] this we'll use this if I get the time CH
+[02:51:29] looking back at the chat
+[02:51:33] Ki
+[02:51:36] K did I close
+[02:51:38] it there you
+[02:51:42] go all right how to be a Dev like
+[02:51:56] youva and in English there's one
+[02:51:58] language I would never do that is Java I
+[02:52:02] there's not one language there is one
+[02:52:03] language I never use and that is
+[02:52:07] Java not the worst idea in the
+[02:52:13] world
+[02:52:19] R local
+[02:52:25] train skipping College V to fulltime
+[02:52:27] coding remote job no you can manage them
+[02:52:29] both together ba I am in first year
+[02:52:32] about coding how can I get started
+[02:52:34] please tell um first year may we are
+[02:52:38] competitive programming
+[02:52:40] um time for
+[02:52:42] Zoom so let's finish this guys let me
+[02:52:44] finish this sorry we'll look at the chat
+[02:52:45] later let me finish this let me try to
+[02:52:48] deploy it I know there's something very
+[02:52:49] simple and missing and then we'll go
+[02:52:50] from there
+[02:52:55] um everything is fine oh and by the way
+[02:52:58] if someone finds a bug please send a
+[02:53:01] Super Chat and tell me I have found a
+[02:53:03] bug and I will look at it and I will
+[02:53:04] revert your super chat I
+[02:53:08] promise all right uh everything's up to
+[02:53:10] date the code is up there there's
+[02:53:12] something small I'm missing I'm sure
+[02:53:15] please help me find it while I debug it
+[02:53:16] locally as well not looking at chat guys
+[02:53:18] give me 20 minutes I think we can finish
+[02:53:20] in 20 minutes then we'll do a
+[02:53:22] quick one uh EMA whatever and then we'll
+[02:53:27] go from
+[02:53:36] there refresh refresh
+[02:53:39] join join
+[02:53:42] okay connection
+[02:53:45] let's
+[02:53:47] see on need sending offer receiving the
+[02:53:50] ice candidates locally
+[02:53:53] okay received offer
+[02:53:58] interesting
+[02:54:05] that's this thing sounds good received
+[02:54:12] offer that's fine
+[02:54:14] Loop Clos is happening only once that is
+[02:54:17] fine received ice candidates locally
+[02:54:20] more ice candidates
+[02:54:25] okay huh
+[02:54:27] interesting the control never reached
+[02:54:30] here did
+[02:54:33] it it did not so that's the bug
+[02:54:38] right yep that is the bug all right
+[02:54:40] let's
+[02:54:43] see
+[02:54:48] [Music]
+[02:55:01] [Music]
+[02:55:02] ah there you
+[02:55:04] go oh
+[02:55:07] [Music]
+[02:55:13] sorry
+[02:55:15] [Music]
+[02:55:33] for right
+[02:55:38] um
+[02:55:43] oh oh
+[02:55:44] [Music]
+[02:55:52] [Music]
+[02:55:59] [Music]
+[02:56:06] [Music]
+[02:56:13] la
+[02:56:23] stream all
+[02:56:26] [Music]
+[02:56:33] right all
+[02:56:35] right hello
+[02:56:38] join Hi join come on come
+[02:56:43] on
+[02:56:49] [Music]
+[02:56:56] oh just
+[02:57:00] [Music]
+[02:57:13] down
+[02:57:15] [Music]
+[02:57:39] oh my God my someone from my family just
+[02:57:42] messaged me talal
+[02:57:45] to
+[02:57:46] for whoever did that too good sir made
+[02:57:50] me
+[02:57:54] laugh okay never mind let me Focus uh
+[02:57:57] candidate room ID
+[02:57:59] type candidate
+[02:58:02] type room ID room
+[02:58:10] ID
+[02:58:12] for
+[02:58:14] on
+[02:58:21] offer send offer room
+[02:58:24] ID answer room
+[02:58:35] [Music]
+[02:58:42] ID
+[02:58:58] bug inside ad ice candidate I
+[02:59:00] think always using set receiving PC
+[02:59:03] let's
+[02:59:05] see add ice candid
+[02:59:11] dat this is a bug
+[02:59:14] indeed so I will give you a bounty thank
+[02:59:16] you $5 K but this is not the only bug
+[02:59:19] this is the control is never reaching
+[02:59:21] here this is a bug um which I do
+[02:59:24] appreciate you giving out a bounty for
+[02:59:26] thank you sorry whatever Super Chat for
+[02:59:29] uh sender then receiving and then set
+[02:59:32] sender PC so this is a bug but this
+[02:59:35] isn't the only
+[02:59:38] bug the bigger bug is control never
+[02:59:40] reaches
+[02:59:42] here
+[02:59:44] [Music]
+[03:00:03] spe
+[03:00:05] [Music]
+[03:00:12] speech
+[03:00:22] for
+[03:00:26] [Music]
+[03:00:39] [Music]
+[03:00:42] speech
+[03:00:48] [Music]
+[03:01:11] one this was imit guys and not
+[03:01:15] send did someone tell that
+[03:01:20] [Music]
+[03:01:24] no I want it all right so that was a bug
+[03:01:27] all right let's see now
+[03:01:36] forther okay still not nothing is
+[03:01:39] happening
+[03:01:40] but maybe it
+[03:01:42] might
+[03:01:44] inbound
+[03:01:47] RTP yes sorry that was loud yes so audio
+[03:01:52] and video is coming through now just not
+[03:01:54] playing which I'm sure is a simple front
+[03:01:56] end
+[03:02:12] bug come on
+[03:02:14] can
+[03:02:18] [Music]
+[03:02:42] look
+[03:02:44] someone has WR something very
+[03:02:51] funny nice funny sir all right all right
+[03:02:54] all right almost done here
+[03:02:58] um on
+[03:03:03] [Music]
+[03:03:12] track
+[03:03:14] [Music]
+[03:03:22] fore on track
+[03:03:25] [Music]
+[03:03:41] [Music]
+[03:03:42] capital
+[03:04:07] [Music]
+[03:04:12] spee
+[03:04:16] [Music]
+[03:04:24] [Music]
+[03:04:30] [Music]
+[03:04:39] [Music]
+[03:04:42] for
+[03:04:46] [Music]
+[03:04:55] [Music]
+[03:05:02] [Music]
+[03:05:12] all
+[03:05:39] [Music]
+[03:05:42] oh
+[03:05:43] [Music]
+[03:05:56] what's dhh
+[03:06:00] bro they see hip
+[03:06:04] hop
+[03:06:09] uh I need some exhilarating
+[03:06:16] song so we need to debug this in the
+[03:06:18] next 10 minutes give
+[03:06:20] me high
+[03:06:23] drop anyone anyone
+[03:06:27] here any song preferences guys someone
+[03:06:31] asked for typing
+[03:06:36] test 52 Bars C no
+[03:06:42] will
+[03:06:46] system
+[03:07:00] uh no this not
+[03:07:04] great good old before
+[03:07:08] without all it make one
+[03:07:11] ah Brazil darkness by someone candles
+[03:07:15] flashing lights Maharani songa
+[03:07:18] sulan arj
+[03:07:21] Val Arjun Val is a good song but a
+[03:07:25] little too
+[03:07:27] much
+[03:07:36] um
+[03:07:38] fix thank you
+[03:07:41] guys um
+[03:07:43] on track is not getting
+[03:08:03] [Music]
+[03:08:12] triggered
+[03:08:16] [Music]
+[03:08:42] spe
+[03:08:43] [Music]
+[03:09:11] for
+[03:09:15] [Music]
+[03:09:41] e
+[03:09:45] [Music]
+[03:10:11] foree
+[03:10:30] [Music]
+[03:10:41] spe
+[03:10:49] [Music]
+[03:11:11] to
+[03:11:13] [Music]
+[03:11:24] [Music]
+[03:11:37] [Music]
+[03:11:53] [Music]
+[03:12:04] uh not really about say I don't
+[03:12:06] [Music]
+[03:12:11] know
+[03:12:16] [Music]
+[03:12:23] [Music]
+[03:12:41] fore
+[03:12:46] [Music]
+[03:13:11] has
+[03:13:14] [Music]
+[03:13:29] someone posted something PR track equal
+[03:13:31] to
+[03:13:41] something the control is never
+[03:13:45] reaching
+[03:13:51] here trust me I'm trying the same thing
+[03:13:53] here brother
+[03:13:56] unless Mar play Maharani
+[03:14:04] Maharani line
+[03:14:08] 62 room
+[03:14:11] manager
+[03:14:15] [Music]
+[03:14:23] [Music]
+[03:14:29] okay he
+[03:14:32] expert oh hello hello
+[03:14:37] hello oh never
+[03:14:39] mind so
+[03:14:41] happy
+[03:14:51] why I know that is because if you look
+[03:14:52] at after I join two rooms look at the
+[03:14:54] web RTC stats you will notice you know
+[03:14:57] one of them
+[03:14:59] is sending
+[03:15:01] out video this is the bytes that are
+[03:15:04] being sent this is
+[03:15:09] the width of the video that's being sent
+[03:15:11] audio that's being sent so two P
+[03:15:13] connections are sending out data and two
+[03:15:15] of them are receiving data as
+[03:15:18] well
+[03:15:21] all h both audio and video that's
+[03:15:24] fine that is right yes so to our sending
+[03:15:28] video this gu is receiving video as you
+[03:15:29] can sorry audio and video as you can see
+[03:15:32] this is the bytes that I'm receiving per
+[03:15:34] second but the on track isn't getting
+[03:15:37] triggered why so everything is right
+[03:15:39] there
+[03:15:40] is no real
+[03:15:43] bug that is
+[03:15:44] left Maharani by arpit
+[03:15:54] Bala but it still doesn't work there is
+[03:15:56] definitely a bug
+[03:15:58] left on track equal
+[03:16:11] to
+[03:16:37] oh
+[03:16:41] nice
+[03:17:02] [Music]
+[03:17:11] let me push my code as well if you guys
+[03:17:12] want to debug
+[03:17:17] it ex $100 Bounty um checkpoint you guys
+[03:17:23] can clone it locally try it out it'll
+[03:17:24] just work for your on your side as well
+[03:17:27] because I'm very late I need to go
+[03:17:29] somewhere but we need to do this first
+[03:17:30] so $100 Bounty figure
+[03:17:32] out some user is try out locally fix it
+[03:17:35] locally if it works on track a function
+[03:17:37] is wrong what makes you think
+[03:17:41] that
+[03:17:44] oh
+[03:17:46] Manish Manish
+[03:17:53] F oh
+[03:17:55] God yes that was it I don't know why I
+[03:17:59] wrapped this inside two
+[03:18:00] brackets oh
+[03:18:05] God all right that makes a lot of sense
+[03:18:09] now there is no literally
+[03:18:17] nice join
+[03:18:25] join well did I speak to
+[03:18:41] soon
+[03:18:54] yeah I don't
+[03:18:56] TR this might have been one of
+[03:19:11] these
+[03:19:14] [Music]
+[03:19:16] my
+[03:19:21] B
+[03:19:23] oh track
+[03:19:32] track oh
+[03:19:36] no inside on
+[03:19:40] track this doesn't uh didn't fix
+[03:19:45] it
+[03:19:59] why
+[03:20:01] where
+[03:20:10] where
+[03:20:14] okay let's try
+[03:20:24] this looks
+[03:20:32] right Bounty refund
+[03:20:38] please bounty on bug by bus on track
+[03:20:42] isn't getting triggered that's the
+[03:20:43] what's the Bounty is on control should
+[03:20:45] reach here make it reach here
+[03:20:48] somehow that's the Bounty um oh laptop
+[03:20:52] died almost
+[03:20:58] me charge oh yep laptop died phone died
+[03:21:03] if I'm sharing the wrong screen I won't
+[03:21:05] be able to
+[03:21:06] see
+[03:21:10] see
+[03:21:13] all right uh I'm not looking at the chat
+[03:21:16] right now if someone figured it out
+[03:21:21] so good for you I won't be able to look
+[03:21:23] at it for a moment
+[03:21:27] uh
+[03:21:29] track a lot of people suggested one
+[03:21:32] thing which I'm pretty sure is not right
+[03:21:36] but add ice candidates room equal to
+[03:21:39] this not room receiving users if user
+[03:21:41] one is sending then user two El user one
+[03:21:44] this looks
+[03:21:45] right
+[03:22:10] um
+[03:22:25] uh it is out of the I
+[03:22:40] think
+[03:23:10] for
+[03:23:40] for
+[03:23:54] try I don't think
+[03:23:58] that on Ice candidate type sender this
+[03:24:02] looks
+[03:24:04] right
+[03:24:06] see anyone in chat hard stop at 12:30
+[03:24:10] guys
+[03:24:12] KB Cas 12:30 I have to
+[03:24:16] rush let's see if someone found anything
+[03:24:18] let me look at the pool
+[03:24:23] requests um what is it
+[03:24:34] called okay phone has charged as well
+[03:24:36] I'm looking at chat
+[03:24:39] again oh okay okay okay okay
+[03:24:42] L nothing triple equal to in line 101
+[03:24:44] okay let's see
+[03:24:47] 101 does not matter would not matter
+[03:24:51] control no the control is not reaching
+[03:24:53] here only though it doesn't matter if it
+[03:24:55] reaches here or not I found now on track
+[03:24:57] typo no on track is small T only no no
+[03:25:01] no no nothing here we should on track
+[03:25:03] equal to
+[03:25:04] something this looks right only I don't
+[03:25:06] think I'm missing something here let
+[03:25:08] me this is right only I mean there's
+[03:25:10] nothing wrong here pc. on track equal
+[03:25:16] to alert on
+[03:25:24] track
+[03:25:26] join
+[03:25:34] join
+[03:25:36] nope type on remote radio ref
+[03:25:40] remote
+[03:25:42] video
+[03:25:49] ref not really ask chat GPT no it won't
+[03:25:54] be able to help me trust
+[03:26:00] me that's not it set remote audio track
+[03:26:03] track set remote audio track
+[03:26:08] isn't no that is fine that's why we're
+[03:26:11] seeing it flow
+[03:26:18] typo that is
+[03:26:22] correct could you check my super
+[03:26:27] chat I need to close the super chat
+[03:26:34] thingy why
+[03:26:36] are long story short is this going to be
+[03:26:38] hard for me please don't sign Super Chat
+[03:26:40] I'm not looking at them I will look at
+[03:26:42] them at the very end if we complete in
+[03:26:44] the next 20 minutes
+[03:26:52] um one in main tab one in private tab I
+[03:26:56] don't won't change anything that does
+[03:26:57] not
+[03:27:08] matter video tracks
+[03:27:13] at track is working on track is not
+[03:27:15] working which basically
+[03:27:24] means three
+[03:27:40] sections
+[03:27:44] transceiver
+[03:27:48] added
+[03:28:01] uh let's
+[03:28:10] see
+[03:28:12] so got think you got there
+[03:28:40] um
+[03:29:09] something suspicious has happened
+[03:29:14] the
+[03:29:23] hell I will solve this bug for
+[03:29:26] $10,000 little too much for me sir right
+[03:29:29] now some other
+[03:29:35] day the hell is happening
+[03:29:39] here do I have some another browser
+[03:29:45] open oh I do have another oh this
+[03:29:47] might be it I mean I don't know but I
+[03:29:50] had one lingering in the background if
+[03:29:52] this is the issue it'll be very sad okay
+[03:29:54] fresh
+[03:29:59] start I had like a browser lingering in
+[03:30:01] the background which I'm sure was you
+[03:30:02] know beach beach me uh trying to connect
+[03:30:06] to the
+[03:30:07] server uh let's see I have these two I
+[03:30:11] did that Let me
+[03:30:13] refresh join
+[03:30:16] join let's look at
+[03:30:19] it okay seems to be
+[03:30:21] working now let's go back here and
+[03:30:31] uncomment one of
+[03:30:34] these replace the arrow function with a
+[03:30:37] normal function will not change anything
+[03:30:39] does not
+[03:30:40] matter
+[03:30:47] all
+[03:30:48] right uh let's try this one more
+[03:30:52] time join
+[03:30:55] join and how many connections do we have
+[03:30:58] we have two so it looks right things are
+[03:31:00] working as expected inbound
+[03:31:03] RTP I am getting audio I am getting
+[03:31:07] video everything is fine but D some come
+[03:31:13] okay someone has added some code which
+[03:31:14] is very hard for me to look at oh on
+[03:31:17] track equal to this thing you're on
+[03:31:19] track fire any righton musk the issue is
+[03:31:22] on track isn't getting fired not that
+[03:31:23] there's some issue bug inside
+[03:31:26] it this is a very small one line thingy
+[03:31:29] somewhere I can almost totally see
+[03:31:33] it
+[03:31:39] but
+[03:31:45] all
+[03:31:47] right
+[03:31:51] uh is this getting overridden
+[03:32:08] somehow let me try something very weird
+[03:32:11] no
+[03:32:39] uh track
+[03:32:42] not track not
+[03:32:59] tack
+[03:33:09] say
+[03:33:14] backend spell check track not
+[03:33:20] t attack
+[03:33:24] attack log to is fine right line number
+[03:33:30] PO on track Handler un
+[03:33:33] these people are bro where track not
+[03:33:38] tack but where
+[03:33:41] typ
+[03:33:45] of remote track May local
+[03:33:48] track you haven't called on track you
+[03:33:50] don't have to call on
+[03:33:55] track
+[03:34:09] 40
+[03:34:12] [Music]
+[03:34:33] uh you are not wrong someone said if you
+[03:34:36] cannot solve it no one else can you can
+[03:34:39] but like you know it's very hard for me
+[03:34:40] to look so let let's just play some
+[03:34:46] [Music]
+[03:35:09] songs
+[03:35:11] [Music]
+[03:35:17] [Music]
+[03:35:23] [Music]
+[03:35:39] helloe
+[03:35:51] this there is literally a fiddle here
+[03:35:55] that you guys can look
+[03:35:57] at and all you have to do is line by
+[03:35:59] line comparison you don't even need web
+[03:36:01] RTC if I'm being honest right you have
+[03:36:04] to live
+[03:36:07] studio
+[03:36:09] uh
+[03:36:12] you you can see it working here this is
+[03:36:14] how I debug you know when I don't know
+[03:36:16] on technology you can see the same code
+[03:36:17] working here only this is local there's
+[03:36:19] no you know two browsers it's happening
+[03:36:20] in the same browser you can see the same
+[03:36:22] code working here the line by line if
+[03:36:24] you want you can debug and you know what
+[03:36:26] what lines of code running here what
+[03:36:27] lines of code running in our code code
+[03:36:28] base I that's how I'm going to debug but
+[03:36:30] just giving a small this thing and if
+[03:36:31] you guys want to know what that looks
+[03:36:33] like it is this fiddle right
+[03:36:38] here all right uh let's go
+[03:36:42] back hello hello no it's
+[03:36:48] [Music]
+[03:36:52] here the only
+[03:36:58] other the only the other thing I see is
+[03:37:02] that they're using ad stream and we're
+[03:37:04] using ad track I don't think it really
+[03:37:06] matters but
+[03:37:09] so
+[03:37:15] [Music]
+[03:37:23] [Music]
+[03:37:39] spe
+[03:37:43] [Music]
+[03:37:55] [Music]
+[03:38:01] no never
+[03:38:05] [Music]
+[03:38:09] mind
+[03:38:26] [Music]
+[03:38:39] oh
+[03:38:44] [Music]
+[03:39:09] spe
+[03:39:13] [Music]
+[03:39:33] [Music]
+[03:39:39] for
+[03:40:09] wo
+[03:40:13] [Music]
+[03:40:27] back can
+[03:40:30] [Music]
+[03:40:39] loely
+[03:41:00] [Music]
+[03:41:06] [Music]
+[03:41:09] for
+[03:41:13] [Music]
+[03:41:23] [Music]
+[03:41:39] for
+[03:41:46] [Music]
+[03:42:08] for
+[03:42:23] [Music]
+[03:42:38] oh
+[03:42:54] [Music]
+[03:42:59] [Music]
+[03:43:05] [Music]
+[03:43:08] spee
+[03:43:11] [Music]
+[03:43:19] [Music]
+[03:43:37] [Music]
+[03:43:38] foree
+[03:44:02] connection State
+[03:44:08] change
+[03:44:21] candidate
+[03:44:38] state
+[03:44:42] said you to add local video chat instead
+[03:44:44] of chat you need to add local video
+[03:44:55] chat console.log pc. on
+[03:45:06] track join
+[03:45:08] join
+[03:45:10] pc. on track
+[03:45:13] function add track checking connected
+[03:45:17] State be connected configuration equal
+[03:45:24] to check if your browser supported my
+[03:45:27] browser does support it right it's
+[03:45:28] happening here which means my browser is
+[03:45:32] fine
+[03:45:38] um pc1 PC2 PC2
+[03:45:43] pc1 I can try it I don't think that
+[03:45:46] is the case but am I sending flipped F
+[03:45:50] sdps I don't think that's the case let
+[03:45:53] me try
+[03:45:55] it I mean I almost touch my code here
+[03:45:58] never mind
+[03:46:07] uh H guys h h
+[03:46:37] loc message other message
+[03:46:41] two different paer connections H by we
+[03:46:44] have two different paer connections
+[03:46:45] don't
+[03:46:51] [Music]
+[03:47:00] worry
+[03:47:03] I hard
+[03:47:05] stop let me message my
+[03:47:08] friend
+[03:47:13] I need to get a car because I have a
+[03:47:15] talk tomorrow from a
+[03:47:21] friend so I
+[03:47:31] [Music]
+[03:47:38] leave
+[03:47:40] on rack
+[03:48:08] on
+[03:48:18] I don't think this is it
+[03:48:38] so
+[03:48:47] [Music]
+[03:49:08] spe
+[03:49:16] sending
+[03:49:18] offer received
+[03:49:20] offer all
+[03:49:26] negotiation send
+[03:49:28] offer received
+[03:49:38] offer see leing ice cases
+[03:50:08] locally
+[03:50:12] this might be a react
+[03:50:14] thing might be a react
+[03:50:20] thing this might be a react
+[03:50:25] thing we should have used refs which we
+[03:50:37] haven't sending PC into receiving
+[03:51:06] PC go yeah
+[03:51:38] spe
+[03:51:44] i
+[03:51:49] b oh
+[03:52:08] oh
+[03:52:23] this might not be it but this gives me
+[03:52:24] some
+[03:52:30] hints PC is
+[03:52:34] null
+[03:52:37] uh huh
+[03:53:08] spet
+[03:53:13] I have done so much spaghetti of my code
+[03:53:16] let me command z a few
+[03:53:36] times yes yes yes code girl your remote
+[03:54:05] work all
+[03:54:07] right
+[03:54:22] uh I don't think I've set things
+[03:54:24] correctly uh
+[03:54:27] because set
+[03:54:30] rece
+[03:54:32] P
+[03:54:37] set
+[03:55:07] H you can
+[03:55:11] it's not the issue
+[03:55:20] then
+[03:55:22] cons
+[03:55:35] PC huh huh uh that's f
+[03:55:40] [Music]
+[03:55:50] receiving index.ts line9 I don't think
+[03:55:52] that is
+[03:55:56] back
+[03:56:07] back
+[03:56:13] bount if you find it if you find the
+[03:56:15] real thing super
+[03:56:18] CH $200
+[03:56:28] Bounty code is out there it's pushed fix
+[03:56:31] it you should see two people and if you
+[03:56:34] do you're good that means you've fixed
+[03:56:37] it and if if no one I will give to
+[03:56:39] myself
+[03:56:52] $200
+[03:56:56] huhuh I think that's it
+[03:57:07] try
+[03:57:18] user
+[03:57:20] manager send this doesn't matter I have
+[03:57:24] but this this doesn't matter it's not
+[03:57:25] the
+[03:57:26] issue at
+[03:57:37] hand
+[03:57:54] PCR equal to
+[03:58:07] PC
+[03:58:37] spe
+[03:58:46] [Music]
+[03:58:48] that is not it
+[03:58:58] [Music]
+[03:59:04] guys get PR Ms Volkswagen
+[03:59:09] get PR seems like someone has fixed it I
+[03:59:11] don't want to look at it I really want
+[03:59:13] to debug it myself but in the interest
+[03:59:15] of time and the fact that I already
+[03:59:22] said let's see I'm
+[03:59:25] [Music]
+[03:59:30] excited
+[03:59:36] uh I
+[03:59:50] [Music]
+[04:00:02] [Music]
+[04:00:07] for
+[04:00:09] [Music]
+[04:00:37] for
+[04:00:45] [Music]
+[04:01:07] foree
+[04:01:10] [Music]
+[04:01:18] [Music]
+[04:01:25] by
+[04:01:27] fix full
+[04:01:37] request
+[04:01:54] by
+[04:01:55] the there's a form that you have to fill
+[04:01:58] talk most probably most probably
+[04:02:01] talk I
+[04:02:06] hope most
+[04:02:36] probably she Striker brows I don't think
+[04:02:39] it will matter
+[04:02:53] Instagram
+[04:02:54] hello
+[04:03:03] hello
+[04:03:07] camer
+[04:03:11] fix
+[04:03:19] any
+[04:03:37] inds
+[04:04:05] sdp
+[04:04:07] okay
+[04:04:18] minute
+[04:04:27] video
+[04:04:29] okay uh
+[04:04:36] coll
+[04:04:40] hello hello I'm
+[04:04:44] back yeah Anatomy ofc
+[04:05:06] STP
+[04:05:09] about cor tc-
+[04:05:13] internals
+[04:05:19] refresh and a camera got stuck because
+[04:05:22] of Brave I'm
+[04:05:24] assuming join
+[04:05:31] join a remote set remote
+[04:05:36] description okay transceiver added
+[04:05:39] audio transceiver added
+[04:05:47] video your reals are funny do you make
+[04:05:50] them you really think I have the time to
+[04:05:51] edit
+[04:05:54] reals no but the guy who makes them is
+[04:05:57] pretty cool he's also coming tomorrow to
+[04:06:00] igd Puri team is here we were thinking
+[04:06:03] of planning so there like two three
+[04:06:05] College people that work with me all
+[04:06:08] very randomly found you know gmail
+[04:06:11] through subtit first guy was very very
+[04:06:15] ad HW he was in school in fact when he
+[04:06:17] you know approached me and then now he's
+[04:06:18] in college so he's here the other gu is
+[04:06:21] here my editor in editor also stays in
+[04:06:26] Delhi in college only so he also
+[04:06:29] everyone's in delhi now because P we
+[04:06:31] were thinking of doing a very big Meetup
+[04:06:34] but that's probably not happening on P
+[04:06:36] that's happening next month so next
+[04:06:38] month we have uh we're booking a stadium
+[04:06:40] most probably we'll see a the hope is we
+[04:06:43] are and then M everyone will be there
+[04:06:46] I'll try to get as many people as we can
+[04:06:47] like a bunch of influencers other than
+[04:06:49] me as well chal G inbound
+[04:06:59] RTP PC get all
+[04:07:05] tracks TC PC get
+[04:07:25] tracks yeah
+[04:07:36] me uh uh spec blind way to get remote
+[04:07:39] streams and
+[04:08:06] tracks
+[04:08:14] [Music]
+[04:08:36] for
+[04:08:46] create offer set local description sttp
+[04:08:49] offer on
+[04:08:52] offer description create
+[04:09:06] answer
+[04:09:36] for
+[04:10:06] for
+[04:10:12] seriously doubt this is
+[04:10:36] it
+[04:10:56] this gives me flashes from two years ago
+[04:10:58] it feels like I've seen this this exact
+[04:11:00] thing why everything is fine but on
+[04:11:02] track isn't getting
+[04:11:04] triggered but I can't put my finger on
+[04:11:06] it
+[04:11:09] receiving PC not found that is
+[04:11:24] fine
+[04:11:27] uh on trans this is receiving side right
+[04:11:30] transceiver added track some oh oh let
+[04:11:34] me try something let me try something
+[04:11:44] pcal field
+[04:12:06] uh
+[04:12:10] [Music]
+[04:12:23] [Music]
+[04:12:34] okay look down
+[04:12:50] [Music]
+[04:13:06] fore
+[04:13:36] spee
+[04:13:43] very nice kind is
+[04:13:48] [Music]
+[04:13:56] [Music]
+[04:14:06] level
+[04:14:08] [Music]
+[04:14:26] back one is
+[04:14:36] video
+[04:14:50] hands
+[04:14:57] up media stream track got
+[04:15:06] logged
+[04:15:11] oh of
+[04:15:18] course so subject. add track
+[04:15:29] [Music]
+[04:15:36] oh
+[04:15:45] [Music]
+[04:15:53] hello
+[04:15:55] [Music]
+[04:16:02] hello how Google
+[04:16:05] meet
+[04:16:07] [Music]
+[04:16:16] but I know you know
+[04:16:19] aftere
+[04:16:21] audio doesn't
+[04:16:34] matter oh God
+[04:16:41] I still couldn't find the right thing
+[04:16:43] but was able to at least make it work uh
+[04:16:52] works so everything is correct other
+[04:16:55] than an event not getting triggered the
+[04:16:58] On Track event which is the right
+[04:16:59] usually the right way to you
+[04:17:02] know get back streams stream whenever a
+[04:17:07] stream comes whenever this web
+[04:17:09] connection everything is done uh a call
+[04:17:11] back is fired now for some reason that
+[04:17:13] call back isn't getting fired for us but
+[04:17:15] there is a new let me share a little how
+[04:17:17] I reached here so whenever I went to
+[04:17:20] about colon we tc- internals I
+[04:17:23] saw okay on the receiving side there was
+[04:17:26] this transceiver added that came twice
+[04:17:29] this is a new API that was introduced in
+[04:17:32] like uh wec a few years ago transceiver
+[04:17:35] was a concept you know whenever you're
+[04:17:37] sending data receiving data you get a
+[04:17:38] transceiver transceiver is getting added
+[04:17:41] which and also we confirmed here right
+[04:17:43] there was incoming audio video bit rate
+[04:17:45] so the audio is coming video is coming
+[04:17:48] so what I did was I have the p
+[04:17:50] connection object and you know you can
+[04:17:52] reach this transceiver by logging
+[04:18:01] this this PC doget transceivers will
+[04:18:05] give you all the current transceivers
+[04:18:06] that you have zero and One Track manala
+[04:18:08] B giv you the first and the second
+[04:18:10] remote track and then just put them on
+[04:18:11] the screen that's that was
+[04:18:14] it more
+[04:18:16] than I mean the the issue still exists
+[04:18:19] by the way someone wants to fix it fix
+[04:18:20] it there's no long long $200 Bounty but
+[04:18:22] still that will be a pretty big Bounty
+[04:18:24] if you it's still intriguing to me why
+[04:18:26] on track wouldn't get fired even though
+[04:18:29] and I'm sure it's something very small
+[04:18:31] okay why this isn't getting fired but
+[04:18:33] basically whatever logic was running
+[04:18:34] here I am just running after 5 seconds
+[04:18:37] because I know you know whenever the
+[04:18:39] negotiation begins after 5
+[04:18:41] Seconds both the parties will have the
+[04:18:43] tracks and then just play them rather
+[04:18:45] than waiting for the set timeout that's
+[04:18:47] what I've done uh this is still not very
+[04:18:49] clean if I'm being honest would love to
+[04:18:51] know why there is an issue here but my
+[04:18:54] friend will kill me if I don't reach his
+[04:18:55] house
+[04:19:00] so
+[04:19:02] a I'm off to
+[04:19:05] mangas which means
+[04:19:15] I am kidding I will be there but I will
+[04:19:17] be half asleep during the event
+[04:19:22] so anyways there's
+[04:19:32] not if you want to really learn webc
+[04:19:36] this is the best best example the raw
+[04:19:38] way to do a web
+[04:19:40] RTC um you know stream locally without
+[04:19:43] websockets is here
+[04:19:45] and the one that we've written so this
+[04:19:48] is in the same tab you're basically
+[04:19:49] sending video in the same tab which you
+[04:19:52] know VI web RTC which might sound weird
+[04:19:54] but H this is the leanest example of web
+[04:19:56] RTC out there this is the starting point
+[04:19:58] if you ever want to do P2P web RTC
+[04:20:02] and mang meet up right now it will be
+[04:20:06] hard coordinate
+[04:20:08] um you going to fly delhi now fly to
+[04:20:11] Delhi I am in Delhi
+[04:20:13] uh web RTC in cot there'll be one class
+[04:20:17] which will be this only but explain in a
+[04:20:19] tone down fashion as I said this is the
+[04:20:21] easy web RTC no one does this web RTC my
+[04:20:23] 4C job was also web RTC job this is this
+[04:20:26] you only do to learn this is happening
+[04:20:29] under the protocol if you want a few
+[04:20:30] resources web
+[04:20:31] RTC
+[04:20:33] weekly K there is a Blog SL you know
+[04:20:36] this Pio guy that I was talking about
+[04:20:37] this guy right here he's basically the B
+[04:20:39] of all web RTC so he has a newsletter he
+[04:20:42] used to this guy oh
+[04:20:44] no this guy is also pretty good this
+[04:20:48] fipo guy has a they have a weekly video
+[04:20:50] they used to at least Co man pretty sure
+[04:20:52] they don't anymore there was a time
+[04:20:53] where BC people were making money so
+[04:20:55] this guy had a very big block this guy
+[04:20:57] was pretty big back then then you know
+[04:21:00] the KNE tied down
+[04:21:01] so take you can always find these people
+[04:21:04] who are you know doing well in that
+[04:21:07] specific Niche all right chal G any
+[04:21:10] questions or shall I call it
+[04:21:13] now check PR okay
+[04:21:17] CH uh let's see if this is
+[04:21:20] something simple or something weird our
+[04:21:23] guy was able to create a PR maybe fixes
+[04:21:28] use ref type this won't fix it would
+[04:21:30] types will never affect your you know
+[04:21:32] this thing try to move on track after
+[04:21:35] this thing cons on drag so me get no
+[04:21:38] that won't help
+[04:21:40] sing um after PC it is after that only I
+[04:21:43] mean you can't recall it is after that
+[04:21:45] specific line PC on track is here con PC
+[04:21:48] is
+[04:21:50] here all right PR mer new Zoom time
+[04:21:55] please now Zoom time please B my friend
+[04:21:57] is on his way
+[04:22:00] uh so I don't think we'll have the time
+[04:22:02] but next time let's try to you know do
+[04:22:06] it here on the thing that we have
+[04:22:07] created oh to tab
+[04:22:10] closed um but yeah you get the
+[04:22:13] idea we we'll do it next time next
+[04:22:17] stream will be also on monkey type so
+[04:22:19] we'll we'll see I mean next time I want
+[04:22:21] to dive into an open source project
+[04:22:22] preferably G project this one works as
+[04:22:30] well
+[04:22:35] system
+[04:22:47] uh so do you sham goldcast front end sir
+[04:22:52] do you sham goldcast
+[04:22:55] FR check Ram super chat huh by time to
+[04:22:58] check some super chats
+[04:23:00] now
+[04:23:04] uh this is last stream with super chats
+[04:23:07] it's very hard for me to follow them you
+[04:23:09] may literally after it won't help I mean
+[04:23:10] I can try it but it won't help I can
+[04:23:12] tell you for sure it won't
+[04:23:13] help um let's see how do I look at all
+[04:23:18] the super chat so that I can answer them
+[04:23:19] one by one and I'm also going to disable
+[04:23:22] Super Chat from next one next time it's
+[04:23:24] very confusing or distracting to say the
+[04:23:27] least
+[04:23:30] uh super
+[04:23:33] chats yeah is there no oh
+[04:23:37] [Music]
+[04:23:38] no oh
+[04:23:43] cancel
+[04:23:45] uh click on live chat option there is SC
+[04:23:50] option top chats live
+[04:23:54] chats fan funding oh very good okay G
+[04:23:58] from the top please make content on
+[04:24:00] python I will eventually not right now m
+[04:24:03] i answer that appreciate the way you
+[04:24:05] deal thank you appreciate you as
+[04:24:11] well please see I have tagged you on
+[04:24:13] Discord board I will ping rookie or Aran
+[04:24:17] uh he will tell him I've told you any
+[04:24:19] he'll he'll teach me
+[04:24:22] um answered that bro create room one
+[04:24:25] okay
+[04:24:27] ier J
+[04:24:30] Juniper if someone wants to start
+[04:24:32] freelancing answer that MO P G screen
+[04:24:38] change sorry that was the highlight for
+[04:24:40] the stream uh join 0200 Co had doubt on
+[04:24:43] Discord rookie is your guy V who is
+[04:24:46] rookie rookie Arian the Discord
+[04:24:50] moderator um will you be using web
+[04:24:52] answer that peer to perer bug here
+[04:24:54] answer that webc video conferencing road
+[04:24:58] map
+[04:25:05] uh PR try to move on track answer that
+[04:25:09] drum I have couple of offers 30 LPA
+[04:25:12] e-commerce startup from scratch 10
+[04:25:14] talented people and banking firm with 40
+[04:25:16] LPA
+[04:25:19] confused A banks are a
+[04:25:22] little very hard but I would go for the
+[04:25:25] bank why one time experience I think it
+[04:25:28] is good it is very intense it is very
+[04:25:29] bad Tech so you
+[04:25:31] know but if you reach the right Bank you
+[04:25:33] know you might learn a few good things
+[04:25:35] and you you know path to make a lot of
+[04:25:37] money higher in Banks from what I know
+[04:25:39] though if I was you I would go for the
+[04:25:40] bank and you always come to a product
+[04:25:41] based startup I think this was the one
+[04:25:43] that I missed um all righty guys all fan
+[04:25:47] funding done back to chat should we call
+[04:25:50] it guys I think enough for today any
+[04:25:53] more questions can I still join the Goot
+[04:25:54] you can if you don't like it ask for a
+[04:25:56] refund
+[04:25:59] friend my friend be when he comes I'll
+[04:26:03] leave talk in Punjabi for 5 minutes I
+[04:26:05] don't know about that
+[04:26:10] sir we
+[04:26:12] made SL you know very dumb version of
+[04:26:15] Google
+[04:26:20] meet
+[04:26:25] okay where do you learn new stuff from
+[04:26:28] like this D you see me bang my head
+[04:26:31] today for an hour on
+[04:26:33] something I just come to know okay this
+[04:26:37] Market has obnoxious amount of money
+[04:26:39] right now for some reason let's say you
+[04:26:41] know 2020 wec 2022 web 3 currently AI
+[04:26:45] there is asymmetric funding in that
+[04:26:48] market for some reason the reason is
+[04:26:50] hype and you know okay VCS follow hype
+[04:26:54] so they put very dumb multipliers in
+[04:26:57] these companies for example I'll give
+[04:26:58] you examples my 4cr company 70x
+[04:27:01] multiplier they had a ARR of 10 mil they
+[04:27:03] were valued at $700 million backpack was
+[04:27:06] Zero Revenue 20 M seat round
+[04:27:10] and ab if you look at AI
+[04:27:14] companies pre-revenue companies are
+[04:27:17] raising 20 million team GIS 20 million
+[04:27:19] rounds seed rounds so that basically
+[04:27:21] tells you okay you know that company has
+[04:27:24] a lot of money has to grow very quickly
+[04:27:25] has founder has suddenly seen a lot of
+[04:27:28] money and you know whatever you can help
+[04:27:30] them with uh which usually is the most
+[04:27:33] difficult bit in that thing for example
+[04:27:34] in webc it was scalable building
+[04:27:37] scalable video systems not a lot of
+[04:27:38] people could do it so whoever could do
+[04:27:40] it could negotiate really
+[04:27:43] hard and there'll be three four
+[04:27:46] companies competing with each other now
+[04:27:48] to and for in a limited talent pool so
+[04:27:51] you know very easy to negotiate when
+[04:27:52] that happens so that's a high level of
+[04:27:54] how I learn I
+[04:27:56] realize I follow funding markets
+[04:27:58] basically and and you know try to get
+[04:28:00] into companies the good thing there is
+[04:28:01] you know you
+[04:28:01] make since the company has a crazy
+[04:28:03] multipler you also make crazy money and
+[04:28:07] May I've seen most hype Cycles die down
+[04:28:09] is when you know you will see yourself
+[04:28:10] topping out growth topping out money
+[04:28:12] topping out is when you can find the
+[04:28:13] next hype cycle and keep it rinse and
+[04:28:17] repeating all right business email uh
+[04:28:20] 100xs
+[04:28:21] gmail.com all right web RTC companies
+[04:28:24] there is D there is hudle 01 there is
+[04:28:28] 100 Ms these are Indian companies Bahar
+[04:28:30] there is live kit there is gather Town
+[04:28:32] there's uh streamyard there's um
+[04:28:36] hop there is hop sister companies child
+[04:28:40] companies
+[04:28:42] um every other video API company bunch
+[04:28:45] of metaverse companies um video
+[04:28:47] conferencing companies air me IND too
+[04:28:50] many companies but again they
+[04:28:51] don't pay as much anymore
+[04:28:56] hello
+[04:29:04] h
+[04:29:07] cha guys have to call it friend is here
+[04:29:09] it was lovely doing this we'll do
+[04:29:11] another one very soon we'll do it like
+[04:29:13] this only ad
+[04:29:16] H and I will have to leave my friend is
+[04:29:20] hereon match don't come with the late
+[04:29:22] but if you want to you can come to ig2
+[04:29:24] tomorrow make sure you fill out a form
+[04:29:26] you can find it somewhere on ig2 page
+[04:29:28] and uh would love to meet you again I'll
+[04:29:30] be half dead but still so I'll call it
+[04:29:32] see you guys
+[04:29:33] bye-bye uh DX

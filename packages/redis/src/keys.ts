@@ -92,6 +92,9 @@ export function recentPairMember(visitorIdA: string, visitorIdB: string): string
   return visitorIdA < visitorIdB ? `${visitorIdA}|${visitorIdB}` : `${visitorIdB}|${visitorIdA}`;
 }
 
+/** STRING (SET NX PX): one gateway at a time sweeps stale tickets. */
+export const MATCHMAKING_SWEEP_LOCK_KEY = 'lock:mm:sweep';
+
 // --- Visitor -----------------------------------------------------------------------------
 
 /** STRING: current ticket ref (matchmaking tag + ticketId). */

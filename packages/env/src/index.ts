@@ -26,4 +26,6 @@ export {
   redisTestEnv,
   type SeedEnv,
   seedEnv,
+  type WorkerEnv,
+  workerEnv,
 } from './schemas.ts';

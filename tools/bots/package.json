@@ -6,7 +6,8 @@
   "scripts": {
     "connect": "tsx src/connect.ts",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "bots": "tsx src/bots.ts"
   },
   "dependencies": {
     "@app/env": "workspace:*",

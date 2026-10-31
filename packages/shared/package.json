@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./crypto": "./src/crypto.ts",
-    "./visitor-token": "./src/visitor-token.ts"
+    "./visitor-token": "./src/visitor-token.ts",
+    "./jobs": "./src/jobs.ts"
   },
   "scripts": {
     "lint": "eslint .",

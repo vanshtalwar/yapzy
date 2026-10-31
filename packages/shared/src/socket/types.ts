@@ -40,6 +40,10 @@ export type RtcIceOut = z.output<typeof schemas.rtcIceOutSchema>;
 export type PeerLeft = z.output<typeof schemas.peerLeftSchema>;
 export type SystemNotice = z.output<typeof schemas.systemNoticeSchema>;
 export type Pong = z.output<typeof schemas.pongSchema>;
+/** Ack data for `chat:message`: the server-assigned id and timestamp of the stored message. */
+export type ChatMessageAck = z.output<typeof schemas.chatMessageAckSchema>;
+/** Normalized `queue:join` preferences, kept on the socket so `chat:next` can requeue. */
+export type QueuePreferences = z.output<typeof schemas.queueJoinSchema>;
 
 // --- Socket.io event maps -------------------------------------------------------------------
 
@@ -49,7 +53,7 @@ export interface ClientToServerEvents {
   'queue:leave': (payload: EmptyPayload, ack: AckCallback) => void;
   'chat:next': (payload: SessionRefPayload, ack: AckCallback) => void;
   'chat:end': (payload: SessionRefPayload, ack: AckCallback) => void;
-  'chat:message': (payload: ChatMessagePayload, ack: AckCallback) => void;
+  'chat:message': (payload: ChatMessagePayload, ack: AckCallback<ChatMessageAck>) => void;
   'chat:typing': (payload: ChatTypingPayload, ack: AckCallback) => void;
   'rtc:offer': (payload: RtcDescriptionPayload, ack: AckCallback) => void;
   'rtc:answer': (payload: RtcDescriptionPayload, ack: AckCallback) => void;
@@ -89,5 +93,7 @@ export interface SocketData {
   visitorId: string;
   ipHash: string;
   pool: MatchPool;
+  /** Last known state; authoritative state is derived from Redis on every event (D-038). */
   state: VisitorState;
+  preferences: QueuePreferences | null;
 }

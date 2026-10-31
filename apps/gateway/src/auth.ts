@@ -58,6 +58,7 @@ export function createHandshakeMiddleware(deps: HandshakeDeps) {
       ipHash,
       pool: ban?.type === 'SHADOW' ? 'shadow' : 'normal',
       state: 'idle',
+      preferences: null,
     };
   }
 

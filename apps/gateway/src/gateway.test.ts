@@ -115,7 +115,12 @@ describe('events', () => {
       error: { code: 'VALIDATION_FAILED', message: 'Invalid payload for queue:join' },
     });
     expect(
-      await socket.timeout(2_000).emitWithAck('queue:join', { mode: 'text', lang: 'en' }),
+      await socket.timeout(2_000).emitWithAck('moderation:signal', {
+        sessionId: '0199a3b2-7c4d-7e5f-8a9b-0c1d2e3f4a5b',
+        about: 'self',
+        kind: 'nudity',
+        score: 0.5,
+      }),
     ).toMatchObject({ ok: false, error: { code: 'NOT_IMPLEMENTED' } });
     expect(await socket.timeout(2_000).emitWithAck('admin:delete_everything', {})).toMatchObject({
       ok: false,

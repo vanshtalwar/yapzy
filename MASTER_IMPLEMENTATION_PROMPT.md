@@ -162,6 +162,9 @@ UI components are sourced from **21st.dev** through the `21st` MCP server config
 | `S3_BUCKET_EVIDENCE`, `S3_BUCKET_FRAMES` | api, worker | `evidence`, `frames` |
 | `INTEREST_FALLBACK_MS` | gateway | `5000` |
 | `RECENT_PAIR_TTL_MS` | gateway | `60000` |
+| `RECONNECT_GRACE_MS` | gateway | `15000` |
+| `MATCH_ACK_TIMEOUT_MS` | gateway | `5000` |
+| `EARLY_FAILURE_WINDOW_MS` | gateway | `10000` |
 | `RATE_LIMIT_DISABLED` | api, gateway | `false`; honored **only** when `NODE_ENV=development` |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | db seed | dev admin |
 | `ADMIN_SESSION_TTL_SECONDS` | api | `28800` |
@@ -191,6 +194,8 @@ Client → Server
 | `rtc:ice` | `{ sessionId, to: participantId, candidate }` | ≤ 1 KB |
 | `rtc:summary` | `{ sessionId, peer: participantId, localCandidateType, remoteCandidateType, avgRttMs, avgBitrateKbps, timeToConnectedMs, failed }` | once per peer connection at its end (video) |
 | `moderation:signal` | `{ sessionId, about: participantId\|'self', kind, score }` | client-side NSFW signals (Part 8), low trust weight |
+| `match:ack` | `{ sessionId }` | must arrive within `MATCH_ACK_TIMEOUT_MS` of `match:found` |
+| `session:resume` | `{ sessionId, lastMessageId? }` | after a socket reconnect; ack `{ selfParticipantId, peers, missedMessages }` or error `SESSION_NOT_RESUMABLE` |
 | `ping` | `{}` | ack with server time |
 
 Server → Client
@@ -203,6 +208,7 @@ Server → Client
 | `chat:message` | `{ sessionId, from: participantId, id, text, at }` |
 | `chat:typing` | `{ sessionId, from: participantId, isTyping }` |
 | `rtc:offer` / `rtc:answer` / `rtc:ice` | `{ sessionId, from: participantId, ... }` (`from` set by the server, never trusted from the client) |
+| `peer:reconnecting` / `peer:resumed` | `{ sessionId, participantId }` — the peer's signaling connection dropped / came back (media may still flow) |
 | `peer:left` | `{ sessionId, participantId, reason: 'left'\|'disconnected', sessionEnded: boolean }` (never reveal reports/bans to others) |
 | `system:notice` | `{ code, message }` — e.g. `SESSION_REPLACED`, `SERVER_RESTARTING`, `BANNED`, `MESSAGE_BLOCKED`, `RATE_LIMITED` |
 
@@ -219,10 +225,9 @@ Matchmaking keys share a **hash tag** so each Lua script touches a single slot (
 | `visitor:<id>:ticket` | STRING | current ticket ref (tag + ticketId) |
 | `visitor:<id>:session` | STRING | current sessionId |
 | `session:{<id>}:meta` | HASH | `{ mode, topology, maxParticipants, startedAt, commonInterests, state: active\|seeking\|ended, endedAt? }` |
-| `session:{<id>}:participants` | HASH | participantId → JSON `{ visitorId, joinedAt, leftAt?, leaveReason? }` (left participants are kept so reports work) |
+| `session:{<id>}:participants` | HASH | participantId → JSON `{ visitorId, status: pending\|active\|reconnecting\|left, joinedAt, disconnectedAt?, leftAt?, leaveReason? }` (left participants are kept so reports work) |
 | `session:{<id>}:log` | LIST | transcript ring buffer (last 100 msgs, `from` = participantId) |
-
-Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic Lua script (Redis Cluster–safe). When a session ends, all its keys get a 1 h TTL so reports can still reference it.
+| `session:deadlines` | ZSET | member `<kind>\|<sessionId>\|<participantId>` (kind `ack` or `grace`), score = deadline (ms). Processed by any gateway node; claimed with `ZREM` so exactly one node handles each entry, and nothing is lost when a node restarts |
 | `presence:node:<nodeId>` | STRING | socket count of a gateway node, TTL 15 s |
 | `presence:nodes` | SET | known gateway node ids |
 | `stats:matches:<yyyyMMddHHmm>` | STRING | per-minute match counter, TTL 2 h |
@@ -232,6 +237,15 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 | `admsess:<id>` | STRING | admin sessions |
 | channel `gw:control` | PUB/SUB | cross-node control: kick visitor, end session, ban applied |
 
+Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic Lua script (Redis Cluster–safe). When a session ends, all its keys get a 1 h TTL so reports can still reference it.
+
+### Session resilience (implemented in Parts 5–7)
+
+1. **Calls survive signaling disconnects.** Media is P2P, so a gateway crash, deploy or brief network blip must not end a call. On socket disconnect the participant becomes `reconnecting` (not `left`) for `RECONNECT_GRACE_MS`; others get `peer:reconnecting`. If the same visitor reconnects to **any** gateway node and sends `session:resume` within the grace period, the participant becomes `active` again, others get `peer:resumed`, and the ack returns any text messages missed meanwhile. When the grace period expires, the participant leaves normally. Gateway shutdown never ends sessions.
+2. **Match acknowledgement (ghost-tab protection).** Participants start as `pending`. The client must send `match:ack` within `MATCH_ACK_TIMEOUT_MS`; otherwise the session ends and the non-responding participant leaves (reason `match_timeout`). The client pauses searching when its tab has been hidden too long while waiting.
+3. **Fair requeue.** If a session fails early (within `EARLY_FAILURE_WINDOW_MS`) through no fault of a participant — the peer never acked, disconnected for good, or WebRTC failed — that participant is requeued with **priority** (head of the queue). A normal skip is not a failure; skipped users requeue normally.
+4. **Video only after media is ready.** In video mode the client only sends `queue:join` after camera and mic are granted (pre-join screen), so nobody is matched with someone who can't send video.
+
 ### Matching algorithm (implemented in Part 5)
 
 - `enqueueOrMatch(ticket, phase)` is **one atomic Lua script**:
@@ -240,6 +254,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
   3. No match → push ticket into the queues for its phase and mark `waiting`.
   4. Match → mark both tickets `matched`, record pair in `recent` (prune entries older than `RECENT_PAIR_TTL_MS`), return peer ticket + common interests.
 - Interest tickets are first enqueued only in interest queues; a gateway timer later "promotes" them into `q:any`. Duplicate references are harmless because of stale-skipping.
+- `enqueueOrMatch` accepts `{ priority: true }`: the ticket is pushed to the **head** of its queues instead of the tail (fair requeue after an early failure — see Session resilience).
 - After a match the gateway (TypeScript) creates the session keys with a random `participantId` per visitor, randomly picks the pair's `initiator` (impolite peer, creates the offer), and emits `match:found` to each visitor's room `visitor:<id>`.
 - Cross-node delivery: every socket joins room `visitor:<visitorId>`; emits go through the Socket.io sharded Redis adapter. No per-session rooms — "send to all other participants" loops over their visitor rooms, so the same code serves 2 or 3 participants. One active socket per visitor (new connection kicks the old one via `gw:control`).
 
@@ -366,7 +381,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 6. Event registration helper `registerHandler(socket, event, schema, handler, { cost })`: validates payload with Zod, applies a **per-socket token-bucket rate limiter** (in memory; per-event cost), catches errors, always answers the ack with the standard envelope, counts/ignores unknown events, disconnects sockets that exceed an abuse threshold.
 7. Presence: every 5 s write `presence:node:<nodeId>` (TTL 15 s) and maintain `presence:nodes`.
 8. `ping` handler (ack with server time). Stub handlers for the remaining events returning `NOT_IMPLEMENTED` (removed in Part 5).
-9. Graceful shutdown: stop accepting connections, notify `SERVER_RESTARTING`, close sockets after a drain timeout (10 s), close Redis, exit. Leave a hook `onShutdown` for Part 5 to end sessions.
+9. Graceful shutdown: stop accepting connections, notify `SERVER_RESTARTING`, close sockets after a drain timeout (10 s), close Redis, exit. Leave a hook `onShutdown` for Part 5 (it stops timers; it must **not** end sessions — see Session resilience).
 10. Scripts: `dev`, `dev:multi` (two instances on 4001 and 4011 with different `GATEWAY_NODE_ID`), `build`, `start`.
 
 **Required tests (real Redis, socket.io-client, random ports):** rejects missing/invalid/expired token; rejects banned visitor; invalid payload → `VALIDATION_ERROR` ack; rate limit → `RATE_LIMITED`; second connection for same visitor kicks the first **across two gateway instances**; presence keys written and expire after shutdown.
@@ -392,23 +407,29 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 2. Gateway handlers replace the stubs:
    - Per-socket state machine `idle → waiting → in_session → (waiting|idle)`; reject invalid transitions with `INVALID_STATE`.
    - `queue:join`: normalize interests (lowercase, trim, dedupe, strip non-alphanumerics except `-`), store preferences on `socket.data`, create ticket, run `enqueueOrMatch('interest'|'any')`. If waiting with interests, schedule promotion after `INTEREST_FALLBACK_MS` (cancel on match/leave). Emit `queue:waiting`.
-   - On match: create `session:{<id>}:meta` + `session:{<id>}:participants` (random `participantId` each) and `visitor:<id>:session` for both, increment `stats:matches:<minute>`, choose the pair's initiator randomly, emit `match:found` to both `visitor:<id>` rooms (cross-node). Implement session logic over the **participant list** (helpers like `getOtherActiveParticipants(sessionId, selfParticipantId)`), never as fixed `a`/`b`.
+   - On match: create `session:{<id>}:meta` + `session:{<id>}:participants` (random `participantId` each, status `pending`) and `visitor:<id>:session` for both, add an `ack` deadline per participant to `session:deadlines`, increment `stats:matches:<minute>`, choose the pair's initiator randomly, emit `match:found` to both `visitor:<id>` rooms (cross-node).
+   - `match:ack`: mark the participant `active` and remove its `ack` deadline. Implement session logic over the **participant list** (helpers like `getOtherActiveParticipants(sessionId, selfParticipantId)`), never as fixed `a`/`b`.
    - Because the waiting peer may be on another node, nodes must update their local socket state when they receive `match:found` for their socket — design this explicitly (e.g. the emitting node also publishes a `gw:control` message, or socket state is derived from Redis `visitor:<id>:session` on each event). Document the choice.
    - `chat:message`: verify session membership + sessionId, trim, enforce length, assign `id` (ulid) + `at`, append to `session:{<id>}:log` (LTRIM 100), emit to every other active participant with `from`, ack sender with `{ id, at }`.
    - `chat:typing`: relay to other participants, throttled (max 1 per 2 s per state change).
    - `rtc:offer|answer|ice`: membership + size checks, verify `to` is an active participant of the same session, relay only to that participant with `from` set by the server.
-   - `chat:next` / `chat:end` / disconnect / `queue:leave`: **leave** the session with one atomic Lua script over the `{<id>}` keys (idempotent, so simultaneous leaves are safe): mark the participant left, emit `peer:left { participantId, sessionEnded }` to the others; when fewer than 2 active participants remain, set `state=ended`, apply a 1 h TTL to all session keys, and enqueue a BullMQ `session-log` job. `chat:next` rejoins the queue with the same preferences.
-   - Shutdown hook ends all local sessions with reason `server_restart`.
+   - `chat:next` / `chat:end` / `queue:leave` / expired grace / expired ack: **leave** the session with one atomic Lua script over the `{<id>}` keys (idempotent, so simultaneous leaves are safe): mark the participant left, emit `peer:left { participantId, sessionEnded }` to the others; when fewer than 2 active participants remain, set `state=ended`, apply a 1 h TTL to all session keys, and enqueue a BullMQ `session-log` job. `chat:next` rejoins the queue with the same preferences.
+   - **Socket disconnect does not leave the session** (Reference Design → Session resilience): set the participant `reconnecting` + `disconnectedAt`, add a `grace` deadline, emit `peer:reconnecting`. A waiting (unmatched) visitor's ticket is still cancelled on disconnect.
+   - `session:resume { sessionId, lastMessageId? }`: verify the visitor owns a `reconnecting` (or still `active`, if the disconnect hasn't been processed yet) participant in that session → mark `active`, remove the `grace` deadline, restore `socket.data` state, emit `peer:resumed`, ack with `{ selfParticipantId, peers, missedMessages }` (from `session:{<id>}:log` after `lastMessageId`). Otherwise ack `SESSION_NOT_RESUMABLE`. A `queue:join` from a visitor who still has a `reconnecting` session first leaves that session (e.g. after a page reload).
+   - Deadline processor (every gateway node, every 1 s): read due entries from `session:deadlines`, claim each with `ZREM` (only the node that removed it handles it), then: expired `ack` → that participant leaves with reason `match_timeout`; expired `grace` → leaves with reason `disconnect`. Survives node restarts because deadlines live in Redis.
+   - Fair requeue: when a session ends within `EARLY_FAILURE_WINDOW_MS` of `match:found` because a peer timed out, disconnected for good, or reported `rtc_failed`, requeue the other participant(s) automatically with `enqueueOrMatch(..., { priority: true })` (only if they had auto-requeue on — pass this preference in `queue:join`). Normal skips requeue normally.
+   - Shutdown hook stops local timers only; it does **not** end sessions — clients reconnect to another node and resume.
    - Periodic sweeper (every 30 s, lock with `SET NX PX`) removes stale tickets.
 3. `apps/worker`: BullMQ worker process; `session-log` job writes `ChatSessionLog` + `SessionParticipant` rows (idempotent upserts). Graceful shutdown. Scripts `dev`, `build`, `start`.
-4. `tools/bots`: CLI (`pnpm bots -- --clients 20 --gateways http://localhost:4001,http://localhost:4011 --mode text --duration 60`) — each bot obtains a token from the API, connects to a random gateway, joins the queue (random interests from a small pool), sends a few messages, randomly skips or ends, and repeats. Prints matches, messages delivered, errors, p50/p95 time-to-match.
+4. `tools/bots`: CLI (`pnpm bots -- --clients 20 --gateways http://localhost:4001,http://localhost:4011 --mode text --duration 60`) — each bot obtains a token from the API, connects to a random gateway, joins the queue (random interests from a small pool), sends `match:ack`, sends a few messages, randomly skips or ends, and repeats. Options `--ghost-rate` (fraction of bots that never ack) and `--reconnect-rate` (bots that drop their socket mid-session, reconnect to another gateway and resume). Prints matches, messages delivered, resumes, ack timeouts, errors, p50/p95 time-to-match.
 
 **Required tests**
-- Matchmaking (real Redis): basic pairing; FIFO fairness; interest match preferred; fallback to `any` after promotion; no self-match; recent-pair avoidance and expiry; different mode/lang/pool never mix; stale entries skipped and dropped; **concurrency: 200 parallel enqueues → every visitor matched at most once, no lost tickets**.
-- Gateway integration: full text flow between two clients on **different gateway nodes**; skip → peer gets `peer:left` and requeues; stale `sessionId` rejected; `rtc:*` with a `to` outside the session rejected; simultaneous leave from both participants is safe; disconnect ends session; messages over limit rejected.
+- Matchmaking (real Redis): basic pairing; FIFO fairness; interest match preferred; fallback to `any` after promotion; no self-match; recent-pair avoidance and expiry; different mode/lang/pool never mix; stale entries skipped and dropped; priority tickets are matched before older normal tickets; **concurrency: 200 parallel enqueues → every visitor matched at most once, no lost tickets**.
+- Gateway integration: full text flow between two clients on **different gateway nodes**; skip → peer gets `peer:left` and requeues; stale `sessionId` rejected; `rtc:*` with a `to` outside the session rejected; simultaneous leave from both participants is safe; messages over limit rejected.
+- Resilience: disconnect → peer gets `peer:reconnecting`, session stays; reconnect **to the other node** + `session:resume` within grace → `peer:resumed` and missed messages returned; no resume → participant leaves after `RECONNECT_GRACE_MS`; a gateway node shut down mid-session → its clients resume on the other node and the session survives; no `match:ack` → session ends after `MATCH_ACK_TIMEOUT_MS` and the acking peer is requeued with priority; each deadline is processed exactly once with two nodes running.
 - Worker: session-log job persists row.
 
-**Acceptance criteria:** bots run 2 minutes with 50 clients across 2 nodes with zero protocol errors and every match symmetric; quality gate green.
+**Acceptance criteria:** bots run 2 minutes with 50 clients across 2 nodes (with `--ghost-rate 0.1 --reconnect-rate 0.1`) with zero protocol errors, every match symmetric, every reconnecting bot resumed, and ghost sessions ended within the ack timeout; restarting one gateway node during the run ends no sessions; quality gate green.
 
 **Manual check:** `pnpm --filter @app/gateway dev:multi`, `pnpm --filter @app/api dev`, `pnpm --filter @app/worker dev`, then `pnpm bots -- --clients 50 ...`; check `ChatSessionLog` rows in Prisma Studio.
 
@@ -438,6 +459,9 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - `lib/socket.ts` singleton typed Socket.io client (`transports: ['websocket']`, auth token, reconnection with backoff, handles `SESSION_REPLACED`, `BANNED`, `SERVER_RESTARTING`).
    - Zustand store with an explicit chat state machine (`idle | connecting | waiting | matched | ended | blocked | error`), current `sessionId`, messages, typing state, preferences, `autoRequeue` setting.
    - Ignore any server event whose `sessionId` ≠ current session.
+   - Session resilience (Reference Design): send `match:ack` as soon as `match:found` is accepted by the store. On socket reconnect while in a session, send `session:resume { sessionId, lastMessageId }` and merge `missedMessages`; on `SESSION_NOT_RESUMABLE` treat the session as ended. Show a non-blocking "Stranger's connection is unstable…" hint on `peer:reconnecting`, cleared by `peer:resumed`. A socket reconnect alone never resets the chat UI.
+   - Ghost-tab protection: if the tab is hidden for more than 60 s while **waiting**, send `queue:leave` and show a "Paused — click to keep searching" state.
+   - Pass the auto-requeue preference in `queue:join` so the server can requeue with priority after an early failure.
 4. Text chat UI: message list (self / stranger / system messages like "You're now chatting with a stranger. You both like: x"), `aria-live` region, typing indicator, input with character counter (500), Enter to send, optimistic send reconciled with ack (failed → retry/blocked state), **Next** (confirm on first press within 3 s or Esc twice), **Stop**, auto-requeue toggle, "Stranger has disconnected" state with "New chat" button. Never render HTML from messages; no auto-linking.
 5. Basic `next.config` security headers (CSP finalized in Part 10).
 
@@ -461,6 +485,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 
 **Tasks**
 1. `useLocalMedia` hook: `getUserMedia` (ideal 640×480 @ 24–30 fps, echoCancellation, noiseSuppression, autoGainControl), permission-denied / no-device / in-use errors with clear UI, device pickers (camera/mic, `devicechange` listener), mute and camera-off via `track.enabled`, mirrored local preview. Acquire once and reuse across matches.
+   **Pre-join screen:** `/chat?mode=video` first shows a camera/mic check (preview, device pickers, mic level meter, "Start" button). `queue:join` is sent only after `getUserMedia` succeeded and the user clicked Start; if permission is denied, the user can switch to text mode instead.
 2. `lib/rtc/CallManager.ts` (one per chat session) owns a `Map<participantId, PeerSession>`, shares the single local stream, routes incoming signals by `from`, creates PeerSessions from `match:found.peers` (and `participant:joined` in Part 11) and destroys one on `peer:left`. For 1:1 the map has one entry; the same code must support a 3-person mesh later.
    `lib/rtc/PeerSession.ts` (framework-agnostic class, **one instance per remote participant**):
    - ICE servers from `GET /v1/turn-credentials` (cache until 60 s before expiry).
@@ -470,20 +495,24 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - Cap outgoing video bitrate (~800 kbps via `RTCRtpSender.setParameters`), prefer maintaining framerate.
    - `close()` is idempotent: removes listeners, closes the PC, clears remote stream; local stream stays alive.
    - Every outgoing/incoming signal is tagged with `sessionId`; signals for other sessions are dropped.
+   - **Lifecycle rules (prevent the classic "ontrack never fires" bugs):** never store `RTCPeerConnection`, `MediaStream` or tracks in React state (keep them in the class; expose only plain status values to React); attach `ontrack`, `onicecandidate`, `onnegotiationneeded`, `onconnectionstatechange` immediately after constructing the connection and before any `setRemoteDescription`/`addTrack`; always pair `createOffer`/`createAnswer` with `setLocalDescription`; no `setTimeout`/polling workarounds (e.g. reading `getTransceivers()` later) — if `ontrack` doesn't fire, find the cause.
+   - A socket reconnect must **not** close the `PeerSession`: media keeps flowing P2P while the client resumes the session. Only `peer:left`, ending the session, or `rtc_failed` closes it. Signals that were in flight during a reconnect may be lost — recover with an ICE restart if the connection becomes `disconnected`.
    - Collect `getStats()` every 2 s (RTT, packet loss, bitrate, selected candidate pair types) → quality indicator; send `rtc:summary` once at session end.
 3. Gateway: handle `rtc:summary` (validate, log at debug, keep counters for Part 10 metrics).
 4. Video chat page `/chat?mode=video`: remote video large (rendered from the list of remote participants, so the layout already handles 1 or 2 remote tiles), local picture-in-picture, text chat panel (side on desktop, drawer on mobile), controls (Next, Stop, Mute, Camera, Device settings, Report placeholder disabled until Part 8), "Looking for someone…" state with local preview, connection quality badge, autoplay handling (muted-autoplay fallback with tap-to-unmute). Enable Video mode on the landing page and set `features.video` accordingly. Source the video tiles, controls bar, device-settings dialog and quality badge via the `21st` MCP into `@app/ui` (Reference Design → Frontend UI components); keep all WebRTC logic outside the components.
 5. Handle tab visibility/background, page unload (`chat:end` via `pagehide`), and network change (`online/offline`).
 6. Document LAN/mobile testing: `getUserMedia` needs a secure context — describe running `next dev --experimental-https` (or a local HTTPS proxy) and pointing `NEXT_PUBLIC_*` URLs at the LAN IP.
 
-**Required tests:** `PeerSession` unit tests with mocked `RTCPeerConnection` (glare handled by perfect negotiation, candidate queuing, stale-session drop, idempotent close, restart policy); `CallManager` tests (signals routed by `from`, peer added/removed, local stream shared and kept alive). Playwright smoke test is added in Part 10.
+**Required tests:** `PeerSession` unit tests with mocked `RTCPeerConnection` (glare handled by perfect negotiation, candidate queuing, stale-session drop, idempotent close, restart policy, handlers attached before the first remote description, socket reconnect does not close the connection); `CallManager` tests (signals routed by `from`, peer added/removed, local stream shared and kept alive). Playwright smoke test is added in Part 10.
 
 **Acceptance criteria:**
 - Two windows connect video+audio within ~2 s on localhost; rapid Next ×20 leaves no zombie peer connections (check `chrome://webrtc-internals`) and no memory growth in tracks.
 - With `NEXT_PUBLIC_FORCE_TURN_RELAY=true`, the selected candidate pair is `relay` and video still works through coturn.
+- Restarting the gateway mid-call does not interrupt video/audio; text chat resumes after the socket reconnects.
+- Nobody can enter the video queue without granted camera/mic.
 - Quality gate green.
 
-**Manual check:** two Chrome windows (one incognito) → video works; toggle relay mode and confirm in `chrome://webrtc-internals`; test camera-denied path.
+**Manual check:** two Chrome windows (one incognito) → video works; toggle relay mode and confirm in `chrome://webrtc-internals`; test camera-denied path; restart the gateway during a call and confirm the video keeps playing.
 
 **Out of scope:** NSFW detection, reports.
 
@@ -581,10 +610,10 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - Structured logs carry `requestId` / `socketId` / `sessionId` correlation fields. Optional OpenTelemetry tracing behind a flag.
 3. **Testing:**
    - Coverage targets: `packages/matchmaking` ≥ 90 % lines, `packages/moderation` ≥ 90 %, apps ≥ 70 % for business logic.
-   - Playwright E2E in `e2e/` (Chromium with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, two browser contexts): text chat flow; video connects (assert via a `data-rtc-state="connected"` attribute); Next re-matches; report flow creates a report; hard-banned visitor sees blocked screen; admin bans a live user.
+   - Playwright E2E in `e2e/` (Chromium with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, two browser contexts): text chat flow; video connects (assert via a `data-rtc-state="connected"` attribute **and** that the remote `<video>` has `videoWidth > 0`, proving `ontrack` fired); a gateway restart mid-call keeps the video connected and text resumes; a tab that never acks a match doesn't block the other user; Next re-matches; report flow creates a report; hard-banned visitor sees blocked screen; admin bans a live user.
    - Root `pnpm test:e2e` that boots required services (or documents how).
 4. **Load testing:** extend `tools/bots` with a `load` mode (ramp-up, target clients, skip-rate distribution, video-signaling simulation with fake SDP/ICE payload sizes, messages/sec) reporting p50/p95/p99 time-to-match, message delivery latency, error rates, and gateway CPU/memory (from `/metrics`). Run locally with 2 gateway nodes at 2,000 and 5,000 clients (or the max the machine handles) and **record results in CONTEXT.md**, plus the projected node count for 1M concurrent.
-5. **Resilience checks:** kill one gateway node during a bot run → clients reconnect to the other, no stuck sessions or tickets (sweeper cleans up); restart Redis → services recover; worker restart → no lost jobs.
+5. **Resilience checks:** kill one gateway node during a bot run → clients reconnect to the other and **resume their sessions** (none end), no stuck sessions, tickets or deadlines; restart Redis → services recover; worker restart → no lost jobs.
 6. **Containers:** multi-stage Dockerfiles for api, gateway, worker, web, admin (`turbo prune`, non-root user, `HEALTHCHECK`, minimal runtime image, Next.js standalone output). Compose profile `full` runs the entire stack in containers.
 7. **CI:** GitHub Actions workflow: pnpm cache, install, lint, typecheck, unit + integration tests (Postgres + Redis service containers, `db:deploy` on test DB), build; separate job for Playwright (can be manual-trigger). Dependabot config.
 8. **Docs:** finalize `README.md` (setup, run modes, testing, load testing, troubleshooting incl. macOS/coturn/HTTPS for LAN), and create `docs/PRODUCTION_CHECKLIST.md` covering: legal review (COPPA, GDPR, DSA, UK Online Safety Act, India IT Rules, US 18 U.S.C. §2258A NCMEC reporting), age-assurance vendor, real CSAM hash matching (PhotoDNA/Thorn Safer), human moderation staffing & wellbeing, Kubernetes + HPA on connection count, Redis Cluster (keys are already hash-tagged), PgBouncer, bare-metal TURN fleet with `denied-peer-ip`, TURN over TLS 443, GeoDNS/multi-region matchmaking, CDN/WAF/DDoS, secrets manager, backups & DR, data retention jobs, incident response, penetration test.
