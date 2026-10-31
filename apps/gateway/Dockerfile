@@ -3,7 +3,7 @@
 #   docker build -f apps/gateway/Dockerfile -t randomchat-gateway .
 # Configuration comes from the environment at run time (no .env in the image).
 
-FROM node:24.22.2-alpine3.24 AS base
+FROM node:26.12.1-alpine3.24 AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
@@ -29,7 +29,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
  && cd /prod/gateway/node_modules/.pnpm \
  && rm -rf prisma@* @prisma+studio-core@* @prisma+engines@* @prisma+dev@* @electric-sql+pglite@* effect@*
 
-FROM node:24.22.2-alpine3.24 AS runtime
+FROM node:26.12.1-alpine3.24 AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /prod/gateway/package.json ./
