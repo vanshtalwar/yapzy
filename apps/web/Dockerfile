@@ -5,7 +5,7 @@
 # NEXT_PUBLIC_* values are inlined into the browser bundle at build time, so they are build
 # arguments, not run-time variables. DEPLOY_ENV=production refuses Turnstile test keys.
 
-FROM node:24.22.2-alpine3.24 AS base
+FROM node:26.12.1-alpine3.24 AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 NEXT_TELEMETRY_DISABLED=1
 RUN corepack enable
 WORKDIR /repo
@@ -34,7 +34,7 @@ COPY --from=prune /repo/out/full/ .
 # The build also converts the NSFWJS model into public/models/ (scripts/prepare-nsfw-model.mjs).
 RUN pnpm turbo run build --filter=@app/web
 
-FROM node:24.22.2-alpine3.24 AS runtime
+FROM node:26.12.1-alpine3.24 AS runtime
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
