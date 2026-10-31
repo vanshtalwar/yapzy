@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (12 parts, executed one at a time) |
 | Planned group calls | Up to **4 people per video call** via **Janus VideoRoom** (Parts 11–12); 2-person calls stay P2P. Parts 1–10 must stay participant-list based and keep the `CallManager` transport interface |
-| Current status | Parts 1–5 done incl. the Part 5 follow-up (session resilience + queue buckets) — **next: Part 6** (Web app & end-to-end text chat) |
+| Current status | Parts 1–6 done (web app with end-to-end text chat) — **next: Part 7** (Video chat, WebRTC) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -24,7 +24,7 @@
 | 3 | REST API service | ✅ Done | 2026-10-31 | Fastify 5; TURN creds verified against live coturn; real Turnstile siteverify call in dev |
 | 4 | Real-time gateway core | ✅ Done | 2026-10-31 | Two nodes verified live (stats 3+2=5); sharded adapter on node-redis (D-031); `VALIDATION_FAILED` used instead of spec's `VALIDATION_ERROR` (D-034) |
 | 5 | Matchmaking & chat session lifecycle | ✅ Done (+ follow-up) | 2026-10-31 | Follow-up (D-046…D-049, D-052…D-053) done: resume/ack/deadlines/priority requeue, queue buckets. Bots 50 × 2 min × 2 nodes, ghost 0.1, reconnect 0.1: 0 protocol errors, 0 asymmetric, 0 undelivered; p95 to match 1 289 ms (4 buckets) vs 1 586 ms (1 bucket); gateway restart mid-run: 168 resumes, 0 sessions ended |
-| 6 | Web app & text chat | ⬜ Not started | | |
+| 6 | Web app & text chat | ✅ Done | 2026-10-31 | Next.js 16.4 + React 19.3 + Tailwind 4; `@app/ui` from 21st.dev; Zustand store + controller. Headless-Chrome smoke (2 browsers): gate → match → chat both ways (HTML shown as text) → typing → Next (auto-requeue rematch) → network drop + resume with missed message → Stop → mobile 390 px, no overflow |
 | 7 | Video chat (WebRTC) | ⬜ Not started | | |
 | 8 | Trust & safety | ⬜ Not started | | |
 | 9 | Admin & moderation dashboard | ⬜ Not started | | |
@@ -55,8 +55,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Lint / format | ESLint flat config + typescript-eslint + simple-import-sort; Prettier | eslint 10.13, typescript-eslint 8.72, prettier 3.9 |
 | Validation | Zod | 4.6 |
 | Logging | pino + pino-pretty | pino 10.4, pino-pretty 13.2 |
-| Web / Admin | Next.js (App Router) + Tailwind CSS | TBD |
-| UI components | 21st.dev components (via `21st` MCP) in shared `packages/ui` (`@app/ui`), shadcn-style conventions (D-018) | TBD (Part 6) |
+| Web / Admin | Next.js (App Router, Turbopack) + React + Tailwind CSS (CSS-first config) | Next 16.4, React 19.3, Tailwind 4.3 (`@tailwindcss/postcss`); admin in Part 9 |
+| Client state | Zustand vanilla store + `useStore` | zustand 5.0; socket.io-client 4.8.4 |
+| UI components | 21st.dev components (via `21st` MCP) in shared `packages/ui` (`@app/ui`), shadcn-style conventions (D-018) | radix-ui 1.8 (unified package), class-variance-authority 0.7, clsx 2.1 + tailwind-merge 3.7 (`cn()`), lucide-react 1.66, sonner 2.0 |
 | REST API | Node.js + Fastify + Zod | Fastify 5.12, fastify-type-provider-zod 7, @fastify/cors 11, helmet 13, rate-limit 11 (Redis store), sensible 6; bundled with tsup 9, dev via tsx 4 |
 | Real-time | Socket.io + `@socket.io/redis-adapter` (sharded) | socket.io 4.8.4 (+ socket.io-client 4.8.4), @socket.io/redis-adapter 8.3 `createShardedAdapter` (`subscriptionMode: 'dynamic'`) on **node-redis 6.3** (adapter only; D-031), proxy-addr 2 |
 | Database | PostgreSQL + Prisma ORM | Postgres 18.6 (image `postgres:18.6-alpine`); Prisma **7.10.1** (`prisma-client` generator, `@prisma/adapter-pg` driver adapter, pinned exactly — D-020) |
@@ -66,7 +67,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Media | WebRTC (P2P) + coturn (TURN/STUN) for 2-person calls; **Janus VideoRoom** (SFU) for 3–4-person calls (Part 11, D-050) | coturn 4.18 (`coturn/coturn:4.18-alpine`); Janus TBD (Part 11) |
 | Auth | `jose` JWT (visitors), argon2id + TOTP (admins) | jose 6.2 (HS256 visitor tokens, `@app/shared/visitor-token`); `@node-rs/argon2` 2.2 (argon2id default) |
 | Bot protection | Cloudflare Turnstile (test keys in dev) | — |
-| Testing | Vitest, Playwright | Vitest 5.0; Playwright TBD |
+| Testing | Vitest, Testing Library, Playwright | Vitest 5.0 (jsdom 30 for React packages), @testing-library/react 16.3; Playwright in Part 10 (Part 6 smoke used playwright-core 1.64 + installed Google Chrome, outside the repo) |
 | Observability | pino, prom-client, Prometheus, Grafana | TBD |
 
 ## 5. Architecture (summary)
@@ -103,13 +104,25 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts
 │     ├─ src/test/        helpers.ts (2 real nodes on random ports, Redis DB 13, unique channels)
 │  │  └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
-│  └─ worker/             BullMQ consumers: src/worker.ts (createWorkers), src/jobs/session-log.ts, src/server.ts
+│  ├─ worker/             BullMQ consumers: src/worker.ts (createWorkers), src/jobs/session-log.ts, src/server.ts
+│  └─ web/                Next.js 16 App Router (port 3000)
+│     ├─ next.config.mjs  env via @app/env `webEnv` (validated at start), security headers + CSP, transpilePackages
+│     ├─ app/             layout.tsx (Toaster, theme colours), page.tsx (landing), chat/page.tsx (/chat?mode=),
+│     │                   terms|privacy|guidelines/page.tsx (placeholder legal), globals.css, icon.svg
+│     ├─ components/      age-gate.tsx (consents + Turnstile → POST /v1/session), turnstile.tsx, blocked-screen.tsx,
+│     │                   site-header/footer, landing/ (start-panel, online-count), chat/ (chat-screen, next-button),
+│     │                   legal/legal-page.tsx
+│     └─ lib/             chat-store.ts (state machine), chat-controller.ts (socket protocol), chat.ts (singletons +
+│                         useChat), socket.ts, api.ts (typed REST + ApiError), session-token.ts, device.ts,
+│                         preferences.ts, consent.ts, storage.ts, config.ts, languages.ts; *.test.ts
 ├─ packages/
-│  ├─ config/             tsconfig.base/node/nextjs.json, eslint.config.base.js (createEslintConfig), prettier.config.js
+│  ├─ config/             tsconfig.base/node/nextjs/react.json, eslint.config.base.js (createEslintConfig({ react, next })),
+│  │                      prettier.config.js
 │  ├─ env/                createEnv(schema), EnvValidationError, root .env loader; schemas: baseEnv, databaseEnv,
-│  │                      databaseTestEnv, redisEnv, redisTestEnv, hashPepperEnv, seedEnv, apiEnv
+│  │                      databaseTestEnv, redisEnv, redisTestEnv, hashPepperEnv, seedEnv, apiEnv, webEnv
 │  ├─ logger/             createLogger({ service, level, nodeEnv, destination }), REDACT_PATHS
-│  ├─ shared/             constants.ts, errors.ts (ErrorCode), schemas.ts, socket/ (events.ts names + NOTICE_CODES,
+│  ├─ shared/             constants.ts, errors.ts (ErrorCode), schemas.ts, rest.ts (REST request/response schemas),
+│  │                      socket/ (events.ts names + NOTICE_CODES,
 │  │                      schemas.ts payload Zod schemas both directions, types.ts event maps/acks/SocketData);
 │  │                      server-only subpaths `@app/shared/crypto` (hmacHash), `@app/shared/jobs`
 │  │                      (QUEUE_NAMES, BULLMQ_PREFIX, LEAVE_REASONS, sessionLogJobSchema),
@@ -119,6 +132,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ matchmaking/        lua.ts (ENQUEUE_OR_MATCH, CANCEL_TICKET, DROP_TICKETS_IF_UNCHANGED), matchmaker.ts
 │  │                      (createMatchmaker: enqueueOrMatch, promoteToAny, cancelTicket, getTicket, sweepStale), ticket.ts
 │  ├─ moderation/         bans.ts: createBanChecker (shared by api + gateway); text filter etc. arrive in Part 8
+│  ├─ ui/                 `@app/ui` React kit (TS source, no build): src/styles.css (theme tokens, `@theme inline`),
+│  │                      src/lib/cn.ts, src/components/ (button, card, badge, input, label, checkbox, switch, dialog,
+│  │                      select, toaster, spinner, status-dot, tag-input, consent-gate, chat/*), components.json
 │  └─ redis/              src/client.ts (createRedis), keys.ts (ALL key builders), json.ts (Zod JSON helpers),
 │                         control.ts (gw:control pub/sub), bans.ts (ban cache schema + TTLs), ttl.ts,
 │                         testing.ts (`@app/redis/testing`: createTestRedis(name, { dbIndex }))
@@ -178,6 +194,26 @@ Conventions established in Part 5:
 - Anything time-based that must survive a node restart lives in Redis (`session:deadlines:{<shard>}`), never in a local timer. Local timers (bucket hops, interest fallback) are optimizations whose loss only delays a match.
 - Client rules for Part 6 (protocol-level, learned from the bots): send `match:ack` immediately on `match:found`; on reconnect, `session:resume` with the `lastMessageId` the client had **when the connection dropped** (not a later one received on the new socket), and dedupe returned `missedMessages` by `id`; treat `INVALID_STATE` on `queue:join` after a `peer:left` as "the server already requeued you" when auto-requeue is on.
 
+Conventions established in Part 6:
+- React packages extend `@app/config/tsconfig.react.json` (DOM libs, Bundler resolution, `jsx: react-jsx`); Next apps extend `tsconfig.nextjs.json`. ESLint: `createEslintConfig({ tsconfigRootDir, react: true })` adds browser globals, react-hooks 7 (incl. React Compiler rules such as `set-state-in-effect`) and bans `dangerouslySetInnerHTML`; `next: true` adds `@next/eslint-plugin-next` core-web-vitals. There is no `next lint` in Next 16 — apps run `eslint .`.
+- `@app/ui` is presentational only (no fetching, no stores, no app logic); apps import components from `@app/ui` and styles via `@import '@app/ui/styles.css'` + `@source '../../../packages/ui/src'` in their `globals.css` (Tailwind 4 must scan the package). Use `cn()` for class merging and the theme tokens (`bg-primary`, `text-muted-foreground`, `bg-success`, `text-warning`…), never raw colours.
+- Every 21st.dev-derived file starts with a provenance comment (name, author, URL, what was changed); the table below lists them.
+- REST payloads are typed by the shared schemas in `@app/shared` `rest.ts`: the API routes declare them, the web client and bots parse responses with them (`api.ts` validates every response).
+- Web env: `next.config.mjs` validates `webEnv` once and copies the `NEXT_PUBLIC_*` values into `process.env`, so `lib/config.ts` can read them as literals that Next inlines into the client bundle. Add new browser variables to `webEnv` and `lib/config.ts`.
+- The chat UI never talks to the socket directly: components read the Zustand store (`useChat(selector)`) and call controller methods (`getChatController()`); all protocol rules live in `lib/chat-controller.ts`, all state transitions in `lib/chat-store.ts` (pure, unit-tested).
+- Browser storage: `rc.deviceId`, `rc.acceptedTos`, `rc.preferences` in `localStorage`; the visitor token `rc.session` in `sessionStorage` (+ memory). All access goes through `lib/storage.ts` (try/catch; works with storage disabled).
+
+### Web app design (Part 6)
+- **Pages:** `/` landing (hero, safety card, start panel: Text/Video cards — Video "Coming soon" until Part 7 —, native language select, interest tag input ≤ 5 normalized with `interestSchema`, auto-requeue switch, live online count polled every 10 s); `/chat?mode=text` (async `searchParams`; `mode=video` shows "coming soon"); `/terms`, `/privacy`, `/guidelines` (placeholder, labelled "Placeholder — requires legal review", mention frame sampling and evidence retention).
+- **Age gate** (`components/age-gate.tsx`): opens on the first Start without a session token, or on `/chat` when the token is missing/expired/rejected. Loads `/v1/config` (ToS version), three required consents (18+, Terms + Guidelines, Privacy; pre-checked if `rc.acceptedTos` equals the current version), Turnstile (explicit render, remounted for a fresh single-use token after any failure) → `POST /v1/session` → `rc.session`. `BANNED` → blocked screen with expiry; `TOS_OUTDATED` → reload config and re-accept; `TURNSTILE_FAILED`/`RATE_LIMITED` → message + new check.
+- **State machine** (`lib/chat-store.ts`): `idle → connecting (start) → waiting (queue:waiting / join ack) → matched (match:found) → ended (peer:left with sessionEnded, Stop, SESSION_NOT_RESUMABLE)`; `ended → connecting` (New chat / auto-requeue) or `→ waiting` (server requeued us); `waiting → idle + paused` (ghost tab) or `idle + stopped` (Stop); `blocked` and `error` (`auth` / `replaced` / `network` / `unknown`) until the user acts. `matchFound` is declined (returns false → client sends `chat:end`) when idle/blocked/error, idempotent for the same session. Every session-scoped event is ignored unless `status === 'matched'` and its `sessionId` is current.
+- **Messages:** entries are `system | stranger | self`; self messages are optimistic (`sending`) and reconciled by `clientMsgId` with the ack (`sent` + server id), `failed` (retry button) or `blocked` (`MESSAGE_BLOCKED`). Stranger messages are deduped by id; `lastReceivedId` is the resume cursor, snapshotted into `resumeCursor` when the connection drops (D-057).
+- **Controller** (`lib/chat-controller.ts`): every ack-emit has an 8 s timeout (→ `SERVICE_UNAVAILABLE`). `connect` → `session:resume` with the snapshot cursor if matched, else `queue:join` if searching; `disconnect` → "Connection lost — reconnecting…" banner (chat stays on screen); `io server disconnect` (gateway drain / `SERVER_RESTARTING`) → manual reconnect after 500–1000 ms; `connect_error` `BANNED` → blocked, `TOKEN_*`/`UNAUTHORIZED` → clear token + gate, middleware rejection → retry after 1–2 s; `system:notice` `SESSION_REPLACED` → "open in another tab" with "Use RandomChat here" (no auto-reconnect), `BANNED` → blocked, `RATE_LIMITED` → toast. `match:found` → `match:ack` immediately. `peer:left` (ended) or a failed resume → auto-requeue after 400 ms if enabled and the server hasn't already requeued us (`INVALID_STATE` on join = already waiting). Typing: `true` once, `false` after 3 s idle or on send. Ghost tab: hidden ≥ 60 s while waiting → `queue:leave` + paused.
+- **Lifecycle:** one store + controller per tab (`lib/chat.ts`); the chat page releases the controller on unmount with a 250 ms delay (StrictMode's dev double-mount re-acquires it), and `dispose()` sends `chat:end`/`queue:leave` before disconnecting.
+- **Next/Stop:** Next needs a second press within 3 s (button turns into "Really skip?") or Esc twice; Stop leaves immediately. When a chat ends: "Stranger has left the chat." / "Stranger has disconnected." + New chat / Home + auto-requeue switch.
+- **Security headers** (`next.config.mjs`): CSP `default-src 'self'`, `script-src 'self' 'unsafe-inline'` (+ `'unsafe-eval'` in dev) `https://challenges.cloudflare.com`, `connect-src` = self + API + gateway (http/ws) origins, `frame-src` Turnstile, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri`/`form-action 'self'`; plus nosniff, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, COOP same-origin, `Permissions-Policy: camera=(self), microphone=(self), …=()`, no `X-Powered-By`. Final (nonce) CSP in Part 10.
+- **Theme:** light/dark from `prefers-color-scheme` only (no toggle); system font stacks (no web fonts); mobile-first (chat fills the viewport, composer uses 16 px text on mobile to avoid iOS zoom).
+
 ### Matchmaking & session design (Part 5 + follow-up)
 - **Buckets (D-052, D-056):** a queue family `(region, pool, mode, lang)` has `MM_BUCKETS_BY_QUEUE["<mode>:<lang>"] ?? MM_BUCKETS` buckets, each its own hash tag `{mm:<region>:<pool>:<mode>:<lang>:<bucket>}`. Join: `chooseBucket` samples up to `BUCKET_CHOICES` = 4 random buckets in one pipelined call (LLEN of `q:any` + the ticket's interest queues) and takes the one with the most waiters (random among ties). Interest matching and recent-pair avoidance are per bucket (a rematch across buckets is possible but negligible in busy queues; small queues use 1 bucket).
 - **Hopping:** a waiting ticket's node timer fires every `MM_BUCKET_HOP_MS` (jittered 75–125 %, D-059): `hop` = cancel-if-waiting in the old bucket (a concurrent match wins) → choose another bucket → enqueue with **priority** (LPUSH, head of queue), same ticketId/createdAt/phase; the visitor ref moves to the new bucket only if it still names the ticket (else the new ticket is cancelled). A ticket id may be re-enqueued into a bucket where it is `cancelled` (hopping back).
@@ -211,16 +247,24 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 
 | Component | File | Source | License |
 |---|---|---|---|
-| — | — | — | — |
+| Theme tokens (light/dark, radius, shadows) | `packages/ui/src/styles.css` | Theme "Modern Minimal" by serafimcloud — https://21st.dev/community/themes/modern-minimal (adapted: primary `#2563eb`, success/warning tokens, system fonts, `@theme inline`) | not stated by the MCP — verify on 21st.dev before production |
+| Chat shell, message list, message bubble, typing indicator, composer | `packages/ui/src/components/chat/*.tsx` | "Chat Messages" by nexus-ui — https://21st.dev/r/nexus-ui/chat-messages (adapted: our tokens, statuses sending/sent/failed/blocked + retry, `role="log"` + `aria-live`, pin-to-bottom, counter, Enter sends) | not stated — verify |
+| Consent gate | `packages/ui/src/components/consent-gate.tsx` | "Multi-Consent Registration Gate" by cnippet-dev — https://21st.dev/r/cnippet-dev/v-checkbox-10 (adapted: generic consent list, children slot for Turnstile, "N required items remaining") | not stated — verify |
+| Tag input | `packages/ui/src/components/tag-input.tsx` | Design inspired by "Tag Input" by ddoemonn (21st.dev); written in-house | own code |
+| Status dot | `packages/ui/src/components/status-dot.tsx` | Design inspired by "Status" by diceui (21st.dev); written in-house | own code |
+| Landing hero | `apps/web/app/page.tsx` | Layout inspired by "Minimal Centered Hero" by ln-dev7 (21st.dev); written in-house | own code |
+| Button, Card, Badge, Input/Textarea, Label, Checkbox, Switch, Dialog, NativeSelect, Toaster, Spinner, SystemMessage | `packages/ui/src/components/*.tsx` | shadcn/ui-style primitives on `radix-ui` / `sonner`, written for this kit (21st free tier allows only 2 component-code retrievals a day) | own code (shadcn/ui is MIT) |
 
 ### MCP servers for agents
 - `21st` (21st.dev, HTTP `https://21st.dev/api/mcp`): configured twice — in the user's local Claude config (key inline, takes precedence) and in project `.mcp.json` (key from env var `API_KEY_21ST`, **not set** as of 2026-10-31). `.mcp.json` contains no secret and is safe to commit. Used for all frontend UI work (see master prompt → Reference Design → Frontend UI components).
+- When the MCP tools are not loaded in a session, agents can call the server directly over JSON-RPC (streamable HTTP; `tools/list` is paginated via `nextCursor` — 51 tools). The key is read from the local Claude config at runtime and must never be printed or written to the repo.
+- **Free tier limits (observed 2026-10-31):** 2 component-code retrievals per day (reset 00:00 UTC), searches and themes unlimited, AI generation disabled. Spend retrievals on complex components (chat, gate); write simple primitives in shadcn style. The MCP does not return license information — check each component's page before production.
 
 ## 7. Services & ports
 
 | Service | Port | Start command | Status |
 |---|---|---|---|
-| web | 3000 | TBD | not built |
+| web | 3000 | `pnpm --filter @app/web dev` (`next dev`, Turbopack) · `build` · `start`; also started by root `pnpm dev` | ✅ two-browser chat verified (headless Chrome) |
 | admin | 3001 | TBD | not built |
 | api | 4000 (`API_HOST`, default 0.0.0.0) | `pnpm --filter @app/api dev` (tsx watch) · `build` (tsup) · `start` (`node dist/server.js`) | ✅ running in dev; graceful shutdown verified |
 | gateway | 4001 (+4011 via `dev:multi`), `GATEWAY_HOST` default 0.0.0.0 | `pnpm --filter @app/gateway dev` · `dev:multi` · `build` (tsup) · `start` | ✅ two nodes verified; graceful drain verified |
@@ -259,9 +303,9 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | REDIS_URL_TEST | integration tests (`createTestRedis`; DB index overridden per package: redis 15, api 14, gateway 13, moderation 12, matchmaking 11, worker 10) | Integration-test Redis; must select a non-zero DB (new, not in master design) | redis://localhost:6379/15 |
 | JWT_SECRET, JWT_TTL_SECONDS | api (issue), gateway (verify; TTL unused there) | Visitor JWT HS256 secret (≥ 32 chars) / lifetime (60 s – 7 d) | placeholder, 43200 |
 | IP_HASH_PEPPER, DEVICE_HASH_PEPPER | seed, api; gateway reads IP_HASH_PEPPER only (`hashPepperEnv`, min 16 chars) | HMAC peppers — rotating one invalidates all stored hashes (bans by device/IP) | placeholders |
-| TOS_VERSION | api (`/v1/config`, session check); web in Part 6 | Current ToS version clients must accept | 2026-10-dev |
+| TOS_VERSION | api (`/v1/config`, session check); web reads it from `/v1/config` | Current ToS version clients must accept | 2026-10-dev |
 | TURNSTILE_SECRET_KEY | api (siteverify) | Cloudflare secret; dev = always-pass test secret | 1x0000000000000000000000000000000AA |
-| NEXT_PUBLIC_TURNSTILE_SITE_KEY | (Part 6) | Cloudflare site key | always-pass test key |
+| NEXT_PUBLIC_TURNSTILE_SITE_KEY | web (`webEnv`, inlined at build) | Cloudflare site key (production must not use the test key — check added in Part 10, D-063) | 1x00000000000000000000AA (always-pass test key) |
 | TURN_SECRET | docker-compose (coturn `--static-auth-secret`), api (credential HMAC) | Shared TURN HMAC secret (≥ 16 chars) | placeholder |
 | TURN_EXTERNAL_IP | docker-compose (coturn `--external-ip`) | IP in relay candidates (new, not in master design) | 127.0.0.1 |
 | TURN_HOST, TURN_PORT, TURN_CREDENTIAL_TTL_SECONDS, STUN_URLS | api (`/v1/turn-credentials`) | TURN/STUN servers handed to clients; STUN_URLS comma list of `stun:`/`stuns:` URLs | localhost, 3478, 600, stun:localhost:3478 |
@@ -271,7 +315,7 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | GATEWAY_PORT, GATEWAY_NODE_ID | gateway | Port / unique node id (`[A-Za-z0-9_-]{1,64}`; `dev:multi` sets gw-4001 / gw-4011) | 4001, unset → `<hostname>-<port>` |
 | CORS_ORIGINS | api, gateway (also the WebSocket Origin allowlist) | Comma list of allowed browser origins (validated URLs) | http://localhost:3000,http://localhost:3001 |
 | TRUST_PROXY | api, gateway (proxy-addr) | Proxies trusted for X-Forwarded-For: empty = none, hop count, or IP/CIDR list; `true` rejected (new, not in master design) | empty |
-| NEXT_PUBLIC_API_URL, NEXT_PUBLIC_GATEWAY_URL | bots (defaults for `connect`); web in Part 6 | Public API / gateway URLs | http://localhost:4000, http://localhost:4001 |
+| NEXT_PUBLIC_API_URL, NEXT_PUBLIC_GATEWAY_URL | web (`webEnv`, inlined at build; also used for the CSP `connect-src`), bots (defaults for `connect`) | Public API / gateway URLs | http://localhost:4000, http://localhost:4001 |
 | NEXT_PUBLIC_FORCE_TURN_RELAY | (Part 7) | Force relay-only ICE | false |
 | S3_ACCESS_KEY, S3_SECRET_KEY | docker-compose (MinIO root user/password, minio-init), API/worker later | MinIO creds (password ≥ 8 chars) | randomchat, placeholder |
 | S3_BUCKET_EVIDENCE, S3_BUCKET_FRAMES | docker-compose (minio-init), API/worker later | Bucket names | evidence, frames |
@@ -294,7 +338,7 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | Command | What it does |
 |---|---|
 | `pnpm install` | Install workspace deps (pnpm 12, catalogs, min-release-age guard) |
-| `pnpm dev` / `build` / `lint` / `typecheck` / `test` / `clean` | `turbo run <task>` across the workspace (`build` has no tasks until Part 3 — exits 0) |
+| `pnpm dev` / `build` / `lint` / `typecheck` / `test` / `clean` | `turbo run <task>` across the workspace; `pnpm dev` starts web (3000), api (4000), one gateway (4001) and the worker |
 | `pnpm format` / `pnpm format:check` | Prettier write / check (planning docs are in `.prettierignore`) |
 | `pnpm infra:up` | `docker compose up -d --wait` for postgres/redis/coturn/minio, then `run --rm minio-init` (buckets + lifecycle; idempotent) |
 | `pnpm infra:down` | Stop containers, keep volumes |
@@ -316,6 +360,7 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | `pnpm bots -- --clients N --gateways URL[,URL] --mode text\|video --lang en --duration S` | Chat-flow load bots; summary + exit 1 on protocol errors/asymmetric matches. Run the API with `RATE_LIMIT_DISABLED=true` for > 10 clients |
 | `pnpm --filter @app/bots connect --count N --gateway URL[,URL]` | N bot visitors (real sessions via the API), round-robin over gateways; Ctrl-C to stop |
 | `pnpm --filter @app/api test` | API integration tests (needs `pnpm infra:up`; turbo `pnpm test` also migrates `app_test` first) |
+| `pnpm --filter @app/web dev` / `build` / `start` / `test` | Web app (Next dev on 3000 / production build / serve it / Vitest store + controller tests). `typecheck` runs `next typegen` first (route types for `PageProps`) |
 | `pnpm --filter @app/<pkg> test` | Run one package's tests |
 
 ## 10. Data model (implemented)
@@ -389,6 +434,8 @@ Builders in `packages/redis/src/keys.ts` (functions/constants in parentheses). B
 | GET | `/v1/turn-credentials` | Bearer | 30/min per visitor | `{ iceServers: [{ urls: STUN_URLS }, { urls: [turn:H:P?transport=udp, …tcp], username: '<expiryUnix>:<visitorId>', credential: base64(HMAC-SHA1(TURN_SECRET, username)) }], ttlSeconds }`, `cache-control: no-store` |
 | GET | `/v1/stats/online` | — | — | `{ online }` = Σ `presence:node:<id>` over `presence:nodes` (expired nodes count 0); cached 2 s in memory, `cache-control: public, max-age=2` |
 
+Request/response schemas live in `@app/shared` (`rest.ts`: `sessionRequestSchema`, `sessionResponseSchema`, `publicConfigSchema`, `turnCredentialsSchema`, `onlineStatsSchema`, `errorEnvelopeSchema`), shared by the API routes, the web client (validates every response) and the bots.
+
 Cross-cutting: body limit 64 KB (413 `PAYLOAD_TOO_LARGE`), 404 `NOT_FOUND`, helmet headers, CORS allowlist (`CORS_ORIGINS`; requests without `Origin` allowed; methods GET/POST/OPTIONS; headers authorization, content-type; exposes x-request-id, retry-after), 429 `RATE_LIMITED` with `retry-after`.
 
 ### Visitor auth design (Part 3)
@@ -396,7 +443,7 @@ Cross-cutting: body limit 64 KB (413 `PAYLOAD_TOO_LARGE`), 404 `NOT_FOUND`, helm
 - Ban check (`services/bans.ts`): reads `ban:visitor|device|ip:*`; if all three are cached it decides from Redis, otherwise one Postgres query for active bans (`revokedAt` null, not expired) on any identifier and re-caches each identifier. Most severe wins (HARD > SHADOW, permanent > later expiry). HARD → 403 `BANNED` with `expiresAt`; SHADOW → normal token (the gateway puts them in the shadow pool without telling them). Redis errors fall back to Postgres.
 - JWT (`@app/shared/visitor-token`, jose): HS256, claims `sub`=visitorId, `jti` (UUID), `iss`=`randomchat-api`, `aud`=`randomchat`, `iat`, `exp` (`JWT_TTL_SECONDS`). Verification pins the algorithm, issuer and audience; errors are `expired` vs `invalid`.
 - Auth plugin: `onRequest: [app.authenticate]` → `request.visitor = { id }`; 401 `UNAUTHORIZED` (missing header), 401 `TOKEN_INVALID` (malformed/tampered/wrong key/claims), 401 `TOKEN_EXPIRED` (client should start a new session).
-- The web app (Part 6) keeps the token in memory + `sessionStorage` (not localStorage, not a cookie) and sends it as `Authorization: Bearer` for REST and in the Socket.io handshake `auth.token` (Part 4).
+- The web app keeps the token in memory + `sessionStorage` (`rc.session`, not localStorage, not a cookie), treats it as expired 60 s early, and sends it as `Authorization: Bearer` for REST and in the Socket.io handshake `auth.token` (read on every connection attempt). An expired/rejected token sends the visitor back through the age gate (a new Turnstile check creates a new session).
 - Turnstile (`services/turnstile.ts`): POST to Cloudflare siteverify with `secret`, `response`, `idempotency_key`; the visitor IP (`remoteip`) is deliberately **not** sent. Network/HTTP/shape failures → `TurnstileUnavailableError` → 503 (never treated as a pass).
 
 ## 13. Socket events (implemented)
@@ -488,6 +535,14 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-058 | 2026-10-31 | Gateway shutdown hook also cancels local waiting tickets and marks local in-session participants `reconnecting` with grace deadlines (deviation: spec says "stop local timers only") | Without it a session whose clients never return stays `active` forever; still never ends a session |
 | D-059 | 2026-10-31 | Bucket hops are jittered (75–125 % of `MM_BUCKET_HOP_MS`) | Two lonely tickets that joined together hopped in lockstep and kept swapping buckets (seen: 3 s to match) |
 | D-060 | 2026-10-31 | New `LeaveReason` `MATCH_TIMEOUT` (Prisma enum + migration `add_match_timeout_leave_reason`) | Ghost-tab timeouts are distinguishable in session logs and later trust scoring |
+| D-061 | 2026-10-31 | REST request/response Zod schemas moved to `@app/shared` (`rest.ts`) and used by the API, web and bots; the web client validates every API response | One contract for both sides (as for sockets); a server change that breaks the client fails typecheck/tests instead of at runtime |
+| D-062 | 2026-10-31 | Web chat = Zustand **vanilla** store (pure state machine, no I/O) + a controller object that owns the socket protocol; React only subscribes (`useStore`) and calls controller methods; store/controller are per-tab singletons created outside React | Protocol rules (acks, resume cursor, stale sessions, ghost tab) are testable without React or a server (fake socket), and StrictMode/re-renders can't create duplicate sockets or handlers |
+| D-063 | 2026-10-31 | `next.config.mjs` imports `@app/env` (TS source, via Node 24 type stripping) and validates `webEnv` at dev/build start; the "no Turnstile test key in production" guard was **removed** from `webEnv` and deferred to Part 10 (keyed on a deployment-environment variable) | `next build` always runs with `NODE_ENV=production`, so a NODE_ENV-based guard broke every local build; one env loader for all apps |
+| D-064 | 2026-10-31 | Theme: 21st "Modern Minimal" tokens adapted (primary `#2563eb`, added success/warning), light/dark via `prefers-color-scheme` only, system font stacks, no `tailwindcss-animate` | Matches the spec (system preference), no font requests (CSP `font-src 'self'`, privacy), fewer dependencies |
+| D-065 | 2026-10-31 | Language picker is a styled **native `<select>`** (`NativeSelect`), not a Radix Select | Native picker on mobile, accessible by default, no portal/JS; only ~10 options |
+| D-066 | 2026-10-31 | The chat page releases its controller with a 250 ms delay (`releaseChatController`); `dispose()` sends `chat:end`/`queue:leave` before disconnecting | React StrictMode mounts effects twice in dev; an immediate dispose would drop the socket and the session between the two mounts |
+| D-067 | 2026-10-31 | Age gate pre-checks the consents when this browser accepted the current ToS version (`rc.acceptedTos`), but always requires a fresh Turnstile check; sessions are per tab (`sessionStorage`), and a second tab of the same device is the same visitor, so the older tab gets `SESSION_REPLACED` and offers "Use RandomChat here" | Bot check stays mandatory per session; one chat per visitor (Part 4 single-socket policy) with a clear way back |
+| D-068 | 2026-10-31 | A `NOT_IN_SESSION` answer to `chat:next` falls back to `queue:join`; `INVALID_STATE` on `queue:join` is treated as "already waiting" | The session may have ended (peer left) between the click and the server; the server may already have requeued us with priority (D-048) |
 
 ## 15. Known issues / TODOs / production gaps
 
@@ -495,7 +550,7 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - A ban created directly in Postgres (seed, SQL, Prisma Studio) takes up to 60 s to apply to visitors whose "not banned" result is cached; Parts 8/9 must write bans through code that updates `ban:*` keys.
 - `/v1/turn-credentials` does not re-check bans (a token issued before a ban keeps working for TURN until it expires); the gateway (Part 4) is where active sessions are cut off.
 - `Visitor.country` stays null (no GeoIP yet; in production use the CDN's country header).
-- Turnstile `hostname`/`action` from siteverify are not checked yet (add when the web app has a fixed hostname, Part 6/10).
+- Turnstile `hostname`/`action` from siteverify are not checked yet (add with the production hostname config in Part 10).
 - `/v1/session` needs internet access in dev (real siteverify call with the test secret).
 - `@app/db` and `@app/redis` tests are integration tests: they need `pnpm infra:up` first. turbo caches test results by file hashes, so a cached pass does not prove the DB/Redis are up (`pnpm test --force` to rerun).
 - Importing `@app/db` validates `DATABASE_URL` at import time (singleton). Tests and scripts that target another DB use `createPrismaClient` from the package internals instead.
@@ -509,13 +564,19 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - A natural disconnect racing a reconnect of the same visitor on another node could, in a tiny window, clean up the new connection's fresh ticket; the client would simply requeue.
 - The bot run needs `RATE_LIMIT_DISABLED=true` on the API for > 10 clients (session rate limit 10/min per IP).
 - Gateway: a device ban created while a visitor is connected does not disconnect them yet (the gateway doesn't know device hashes); Part 8's ban writer must resolve affected visitor ids and publish `ban_applied`/`kick_visitor`. The `ban_applied` message is defined but not handled by the gateway yet.
-- Gateway drain always waits up to 10 s if clients don't reconnect elsewhere (e.g. single-URL bots); the web client (Part 6) should reconnect on `SERVER_RESTARTING`.
+- Gateway drain always waits up to 10 s if clients don't reconnect elsewhere (e.g. single-URL bots). The web client reconnects 500–1000 ms after an `io server disconnect`; with a single dev gateway it simply waits for the restarted node (sessions resume within `RECONNECT_GRACE_MS`).
 - `rtc_failed` early failures (D-048) are not triggered yet: nothing reports a WebRTC failure as a leave reason until Part 7 (`RTC_FAILED` path in `leaveParticipant` is ready, `earlyFailure: true`).
 - A gateway **crash** (no graceful shutdown) leaves its in-session participants `active` with no grace deadline; they become `reconnecting` only when the visitor reconnects. If they never return, the peer must skip; session keys expire after 24 h.
 - A hop is two scripts (cancel in the old bucket, enqueue in the new one); a process crash exactly between them leaves the visitor's ref pointing at a cancelled ticket until their client requeues.
 - Lowering `MM_BUCKETS` at runtime orphans tickets in buckets above the new count (the sweeper no longer visits them; they are never matched).
 - `turbo dev` (root `pnpm dev`) runs a single gateway node; use `pnpm --filter @app/gateway dev:multi` for two.
 - Killing only the child of `tsx watch` (e.g. by port) leaves the `tsx watch` parent alive; stop dev servers with Ctrl-C in their terminal.
+- **Web (Part 6):** a page reload ends the current chat (the new page starts a fresh search; the gateway marks the old participant `reconnecting` and `queue:join` then leaves that session, so the stranger sees "Stranger has disconnected"). Resuming across reloads would need the sessionId in `sessionStorage` and our own sent messages (not returned by `session:resume`) — deferred.
+- **Web:** CSP still allows `'unsafe-inline'` scripts (Next's inline bootstrap) and, in dev only, `'unsafe-eval'`; nonce-based CSP is Part 10. In dev, Next's dev-tools button ("N", bottom left) overlaps the page; it is not in production builds.
+- **Web:** the Turnstile widget needs internet (Cloudflare script + siteverify) even in dev; the dev CSP also allows `ws:`/`wss:` for Next's HMR socket.
+- **Web:** video mode is disabled ("Coming soon") until Part 7; there is no report button until Part 8.
+- **21st.dev licenses** of the adapted components (theme, Chat Messages, consent gate) were not returned by the MCP — verify on each component page before production (listed in §6 "UI components list").
+- The Part 6 browser smoke test (two Chrome contexts via playwright-core, network drop simulated by proxying the gateway WebSocket with `routeWebSocket`, because Chrome's offline emulation does not close open WebSockets) lived outside the repo; Part 10 adds Playwright e2e tests to the repo.
 - Production-only items (tracked fully in `docs/PRODUCTION_CHECKLIST.md` from Part 10): legal review, age-assurance vendor, CSAM hash matching + NCMEC reporting process, human moderation staffing, bare-metal TURN with `denied-peer-ip`, Kubernetes, Redis Cluster, PgBouncer, multi-region, CDN/WAF/DDoS.
 
 ## 16. Changelog
@@ -534,3 +595,4 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | 2026-10-31 | — | Plan update: group video calls of up to 4 people via **Janus**. Master prompt: new Part 11 (Janus SFU, `packages/sfu`, node registry, P2P → SFU upgrade, failover) and Part 12 (add 3rd/4th person: consent, seek matching, 4-tile UI); Reference Design gains topologies `mesh`/`sfu`, events `call:topology`/`call:topologyReady`, `match:found.sfu`, `sfu:*` keys, Janus ports/env; Part 7 `CallManager` gets a transport interface. Decisions D-050, D-051 (D-011 superseded). Resilience decisions renumbered D-046…D-049 (had collided with Part 5's D-038…D-041). |
 | 2026-10-31 | — | Scale review for 1M concurrent users: queue buckets with hopping + region in matchmaking keys (D-052), sharded deadlines and match counters (D-053), risk-based frame sampling with a global budget (D-054), production-plan items for session analytics, multi-region and 1M validation (D-055). Master prompt: Reference Design (key schema, new "Queue buckets" section, env vars, `match:found.moderation`), Parts 5, 8, 10 updated. Part 5 follow-up note extended. |
 | 2026-10-31 | 5 (follow-up) | Session resilience + scale fixes: `match:ack` with sharded Redis ack deadlines, reconnect grace + `session:resume` on any node (missed messages), participant statuses, deadline processor (exactly-once via ZREM), fair priority requeue, shutdown keeps sessions; queue buckets with region in the tag, `chooseBucket` (4 choices) + jittered priority hops, sharded match counters; `MATCH_TIMEOUT` enum migration; new env vars (resilience + `MM_*`, shards). Bots: `--ghost-rate`, `--reconnect-rate`, forced reconnect on restart, per-message delivery tracking. Acceptance (50 bots, 2 min, 2 nodes, ghost/reconnect 0.1): 0 protocol errors, 0 asymmetric, 0 undelivered; p95 1 289 ms (4 buckets) vs 1 586 ms (1 bucket); restart mid-run → 168 resumes, 0 sessions ended; ghost sessions ended ≤ 6.0 s. Bugs found by the bots and fixed: resume cut-off lost messages (D-057), lockstep hops (D-059), 2-choice bucket misses (D-056). Tests: 134. Decisions D-056…D-060. Also committed the concurrent plan update separately and removed an accidentally committed transcript. |
+| 2026-10-31 | 6 | Web app & text chat: `apps/web` (Next.js 16.4, React 19.3, Tailwind 4) with landing (mode cards, language, interests, auto-requeue, live online count), age gate (consents + Turnstile → `/v1/session`, banned screen), `/chat` (state machine store + socket controller: match ack, resume with drop-time cursor + dedupe, stale-session filtering, optimistic messages with retry/blocked, typing, Next confirm/Esc×2, Stop, auto-requeue, ghost-tab pause, single-tab handling), placeholder legal pages, security headers/CSP; `packages/ui` (`@app/ui`, shadcn-style kit adapted from 21st.dev: theme, chat components, consent gate); shared REST schemas in `@app/shared`; `webEnv`; ESLint react/next presets and `tsconfig.react.json`. Tests: 9 store + 7 controller (fake socket) + 3 HTML-escaping component tests; headless-Chrome two-browser smoke passed. |

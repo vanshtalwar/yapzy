@@ -1,22 +1,10 @@
 import { type ApiEnv } from '@app/env';
-import { ErrorCode } from '@app/shared';
+import { ErrorCode, turnCredentialsSchema } from '@app/shared';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { z } from 'zod';
 
 import { type Clock } from '../deps.ts';
 import { AppError } from '../errors.ts';
 import { createTurnCredentials } from '../services/turn.ts';
-
-const turnResponse = z.object({
-  iceServers: z.array(
-    z.object({
-      urls: z.array(z.string()),
-      username: z.string().optional(),
-      credential: z.string().optional(),
-    }),
-  ),
-  ttlSeconds: z.number().int(),
-});
 
 export const TURN_RATE_LIMIT = { max: 30, timeWindow: '1 minute' } as const;
 
@@ -28,7 +16,7 @@ export const turnRoutes: FastifyPluginAsyncZod<{ config: ApiEnv; clock: Clock }>
     '/v1/turn-credentials',
     {
       onRequest: [app.authenticate],
-      schema: { response: { 200: turnResponse } },
+      schema: { response: { 200: turnCredentialsSchema } },
       config: {
         // Keyed by visitor, so it must run after authentication (preHandler > onRequest).
         rateLimit: {

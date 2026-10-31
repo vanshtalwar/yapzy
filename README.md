@@ -32,7 +32,7 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 
 | Command                        | What it does                                                        |
 | ------------------------------ | ------------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (API, one gateway node, worker)          |
+| `pnpm dev`                     | Run all apps in watch mode (web, API, one gateway node, worker)     |
 | `pnpm build`                   | Build all apps                                                      |
 | `pnpm lint`                    | ESLint (type-aware) in every package                                |
 | `pnpm typecheck`               | `tsc` in every package                                              |
@@ -48,6 +48,28 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 `@app/db`, `@app/redis`, `@app/matchmaking`, `@app/moderation`, `@app/api`, `@app/gateway` and `@app/worker` tests are integration
 tests: run `pnpm infra:up` first.
+
+## Web app (`apps/web`, port 3000)
+
+```bash
+pnpm dev    # web + API + gateway + worker (needs `pnpm infra:up`)
+```
+
+Open <http://localhost:3000> in two windows that don't share storage (one normal, one
+incognito), click **Start chatting** in both, tick the three boxes and wait for the bot check
+(Cloudflare's always-pass test key, so it needs internet), then chat. **Next** needs a second
+press within 3 s (or Esc twice); **Stop** leaves the chat. With "Auto-find next stranger" on,
+both windows search again after a chat ends. A tab left in the background for 60 s while
+searching pauses itself ("Keep searching").
+
+```bash
+pnpm --filter @app/web build && pnpm --filter @app/web start   # production build
+pnpm --filter @app/web test                                     # store/controller unit tests
+```
+
+The UI kit lives in `packages/ui` (`@app/ui`): shadcn-style components adapted from
+[21st.dev](https://21st.dev) via the `21st` MCP (provenance in each file and in `CONTEXT.md`).
+Video chat arrives in Part 7.
 
 ## REST API (`apps/api`, port 4000)
 
@@ -130,8 +152,8 @@ To compare queue bucketing, start the gateways with `MM_BUCKETS=1` and then `MM_
 ## Layout
 
 ```
-apps/        api (Fastify REST), gateway (Socket.io), worker (BullMQ); web, admin in later parts
-packages/    config, env, logger, shared, db (Prisma), redis, matchmaking (Lua), moderation (bans)
+apps/        web (Next.js), api (Fastify REST), gateway (Socket.io), worker (BullMQ); admin in Part 9
+packages/    config, env, logger, shared, ui (React kit), db (Prisma), redis, matchmaking (Lua), moderation (bans)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init
 tools/bots   socket bot clients (`connect`, `bots`)
 ```

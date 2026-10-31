@@ -161,3 +161,17 @@ export const workerEnv = baseEnv.extend({
 });
 
 export type WorkerEnv = z.output<typeof workerEnv>;
+
+/**
+ * Public (browser) configuration of apps/web, inlined by Next.js at build time. Defaults suit
+ * local development (Cloudflare's always-pass Turnstile test key). Refusing test keys in a
+ * real deployment is a Part 10 production check: `next build` always runs with
+ * NODE_ENV=production, so NODE_ENV cannot tell a local build from a deployment.
+ */
+export const webEnv = baseEnv.extend({
+  NEXT_PUBLIC_API_URL: z.url().default('http://localhost:4000'),
+  NEXT_PUBLIC_GATEWAY_URL: z.url().default('http://localhost:4001'),
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1).default('1x00000000000000000000AA'),
+});
+
+export type WebEnv = z.output<typeof webEnv>;

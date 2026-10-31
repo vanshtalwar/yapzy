@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import { createEnv, EnvValidationError } from './create-env.ts';
 import { applyEnvFileContent, findWorkspaceRoot } from './load-env-file.ts';
-import { apiEnv, baseEnv, databaseEnv, gatewayEnv, redisEnv } from './schemas.ts';
+import { apiEnv, baseEnv, databaseEnv, gatewayEnv, redisEnv, webEnv } from './schemas.ts';
 
 const serviceEnv = baseEnv.extend({
   JWT_SECRET: z.string().min(32),
@@ -167,5 +167,15 @@ describe('gatewayEnv', () => {
         createEnv(gatewayEnv, { source: { ...valid, MM_BUCKETS_BY_QUEUE: bad } }),
       ).toThrow(/MM_BUCKETS_BY_QUEUE/);
     }
+  });
+});
+
+describe('webEnv', () => {
+  it('defaults to local development URLs and the Turnstile test key', () => {
+    expect(createEnv(webEnv, { source: {} })).toMatchObject({
+      NEXT_PUBLIC_API_URL: 'http://localhost:4000',
+      NEXT_PUBLIC_GATEWAY_URL: 'http://localhost:4001',
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+    });
   });
 });

@@ -1,0 +1,5 @@
+@import 'tailwindcss';
+@import '@app/ui/styles.css';
+
+/* The UI kit lives outside this app; let Tailwind see its class names. */
+@source '../../../packages/ui/src';

@@ -1,29 +1,14 @@
 import { Prisma, type PrismaClient } from '@app/db';
 import { type ApiEnv } from '@app/env';
 import { type BanChecker } from '@app/moderation';
-import { ErrorCode } from '@app/shared';
+import { ErrorCode, sessionRequestSchema, sessionResponseSchema } from '@app/shared';
 import { hmacHash } from '@app/shared/crypto';
 import { type VisitorTokenService } from '@app/shared/visitor-token';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { z } from 'zod';
 
 import { type Clock } from '../deps.ts';
 import { AppError } from '../errors.ts';
 import { TurnstileUnavailableError, type TurnstileVerifier } from '../services/turnstile.ts';
-
-const sessionBody = z.object({
-  turnstileToken: z.string().min(1).max(2048),
-  ageConfirmed: z.boolean(),
-  tosVersion: z.string().min(1).max(32),
-  /** Random UUID the browser keeps in localStorage; only its HMAC is stored. */
-  deviceId: z.uuid(),
-});
-
-const sessionResponse = z.object({
-  token: z.string(),
-  visitorId: z.uuid(),
-  expiresAt: z.iso.datetime(),
-});
 
 export interface SessionRouteOptions {
   config: ApiEnv;
@@ -64,7 +49,7 @@ export const sessionRoutes: FastifyPluginAsyncZod<SessionRouteOptions> = (app, o
   app.post(
     '/v1/session',
     {
-      schema: { body: sessionBody, response: { 200: sessionResponse } },
+      schema: { body: sessionRequestSchema, response: { 200: sessionResponseSchema } },
       config: {
         rateLimit: { ...SESSION_RATE_LIMIT, keyGenerator: (request) => ipHashOf(request.ip) },
       },
