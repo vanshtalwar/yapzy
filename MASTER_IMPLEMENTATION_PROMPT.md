@@ -27,7 +27,8 @@
 | 8 | Trust & safety | Text filter, reports + evidence, client NSFW, frame pipeline, bans, shadow pool, trust score |
 | 9 | Admin & moderation dashboard | Admin auth (+TOTP), review queue, evidence viewer, bans, audit log, live stats |
 | 10 | Hardening, observability, testing & DX | Security pass, metrics, E2E, load test, Dockerfiles, CI, production checklist |
-| 11 | *(Future, optional)* Add a 3rd random participant | Consent flow, "seek third" matching, 3-way P2P mesh video |
+| 11 | Janus SFU & call topology switch | Janus VideoRoom in Docker, room/token orchestration, node registry, P2P → Janus upgrade mid-call, failover |
+| 12 | Group video: add a 3rd and 4th random person | Consent flow, "seek participant" matching, up to 4 people per call via Janus |
 
 ---
 
@@ -76,8 +77,13 @@
  PostgreSQL (visitors, reports, bans, moderation events, admins, audit log, session metadata)
  MinIO (S3) (report evidence, temporary moderation frames)
 
+ 2-person calls:
  Browser ◄═══ WebRTC media (P2P, DTLS-SRTP) ═══► Browser
             └─ fallback relay via coturn :3478 (ephemeral HMAC credentials from API)
+
+ 3–4-person calls (Parts 11–12):
+ Browser ══► Janus VideoRoom (SFU) ══► other browsers   (each user uploads once; Janus forwards)
+             ▲ rooms + join tokens created by the gateway via the Janus admin API (never exposed to browsers)
 ```
 
 ### Repository layout (target)
@@ -99,8 +105,9 @@
 │  ├─ db/            Prisma schema, client singleton, seed
 │  ├─ redis/         ioredis factory, central key builders, pub/sub helpers
 │  ├─ matchmaking/   Lua scripts + typed TS wrapper
-│  └─ moderation/    text filter, classifier & hash-matcher interfaces, trust rules
-├─ infra/docker/     docker-compose.yml, coturn config, init scripts, (later) Prometheus/Grafana
+│  ├─ moderation/    text filter, classifier & hash-matcher interfaces, trust rules
+│  └─ sfu/           Janus admin client, node registry, room/token orchestration (Part 11)
+├─ infra/docker/     docker-compose.yml, coturn config, Janus image + config (Part 11), init scripts, (later) Prometheus/Grafana
 ├─ tools/bots/       socket bot clients (functional tests, later load tests)
 ├─ e2e/              Playwright tests
 ├─ docs/             PRODUCTION_CHECKLIST.md (Part 10)
@@ -133,6 +140,7 @@ UI components are sourced from **21st.dev** through the `21st` MCP server config
 | Redis | 6379 |
 | coturn | 3478 udp/tcp, relay range 49160–49200/udp |
 | MinIO | 9000 (S3 API), 9001 (console) |
+| Janus (Part 11) | 8188 (client WebSocket), 7188 (admin WebSocket — internal only), RTP 20000–20100/udp; second node `janus-2` on 8189 / 7189 / 20200–20300 (profile `sfu-multi`) |
 | Prometheus / Grafana (Part 10) | 9090 / 3002 |
 
 ### Environment variables (canonical names)
@@ -165,6 +173,23 @@ UI components are sourced from **21st.dev** through the `21st` MCP server config
 | `RECONNECT_GRACE_MS` | gateway | `15000` |
 | `MATCH_ACK_TIMEOUT_MS` | gateway | `5000` |
 | `EARLY_FAILURE_WINDOW_MS` | gateway | `10000` |
+| `JANUS_NODES` | gateway | JSON list `[{ "id": "janus-1", "wsUrl": "ws://localhost:8188", "adminUrl": "ws://localhost:7188" }]` (Part 11) |
+| `JANUS_ADMIN_SECRET` | gateway, Janus | admin API secret + VideoRoom `admin_key` (Part 11) |
+| `JANUS_TOKEN_SECRET` | gateway, Janus | HMAC secret for Janus signed tokens (`token_auth_secret`) (Part 11) |
+| `JANUS_PUBLIC_IP` | Janus | IP advertised in Janus ICE candidates (`nat_1_1_mapping`); `127.0.0.1` in dev (Part 11) |
+| `SFU_PUBLISHER_BITRATE` | gateway | `600000` bps per publisher (Part 11) |
+| `SFU_UPGRADE_TIMEOUT_MS` | gateway | `10000` (Part 11) |
+| `DEV_FORCE_SFU` | gateway | `false`; development only — every video session uses Janus (Part 11) |
+| `GROUP_MIN_TRUST`, `SEEK_PARTICIPANT_TIMEOUT_MS` | gateway | `60`, `30000` (Part 12) |
+| `MM_REGION` | gateway | `local` — region in matchmaking keys |
+| `MM_BUCKETS` | gateway | `4` — default bucket count per queue family |
+| `MM_BUCKETS_BY_QUEUE` | gateway | JSON overrides, e.g. `{"video:en": 32}`; empty in dev |
+| `MM_BUCKET_HOP_MS` | gateway | `1000` — waiting time before a ticket hops to another bucket |
+| `DEADLINE_SHARDS` | gateway | `16` (production 64) |
+| `STATS_COUNTER_SHARDS` | gateway, api | `16` |
+| `MOD_FRAME_INTERVALS_MS` | gateway | JSON per risk tier, default `{"high": 20000, "new": 30000, "normal": 120000, "trusted": 0}` (`0` = only spot checks) (Part 8) |
+| `MOD_NORMAL_SAMPLE_RATE`, `MOD_TRUSTED_SPOTCHECK_RATE` | gateway | `0.3`, `0.1` — share of sessions sampled for those tiers (Part 8) |
+| `MOD_FRAME_BUDGET_PER_SEC` | gateway, worker | `50` in dev — global cap on frames/s sent for server-side checks (Part 8) |
 | `RATE_LIMIT_DISABLED` | api, gateway | `false`; honored **only** when `NODE_ENV=development` |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | db seed | dev admin |
 | `ADMIN_SESSION_TTL_SECONDS` | api | `28800` |
@@ -178,13 +203,15 @@ UI components are sourced from **21st.dev** through the `21st` MCP server config
 
 All client→server events that expect a result use an **ack**: `{ ok: true, data? } | { ok: false, error: { code, message } }`. Every in-session event carries `sessionId`; the server rejects and the client ignores events for a session that is not the current one (prevents stale signals during rapid skipping).
 
-**Participants, not pairs.** A session has 2 participants today and up to 3 after Part 11. Each participant gets a random per-session `participantId`; visitor IDs are never sent to other users. WebRTC uses one `RTCPeerConnection` per remote participant (mesh), and the server assigns `initiator`/`polite` **per pair**. All code (gateway, client, DB) must work over a participant list — never hard-code "the peer" or `a`/`b`.
+**Participants, not pairs.** A session has 2 participants today and up to 4 after Part 12. Each participant gets a random per-session `participantId`; visitor IDs are never sent to other users. All code (gateway, client, DB) must work over a participant list — never hard-code "the peer" or `a`/`b`.
+
+**Two media topologies.** `mesh` = direct P2P, used **only for 2-person calls**: one `RTCPeerConnection` per remote participant, server assigns `initiator`/`polite` per pair, signaling relayed via `rtc:*`. `sfu` = **Janus VideoRoom**, used for 3–4-person calls (and for every video call when `DEV_FORCE_SFU=true`): each client publishes once to Janus and subscribes to the others' feeds; it signals with Janus directly over Janus's WebSocket using a short-lived token issued by our gateway. A call switches `mesh → sfu` mid-call (make-before-break) when a group is formed and never switches back.
 
 Client → Server
 
 | Event | Payload | Notes |
 |---|---|---|
-| `queue:join` | `{ mode: 'text'\|'video', lang: string, interests: string[] }` | interests ≤ 5, each ≤ 24 chars, normalized lowercase (Part 11 adds `allowGroup`) |
+| `queue:join` | `{ mode: 'text'\|'video', lang: string, interests: string[] }` | interests ≤ 5, each ≤ 24 chars, normalized lowercase (Part 12 adds `allowGroup`) |
 | `queue:leave` | `{}` | |
 | `chat:next` | `{ sessionId }` | leaves the call + rejoins queue with same preferences |
 | `chat:end` | `{ sessionId }` | leaves the call, back to idle |
@@ -196,6 +223,7 @@ Client → Server
 | `moderation:signal` | `{ sessionId, about: participantId\|'self', kind, score }` | client-side NSFW signals (Part 8), low trust weight |
 | `match:ack` | `{ sessionId }` | must arrive within `MATCH_ACK_TIMEOUT_MS` of `match:found` |
 | `session:resume` | `{ sessionId, lastMessageId? }` | after a socket reconnect; ack `{ selfParticipantId, peers, missedMessages }` or error `SESSION_NOT_RESUMABLE` |
+| `call:topologyReady` | `{ sessionId, epoch }` | client is receiving all peers via the new topology and has closed the old connections (Part 11) |
 | `ping` | `{}` | ack with server time |
 
 Server → Client
@@ -203,8 +231,9 @@ Server → Client
 | Event | Payload |
 |---|---|
 | `queue:waiting` | `{ since }` |
-| `match:found` | `{ sessionId, mode, topology: 'mesh', maxParticipants, selfParticipantId, peers: [{ participantId, initiator: boolean, polite: boolean }], commonInterests: string[] }` (`initiator`/`polite` are from the receiver's point of view for that pair) |
-| `participant:joined` | `{ sessionId, participantId, initiator, polite }` — reserved for Part 11 |
+| `match:found` | `{ sessionId, mode, topology: 'mesh'\|'sfu', maxParticipants, selfParticipantId, peers: [{ participantId, initiator: boolean, polite: boolean }], sfu?: { wsUrl, roomId, token, epoch }, moderation: { frameIntervalMs: number \| null }, commonInterests: string[] }` (`initiator`/`polite` are from the receiver's point of view and only used for `mesh`; `sfu` is present only when `topology = 'sfu'`; `moderation.frameIntervalMs` is the server-chosen frame-sampling interval for this participant, `null` = no sampling — Part 8) |
+| `call:topology` | `{ sessionId, topology: 'sfu', epoch, sfu: { wsUrl, roomId, token } }` — switch to (or, on SFU failover, move to a new) Janus room; or `{ sessionId, topology: 'mesh', epoch, reason }` to roll back a failed upgrade (Part 11) |
+| `participant:joined` | `{ sessionId, participantId }` — a new participant joined a group call (Part 12) |
 | `chat:message` | `{ sessionId, from: participantId, id, text, at }` |
 | `chat:typing` | `{ sessionId, from: participantId, isTyping }` |
 | `rtc:offer` / `rtc:answer` / `rtc:ice` | `{ sessionId, from: participantId, ... }` (`from` set by the server, never trusted from the client) |
@@ -214,7 +243,7 @@ Server → Client
 
 ### Redis key schema (all builders in `packages/redis/src/keys.ts`)
 
-Matchmaking keys share a **hash tag** so each Lua script touches a single slot (Redis Cluster–ready). `tag = {mm:<pool>:<mode>:<lang>}` where `pool ∈ normal | shadow`.
+Matchmaking keys share a **hash tag** so each Lua script touches a single slot (Redis Cluster–ready). `tag = {mm:<region>:<pool>:<mode>:<lang>:<bucket>}` where `region = MM_REGION`, `pool ∈ normal | shadow`, and `bucket ∈ [0, bucketCount)` — each queue family is split into buckets so no single Redis shard carries all matching for a popular queue (see **Queue buckets**).
 
 | Key | Type | Purpose |
 |---|---|---|
@@ -224,13 +253,15 @@ Matchmaking keys share a **hash tag** so each Lua script touches a single slot (
 | `{tag}:recent` | ZSET | member `minId\|maxId` (pair), score = timestamp; avoids immediate rematch |
 | `visitor:<id>:ticket` | STRING | current ticket ref (tag + ticketId) |
 | `visitor:<id>:session` | STRING | current sessionId |
-| `session:{<id>}:meta` | HASH | `{ mode, topology, maxParticipants, startedAt, commonInterests, state: active\|seeking\|ended, endedAt? }` |
+| `session:{<id>}:meta` | HASH | `{ mode, topology, maxParticipants, startedAt, commonInterests, state: active\|seeking\|ended, endedAt?, topologyEpoch, topologyState: stable\|upgrading, sfuNodeId?, sfuRoomId? }` |
+| `sfu:nodes` | HASH | Janus nodeId → JSON `{ wsUrl, adminUrl, healthy, rooms, lastCheckedAt }` (Part 11) |
+| `sfu:rooms` | HASH | `<nodeId>:<roomId>` → sessionId; used to destroy orphan rooms (Part 11) |
 | `session:{<id>}:participants` | HASH | participantId → JSON `{ visitorId, status: pending\|active\|reconnecting\|left, joinedAt, disconnectedAt?, leftAt?, leaveReason? }` (left participants are kept so reports work) |
 | `session:{<id>}:log` | LIST | transcript ring buffer (last 100 msgs, `from` = participantId) |
-| `session:deadlines` | ZSET | member `<kind>\|<sessionId>\|<participantId>` (kind `ack` or `grace`), score = deadline (ms). Processed by any gateway node; claimed with `ZREM` so exactly one node handles each entry, and nothing is lost when a node restarts |
+| `session:deadlines:{<shard>}` | ZSET | **sharded**: `shard = hash(sessionId) % DEADLINE_SHARDS`. Member `<kind>\|<sessionId>\|<participantId>` (kind `ack` or `grace`), score = deadline (ms). Every gateway node polls all shards; entries are claimed with `ZREM` so exactly one node handles each, and nothing is lost when a node restarts |
 | `presence:node:<nodeId>` | STRING | socket count of a gateway node, TTL 15 s |
 | `presence:nodes` | SET | known gateway node ids |
-| `stats:matches:<yyyyMMddHHmm>` | STRING | per-minute match counter, TTL 2 h |
+| `stats:matches:<yyyyMMddHHmm>:<n>` | STRING | per-minute match counter **sharded** into `STATS_COUNTER_SHARDS` keys (random `n` on write, summed on read), TTL 2 h — avoids one hot key taking every match |
 | `ban:visitor:<id>`, `ban:device:<hash>`, `ban:ip:<hash>` | STRING | ban cache (JSON: type, expiresAt) |
 | `trust:<visitorId>` | STRING | cached trust score |
 | `rl:*` | various | rate limiting |
@@ -255,6 +286,14 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
   4. Match → mark both tickets `matched`, record pair in `recent` (prune entries older than `RECENT_PAIR_TTL_MS`), return peer ticket + common interests.
 - Interest tickets are first enqueued only in interest queues; a gateway timer later "promotes" them into `q:any`. Duplicate references are harmless because of stale-skipping.
 - `enqueueOrMatch` accepts `{ priority: true }`: the ticket is pushed to the **head** of its queues instead of the tail (fair requeue after an early failure — see Session resilience).
+
+### Queue buckets (scale: no single hot Redis shard)
+
+- A **queue family** is `(region, pool, mode, lang)`. Each family is split into `bucketCount` buckets; each bucket has its own hash tag, so buckets land on different Redis shards and are matched in parallel. `bucketCount = MM_BUCKETS_BY_QUEUE[<mode>:<lang>]` or `MM_BUCKETS` (dev default 4 so the logic is always exercised; production: 32–64 for the busiest families, 1–4 for small ones — sized so every bucket keeps plenty of waiting users).
+- **Bucket choice on join ("power of two choices"):** read the waiting count of 2 random buckets (one pipelined call); join the one that has someone waiting (an instant match is likely), otherwise the shorter one.
+- **Hopping (no stranded users):** a ticket still waiting after `MM_BUCKET_HOP_MS` is atomically cancelled in its bucket (only if still `waiting`) and re-enqueued into another bucket chosen the same way, with `{ priority: true }` and its original `createdAt` so it keeps its place. This repeats until matched, so two lonely users in different buckets always find each other within a few hops.
+- Interest matching and recent-pair avoidance work **within a bucket**. Because bucket counts scale with traffic, each bucket stays dense enough for interest matches; a rematch with the same person in another bucket is possible but negligible in busy queues (small queues use 1 bucket). Document this trade-off.
+- `region` is in the tag now so multi-region matching (production phase) needs no key changes: each region matches locally first, then falls back to neighbouring regions.
 - After a match the gateway (TypeScript) creates the session keys with a random `participantId` per visitor, randomly picks the pair's `initiator` (impolite peer, creates the offer), and emits `match:found` to each visitor's room `visitor:<id>`.
 - Cross-node delivery: every socket joins room `visitor:<visitorId>`; emits go through the Socket.io sharded Redis adapter. No per-session rooms — "send to all other participants" loops over their visitor rooms, so the same code serves 2 or 3 participants. One active socket per visitor (new connection kicks the old one via `gw:control`).
 
@@ -309,7 +348,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 2. Models (UUIDs or cuid2 ids, `createdAt`/`updatedAt` where sensible, explicit indexes):
    - `Visitor` — `deviceIdHash` (unique), `lastIpHash`, `firstSeenAt`, `lastSeenAt`, `ageConfirmedAt`, `tosVersion`, `trustScore` (int, default 50), `country` (nullable).
    - `ChatSessionLog` — metadata only: `id` (= sessionId), `mode`, `topology` (enum `MESH`; `SFU` reserved), `maxParticipants`, `commonInterests` (text[]), `startedAt`, `endedAt`. Index on `startedAt`.
-   - `SessionParticipant` — `sessionId` (→ ChatSessionLog), `visitorId`, `participantId` (unique per session), `joinedAt`, `leftAt`, `leaveReason` (enum: `SKIP`, `STOP`, `DISCONNECT`, `RTC_FAILED`, `REPORTED`, `BANNED`, `SERVER_RESTART`). Unique `(sessionId, participantId)`, index on `visitorId`. Sessions are N participants so 3-person calls (Part 11) need no schema redesign.
+   - `SessionParticipant` — `sessionId` (→ ChatSessionLog), `visitorId`, `participantId` (unique per session), `joinedAt`, `leftAt`, `leaveReason` (enum: `SKIP`, `STOP`, `DISCONNECT`, `RTC_FAILED`, `REPORTED`, `BANNED`, `SERVER_RESTART`). Unique `(sessionId, participantId)`, index on `visitorId`. Sessions are N participants so group calls (Parts 11–12) need no schema redesign.
    - `Report` — `sessionId`, `reporterId`, `reportedId` (visitor, resolved server-side), `reportedParticipantId`, `reason` (enum: `NUDITY_SEXUAL`, `MINOR_SAFETY`, `HARASSMENT`, `HATE`, `SPAM_SCAM`, `VIOLENCE_SELF_HARM`, `OTHER`), `details` (≤ 500), `status` (`OPEN`, `IN_REVIEW`, `ACTIONED`, `DISMISSED`), `priority` (int), `transcript` (Json, nullable), `assignedToId`, `resolvedAt`, `resolutionNote`. Index `(status, priority desc, createdAt)`.
    - `Evidence` — `reportId` (nullable), `moderationEventId` (nullable), `type` (`FRAME`, `TRANSCRIPT`, `AUTO_FLAG_FRAME`), `storageKey`, `sha256`, `expiresAt`.
    - `ModerationEvent` — `visitorId`, `sessionId`, `source` (`CLIENT_NSFW`, `SERVER_CLASSIFIER`, `TEXT_FILTER`, `HASH_MATCH`, `REPORT_THRESHOLD`), `label`, `score` (float), `actionTaken` (enum incl. `NONE`, `TRUST_DECREASED`, `SHADOW_BANNED`, `BANNED`, `ESCALATED`).
@@ -406,8 +445,8 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 1. `packages/matchmaking`: Lua scripts (loaded with ioredis `defineCommand`) + typed wrapper implementing the **Matching algorithm** in the Reference Design: `enqueueOrMatch(ticket, phase)`, `promoteToAny(ticketId)`, `cancelTicket(ticketId)`, `sweepStale(maxAgeMs)`. All keys passed via `KEYS` and sharing the hash tag. Bounded scans. Return values validated with Zod.
 2. Gateway handlers replace the stubs:
    - Per-socket state machine `idle → waiting → in_session → (waiting|idle)`; reject invalid transitions with `INVALID_STATE`.
-   - `queue:join`: normalize interests (lowercase, trim, dedupe, strip non-alphanumerics except `-`), store preferences on `socket.data`, create ticket, run `enqueueOrMatch('interest'|'any')`. If waiting with interests, schedule promotion after `INTEREST_FALLBACK_MS` (cancel on match/leave). Emit `queue:waiting`.
-   - On match: create `session:{<id>}:meta` + `session:{<id>}:participants` (random `participantId` each, status `pending`) and `visitor:<id>:session` for both, add an `ack` deadline per participant to `session:deadlines`, increment `stats:matches:<minute>`, choose the pair's initiator randomly, emit `match:found` to both `visitor:<id>` rooms (cross-node).
+   - `queue:join`: normalize interests (lowercase, trim, dedupe, strip non-alphanumerics except `-`), store preferences on `socket.data`, create ticket, pick a bucket (Reference Design → **Queue buckets**), run `enqueueOrMatch('interest'|'any')`. If waiting with interests, schedule promotion after `INTEREST_FALLBACK_MS`; if still waiting after `MM_BUCKET_HOP_MS`, hop to another bucket (cancel timers on match/leave). Emit `queue:waiting`.
+   - On match: create `session:{<id>}:meta` + `session:{<id>}:participants` (random `participantId` each, status `pending`) and `visitor:<id>:session` for both, add an `ack` deadline per participant to the session's `session:deadlines:{<shard>}`, increment a random shard of `stats:matches:<minute>`, choose the pair's initiator randomly, emit `match:found` to both `visitor:<id>` rooms (cross-node).
    - `match:ack`: mark the participant `active` and remove its `ack` deadline. Implement session logic over the **participant list** (helpers like `getOtherActiveParticipants(sessionId, selfParticipantId)`), never as fixed `a`/`b`.
    - Because the waiting peer may be on another node, nodes must update their local socket state when they receive `match:found` for their socket — design this explicitly (e.g. the emitting node also publishes a `gw:control` message, or socket state is derived from Redis `visitor:<id>:session` on each event). Document the choice.
    - `chat:message`: verify session membership + sessionId, trim, enforce length, assign `id` (ulid) + `at`, append to `session:{<id>}:log` (LTRIM 100), emit to every other active participant with `from`, ack sender with `{ id, at }`.
@@ -416,7 +455,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - `chat:next` / `chat:end` / `queue:leave` / expired grace / expired ack: **leave** the session with one atomic Lua script over the `{<id>}` keys (idempotent, so simultaneous leaves are safe): mark the participant left, emit `peer:left { participantId, sessionEnded }` to the others; when fewer than 2 active participants remain, set `state=ended`, apply a 1 h TTL to all session keys, and enqueue a BullMQ `session-log` job. `chat:next` rejoins the queue with the same preferences.
    - **Socket disconnect does not leave the session** (Reference Design → Session resilience): set the participant `reconnecting` + `disconnectedAt`, add a `grace` deadline, emit `peer:reconnecting`. A waiting (unmatched) visitor's ticket is still cancelled on disconnect.
    - `session:resume { sessionId, lastMessageId? }`: verify the visitor owns a `reconnecting` (or still `active`, if the disconnect hasn't been processed yet) participant in that session → mark `active`, remove the `grace` deadline, restore `socket.data` state, emit `peer:resumed`, ack with `{ selfParticipantId, peers, missedMessages }` (from `session:{<id>}:log` after `lastMessageId`). Otherwise ack `SESSION_NOT_RESUMABLE`. A `queue:join` from a visitor who still has a `reconnecting` session first leaves that session (e.g. after a page reload).
-   - Deadline processor (every gateway node, every 1 s): read due entries from `session:deadlines`, claim each with `ZREM` (only the node that removed it handles it), then: expired `ack` → that participant leaves with reason `match_timeout`; expired `grace` → leaves with reason `disconnect`. Survives node restarts because deadlines live in Redis.
+   - Deadline processor (every gateway node, every 1 s): for each of the `DEADLINE_SHARDS` shards (pipelined, starting at a random shard), read up to 100 due entries from `session:deadlines:{<shard>}`, claim each with `ZREM` (only the node that removed it handles it), then: expired `ack` → that participant leaves with reason `match_timeout`; expired `grace` → leaves with reason `disconnect`. Survives node restarts because deadlines live in Redis.
    - Fair requeue: when a session ends within `EARLY_FAILURE_WINDOW_MS` of `match:found` because a peer timed out, disconnected for good, or reported `rtc_failed`, requeue the other participant(s) automatically with `enqueueOrMatch(..., { priority: true })` (only if they had auto-requeue on — pass this preference in `queue:join`). Normal skips requeue normally.
    - Shutdown hook stops local timers only; it does **not** end sessions — clients reconnect to another node and resume.
    - Periodic sweeper (every 30 s, lock with `SET NX PX`) removes stale tickets.
@@ -424,12 +463,12 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 4. `tools/bots`: CLI (`pnpm bots -- --clients 20 --gateways http://localhost:4001,http://localhost:4011 --mode text --duration 60`) — each bot obtains a token from the API, connects to a random gateway, joins the queue (random interests from a small pool), sends `match:ack`, sends a few messages, randomly skips or ends, and repeats. Options `--ghost-rate` (fraction of bots that never ack) and `--reconnect-rate` (bots that drop their socket mid-session, reconnect to another gateway and resume). Prints matches, messages delivered, resumes, ack timeouts, errors, p50/p95 time-to-match.
 
 **Required tests**
-- Matchmaking (real Redis): basic pairing; FIFO fairness; interest match preferred; fallback to `any` after promotion; no self-match; recent-pair avoidance and expiry; different mode/lang/pool never mix; stale entries skipped and dropped; priority tickets are matched before older normal tickets; **concurrency: 200 parallel enqueues → every visitor matched at most once, no lost tickets**.
+- Matchmaking (real Redis): basic pairing; FIFO fairness; interest match preferred; fallback to `any` after promotion; no self-match; recent-pair avoidance and expiry; different mode/lang/pool never mix; stale entries skipped and dropped; priority tickets are matched before older normal tickets; bucket choice prefers a bucket with someone waiting; **two users waiting alone in different buckets are matched after hopping**; a hop never loses or duplicates a ticket (concurrent hop + match); keys of different buckets have different hash tags; **concurrency: 200 parallel enqueues → every visitor matched at most once, no lost tickets**.
 - Gateway integration: full text flow between two clients on **different gateway nodes**; skip → peer gets `peer:left` and requeues; stale `sessionId` rejected; `rtc:*` with a `to` outside the session rejected; simultaneous leave from both participants is safe; messages over limit rejected.
 - Resilience: disconnect → peer gets `peer:reconnecting`, session stays; reconnect **to the other node** + `session:resume` within grace → `peer:resumed` and missed messages returned; no resume → participant leaves after `RECONNECT_GRACE_MS`; a gateway node shut down mid-session → its clients resume on the other node and the session survives; no `match:ack` → session ends after `MATCH_ACK_TIMEOUT_MS` and the acking peer is requeued with priority; each deadline is processed exactly once with two nodes running.
 - Worker: session-log job persists row.
 
-**Acceptance criteria:** bots run 2 minutes with 50 clients across 2 nodes (with `--ghost-rate 0.1 --reconnect-rate 0.1`) with zero protocol errors, every match symmetric, every reconnecting bot resumed, and ghost sessions ended within the ack timeout; restarting one gateway node during the run ends no sessions; quality gate green.
+**Acceptance criteria:** bots run 2 minutes with 50 clients across 2 nodes with `MM_BUCKETS=4` (with `--ghost-rate 0.1 --reconnect-rate 0.1`), p95 time-to-match no worse than with `MM_BUCKETS=1`, with zero protocol errors, every match symmetric, every reconnecting bot resumed, and ghost sessions ended within the ack timeout; restarting one gateway node during the run ends no sessions; quality gate green.
 
 **Manual check:** `pnpm --filter @app/gateway dev:multi`, `pnpm --filter @app/api dev`, `pnpm --filter @app/worker dev`, then `pnpm bots -- --clients 50 ...`; check `ChatSessionLog` rows in Prisma Studio.
 
@@ -486,7 +525,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 **Tasks**
 1. `useLocalMedia` hook: `getUserMedia` (ideal 640×480 @ 24–30 fps, echoCancellation, noiseSuppression, autoGainControl), permission-denied / no-device / in-use errors with clear UI, device pickers (camera/mic, `devicechange` listener), mute and camera-off via `track.enabled`, mirrored local preview. Acquire once and reuse across matches.
    **Pre-join screen:** `/chat?mode=video` first shows a camera/mic check (preview, device pickers, mic level meter, "Start" button). `queue:join` is sent only after `getUserMedia` succeeded and the user clicked Start; if permission is denied, the user can switch to text mode instead.
-2. `lib/rtc/CallManager.ts` (one per chat session) owns a `Map<participantId, PeerSession>`, shares the single local stream, routes incoming signals by `from`, creates PeerSessions from `match:found.peers` (and `participant:joined` in Part 11) and destroys one on `peer:left`. For 1:1 the map has one entry; the same code must support a 3-person mesh later.
+2. `lib/rtc/CallManager.ts` (one per chat session) shares the single local stream and exposes remote media **per participantId** to the UI through a **transport interface**. Implement `MeshTransport` now: a `Map<participantId, PeerSession>`, routes incoming signals by `from`, creates PeerSessions from `match:found.peers` and destroys one on `peer:left`. Part 11 adds `SfuTransport` (Janus) behind the same interface and lets `CallManager` run both during a make-before-break switch — design the interface for that now.
    `lib/rtc/PeerSession.ts` (framework-agnostic class, **one instance per remote participant**):
    - ICE servers from `GET /v1/turn-credentials` (cache until 60 s before expiry).
    - `iceTransportPolicy: 'relay'` when `NEXT_PUBLIC_FORCE_TURN_RELAY=true`.
@@ -499,7 +538,7 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - A socket reconnect must **not** close the `PeerSession`: media keeps flowing P2P while the client resumes the session. Only `peer:left`, ending the session, or `rtc_failed` closes it. Signals that were in flight during a reconnect may be lost — recover with an ICE restart if the connection becomes `disconnected`.
    - Collect `getStats()` every 2 s (RTT, packet loss, bitrate, selected candidate pair types) → quality indicator; send `rtc:summary` once at session end.
 3. Gateway: handle `rtc:summary` (validate, log at debug, keep counters for Part 10 metrics).
-4. Video chat page `/chat?mode=video`: remote video large (rendered from the list of remote participants, so the layout already handles 1 or 2 remote tiles), local picture-in-picture, text chat panel (side on desktop, drawer on mobile), controls (Next, Stop, Mute, Camera, Device settings, Report placeholder disabled until Part 8), "Looking for someone…" state with local preview, connection quality badge, autoplay handling (muted-autoplay fallback with tap-to-unmute). Enable Video mode on the landing page and set `features.video` accordingly. Source the video tiles, controls bar, device-settings dialog and quality badge via the `21st` MCP into `@app/ui` (Reference Design → Frontend UI components); keep all WebRTC logic outside the components.
+4. Video chat page `/chat?mode=video`: remote video large (rendered from the list of remote participants, so the layout already handles 1–3 remote tiles, e.g. a 2×2 grid), local picture-in-picture, text chat panel (side on desktop, drawer on mobile), controls (Next, Stop, Mute, Camera, Device settings, Report placeholder disabled until Part 8), "Looking for someone…" state with local preview, connection quality badge, autoplay handling (muted-autoplay fallback with tap-to-unmute). Enable Video mode on the landing page and set `features.video` accordingly. Source the video tiles, controls bar, device-settings dialog and quality badge via the `21st` MCP into `@app/ui` (Reference Design → Frontend UI components); keep all WebRTC logic outside the components.
 5. Handle tab visibility/background, page unload (`chat:end` via `pagehide`), and network change (`online/offline`).
 6. Document LAN/mobile testing: `getUserMedia` needs a secure context — describe running `next dev --experimental-https` (or a local HTTPS proxy) and pointing `NEXT_PUBLIC_*` URLs at the LAN IP.
 
@@ -538,16 +577,24 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - Pool from ban cache + trust cache at connect and on each `queue:join`.
 3. API:
    - `POST /v1/reports` (Bearer, multipart via `@fastify/multipart`): `{ sessionId, reportedParticipantId, reason, details? }` + up to 3 JPEG frames (≤ 300 KB each, verify magic bytes, re-encode/strip metadata with `sharp`). Verify reporter and reported were both participants of the session (`session:{<id>}:participants`, kept 1 h after end), resolve `reportedParticipantId` → visitorId server-side, snapshot transcript from Redis, upload frames to MinIO `evidence/reports/<reportId>/<n>.jpg` with sha256, create `Report` + `Evidence` rows, compute priority (`MINOR_SAFETY` highest, then `NUDITY_SEXUAL`, …, boosted by reported visitor's recent report count). Rate limit 10/hour per visitor. Reporting automatically ends the session for the reporter (client sends `chat:next`).
-   - `POST /v1/moderation/frames` (Bearer, video sessions only): one downscaled JPEG (≤ 320 px, ≤ 60 KB) of the visitor's **own outgoing** video; rate-limited (max 1 per 20 s); stored in MinIO `frames/` (1-day lifecycle) → enqueue `classify-frame` job.
+   - `POST /v1/moderation/frames` (Bearer, video sessions only): one downscaled JPEG (≤ 320 px, ≤ 60 KB) of the visitor's **own outgoing** video; accepted only at the interval the server assigned to that participant (reject faster uploads); stored in MinIO `frames/` (1-day lifecycle) → enqueue `classify-frame` job.
+   - **Risk-based frame sampling (scale):** sampling every video user every 30 s would be ~23k images/s at 1M users. Instead the gateway assigns each participant a sampling interval in `match:found.moderation.frameIntervalMs`, by risk tier (`MOD_FRAME_INTERVALS_MS`):
+     - `high` — trust < 40, recent reports/flags, or any group (SFU) call: every ~20 s.
+     - `new` — first 24 h or first 10 sessions: every ~30 s.
+     - `normal` — only `MOD_NORMAL_SAMPLE_RATE` of sessions are sampled, every ~120 s.
+     - `trusted` — trust ≥ 70 and no reports in 7 days: one spot-check frame ~10 s into `MOD_TRUSTED_SPOTCHECK_RATE` of sessions.
+     - A report or client NSFW signal in a session switches its participants to `high` immediately (pushed via `system:notice` with the new interval).
+     - **Global budget:** the worker measures `classify-frame` throughput/queue depth and publishes a multiplier in Redis; the gateway stretches intervals (lowest tiers first) so total uploads stay under `MOD_FRAME_BUDGET_PER_SEC`. `high` is never stretched beyond 2×.
+     - **Missing uploads:** the gateway/API count expected vs received frames per participant; a client that repeatedly fails to upload gets a trust penalty and is moved to `high` (prevents opting out by blocking the upload).
    - `GET /v1/config` → `features.reports = true`.
 4. Worker jobs: `classify-frame` (run `HashMatcher` then `ImageClassifier`; clean → delete frame immediately; flagged → `ModerationEvent`, `Evidence` (`AUTO_FLAG_FRAME`), auto-created high-priority `Report`, trust decrease, auto SHADOW ban above threshold / HARD ban + escalation on hash match, publish `ban_applied`); `moderation-event` (persist + trust update); `report-threshold` (≥ N distinct reporters in 24 h → automatic SHADOW ban, configurable). `BanService.apply()` writes Postgres, refreshes Redis ban cache, publishes `ban_applied`.
 5. Web:
    - Report button + dialog (reason radio list, optional details; UI sourced via the `21st` MCP like the blur overlay and blocked-message notices). Keep an **in-memory** ring buffer of the last 3 remote frames sampled every 3 s (640 px JPEG via canvas) — never uploaded unless the user reports. Submit, then auto-Next with confirmation toast.
    - Client NSFW (`nsfwjs`, model files self-hosted under `/public/models`, lazy-loaded only in video mode): classify the remote video every 2 s at 224 px; above threshold → blur remote video with an overlay offering Next / Report; send `moderation:signal`. Classify own outgoing video every 5 s; above threshold → warn the user. Run inference off the critical render path (`requestIdleCallback` or a Web Worker with OffscreenCanvas when supported).
-   - Server frame sampling: during video sessions upload own downscaled frame every 30 s ± 10 s jitter.
+   - Server frame sampling: during video sessions upload own downscaled frame at the server-assigned `frameIntervalMs` (± 20 % jitter; first frame at a random point within the first interval); no uploads when it is `null`; apply interval updates from `system:notice`.
    - Banned/blocked UX; message-blocked UX.
 
-**Required tests:** text filter cases (incl. obfuscation like `w w w . x . c o m`), trust rules, report endpoint (non-participant rejected, frame validation, transcript snapshot, priority), worker flows with mock classifier (flag → ban → `gw:control` message), gateway reacts to `ban_applied` across nodes, shadow-banned visitors only match each other.
+**Required tests:** text filter cases (incl. obfuscation like `w w w . x . c o m`), trust rules, risk-tier interval assignment (incl. group calls → `high`, report → switch to `high`), budget multiplier stretches low tiers first and never `high` beyond 2×, frame uploads faster than the assigned interval rejected, missing-upload penalty, report endpoint (non-participant rejected, frame validation, transcript snapshot, priority), worker flows with mock classifier (flag → ban → `gw:control` message), gateway reacts to `ban_applied` across nodes, shadow-banned visitors only match each other.
 
 **Acceptance criteria:** a report from the UI appears in Postgres with evidence in MinIO; forcing a flag via `DEV_FORCE_FLAG_VISITOR_IDS` shadow-bans that visitor live and they are only matched with shadow-pool bots; link messages are blocked; quality gate green.
 
@@ -612,11 +659,11 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
    - Coverage targets: `packages/matchmaking` ≥ 90 % lines, `packages/moderation` ≥ 90 %, apps ≥ 70 % for business logic.
    - Playwright E2E in `e2e/` (Chromium with `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, two browser contexts): text chat flow; video connects (assert via a `data-rtc-state="connected"` attribute **and** that the remote `<video>` has `videoWidth > 0`, proving `ontrack` fired); a gateway restart mid-call keeps the video connected and text resumes; a tab that never acks a match doesn't block the other user; Next re-matches; report flow creates a report; hard-banned visitor sees blocked screen; admin bans a live user.
    - Root `pnpm test:e2e` that boots required services (or documents how).
-4. **Load testing:** extend `tools/bots` with a `load` mode (ramp-up, target clients, skip-rate distribution, video-signaling simulation with fake SDP/ICE payload sizes, messages/sec) reporting p50/p95/p99 time-to-match, message delivery latency, error rates, and gateway CPU/memory (from `/metrics`). Run locally with 2 gateway nodes at 2,000 and 5,000 clients (or the max the machine handles) and **record results in CONTEXT.md**, plus the projected node count for 1M concurrent.
+4. **Load testing:** extend `tools/bots` with a `load` mode (ramp-up, target clients, skip-rate distribution, video-signaling simulation with fake SDP/ICE payload sizes, messages/sec) reporting p50/p95/p99 time-to-match, message delivery latency, error rates, and gateway CPU/memory (from `/metrics`). Run locally with 2 gateway nodes at 2,000 and 5,000 clients (or the max the machine handles), with `MM_BUCKETS` 1 vs 8, and **record results in CONTEXT.md** (incl. per-bucket match rates, hops per match, p99 time-to-match, Redis ops/s per key family), plus the projected node, Redis-shard and bucket counts for 1M concurrent. Add a Redis hot-key check (e.g. `redis-cli --hotkeys` with an LFU policy in a test run, or per-key-family op counters) and confirm no single key family dominates.
 5. **Resilience checks:** kill one gateway node during a bot run → clients reconnect to the other and **resume their sessions** (none end), no stuck sessions, tickets or deadlines; restart Redis → services recover; worker restart → no lost jobs.
 6. **Containers:** multi-stage Dockerfiles for api, gateway, worker, web, admin (`turbo prune`, non-root user, `HEALTHCHECK`, minimal runtime image, Next.js standalone output). Compose profile `full` runs the entire stack in containers.
 7. **CI:** GitHub Actions workflow: pnpm cache, install, lint, typecheck, unit + integration tests (Postgres + Redis service containers, `db:deploy` on test DB), build; separate job for Playwright (can be manual-trigger). Dependabot config.
-8. **Docs:** finalize `README.md` (setup, run modes, testing, load testing, troubleshooting incl. macOS/coturn/HTTPS for LAN), and create `docs/PRODUCTION_CHECKLIST.md` covering: legal review (COPPA, GDPR, DSA, UK Online Safety Act, India IT Rules, US 18 U.S.C. §2258A NCMEC reporting), age-assurance vendor, real CSAM hash matching (PhotoDNA/Thorn Safer), human moderation staffing & wellbeing, Kubernetes + HPA on connection count, Redis Cluster (keys are already hash-tagged), PgBouncer, bare-metal TURN fleet with `denied-peer-ip`, TURN over TLS 443, GeoDNS/multi-region matchmaking, CDN/WAF/DDoS, secrets manager, backups & DR, data retention jobs, incident response, penetration test.
+8. **Docs:** finalize `README.md` (setup, run modes, testing, load testing, troubleshooting incl. macOS/coturn/HTTPS for LAN), and create `docs/PRODUCTION_CHECKLIST.md` covering: legal review (COPPA, GDPR, DSA, UK Online Safety Act, India IT Rules, US 18 U.S.C. §2258A NCMEC reporting), age-assurance vendor, real CSAM hash matching (PhotoDNA/Thorn Safer), human moderation staffing & wellbeing, Kubernetes + HPA on connection count, Redis Cluster sizing (keys are already hash-tagged; queue buckets per family; sharded deadlines/counters; replicas + automatic failover), PgBouncer, **session analytics off Postgres** (session-log events via Redis Streams or Kafka, batch-inserted into ClickHouse; shard BullMQ queues by hash tag; Postgres keeps reports/bans/visitors), **multi-region** (regional gateways/Redis/TURN/Janus, `MM_REGION` matching local-first with neighbour-region fallback, GeoDNS/anycast), **scale validation to 1M** (distributed bot fleet on 100+ machines to 1M sockets and ~22k matches/s, headless WebRTC media load through TURN and Janus, failure drills under load: Redis primary, gateway node, Janus node, whole region), GPU/ML capacity for frame classification within `MOD_FRAME_BUDGET_PER_SEC`, Janus fleet sizing, bare-metal TURN fleet with `denied-peer-ip`, TURN over TLS 443, GeoDNS/multi-region matchmaking, CDN/WAF/DDoS, secrets manager, backups & DR, data retention jobs, incident response, penetration test.
 
 **Acceptance criteria:** all E2E tests pass; load test results recorded; `docker compose --profile full up` runs the whole stack; CI workflow valid; quality gate green.
 
@@ -628,38 +675,94 @@ Session keys share the hash tag `{<sessionId>}` so join/leave can be one atomic 
 
 ---
 
-## PART 11 — *(Future, optional)* Add a third random participant
+## PART 11 — Janus SFU & call topology switch
 
 **Paste:** `Execute Part 11 of MASTER_IMPLEMENTATION_PROMPT.md`
 
 **Prerequisite:** Parts 1–10 complete.
 
-**Goal:** Two people in a video call can jointly agree to add a third random stranger. Uses a **3-way P2P mesh** (no media server).
+**Goal:** Video calls can run through a **Janus VideoRoom** (SFU) instead of P2P, and a running 2-person P2P call can switch to Janus mid-call without a visible drop. This is the media foundation for 3–4-person calls (Part 12). 2-person calls stay P2P by default.
 
-**Why mesh is enough:** with 3 people each browser sends 2 streams and receives 2 — fine on most connections at ~500 kbps per stream. For 4+ participants, server-side recording or server-side video moderation, add an SFU (LiveKit or mediasoup) and return `topology: 'sfu'` in `match:found` — out of scope for this part. Note: TURN-relayed mesh calls cost ~2× a relayed 1:1 call.
+**Why Janus for groups:** with 4 people in a P2P mesh each browser encodes and uploads its video 3 times over 6 fragile connections — unreliable on phones and mobile data. With Janus each user uploads once (~0.6 Mbps) and Janus forwards without re-encoding (~2 Mbps in / ~6 Mbps out per 4-person room). Janus has no built-in clustering, so this part builds the node registry, room placement, health checks and failover.
 
 **Tasks**
-1. Product rules (all enforced server-side):
-   - Both current participants must request it: `call:requestThird { sessionId }` → others receive `call:thirdRequested`; they answer `call:respondThird { sessionId, accept }`. Request expires after 15 s; either participant can cancel. When everyone agrees, session `state = seeking` and all receive `call:seeking`.
-   - Joiners come **only** from users who opted in: `queue:join { ..., allowGroup: true }` (landing-page toggle, off by default).
-   - Eligibility: video mode, same lang, not in the shadow pool, trust ≥ `GROUP_MIN_TRUST` (default 60) for all three.
-   - `maxParticipants = 3`. Seeking times out after `SEEK_THIRD_TIMEOUT_MS` (default 30 s) → `call:seekCancelled { reason }`, call continues as 1:1.
-2. Matchmaking: hash-tagged queue `{tag}:q:seek` of sessions seeking a third (entry stores sessionId + both participants' visitorIds for recent-pair checks). Lua `matchThird`: opted-in solo tickets check `q:seek` first, then fall back to normal 1:1 matching; a session entering `seeking` checks waiting opted-in solo tickets. Atomic, stale-skipping, avoids recent pairs with **either** existing participant. Because session keys live in another hash slot, adding the participant is a second Lua step over `{<sessionId>}`; if it fails (session ended meanwhile), put the solo ticket back at the head of its queue.
-3. Gateway: on a third match, add the participant atomically (enforce `maxParticipants`), emit `participant:joined` to the existing two (the joiner is `initiator` toward both) and `match:found` to the joiner with both peers. Text fan-out and leave logic already work: when one of three leaves, the remaining two continue (`sessionEnded: false`). `chat:next` in a 3-way call means "leave this call and find a new one".
-4. Web: "Add a 3rd person" button + consent banner, "Looking for a third person…" state, two remote tiles (grid on desktop, stacked on mobile) labeled "Stranger 1/2", per-tile Report and quality badge, per-tile client NSFW check, lower outgoing bitrate cap to ~500 kbps while 3 participants are connected.
-5. Safety & admin: reports target a specific participant; transcripts show which stranger sent each line; admin report view lists all session participants; an auto-flag removes only the flagged participant.
-6. Metrics: third-person requests, consent rate, seek success rate, time-to-third, 3-way session duration.
+1. **Janus in Docker** (`infra/docker/janus/`):
+   - There is no official image: build Janus from a **pinned stable release tag** in a multi-stage Dockerfile with only what is needed — core, VideoRoom plugin, WebSocket transport (client port 8188, admin port 7188). Disable the HTTP/REST transport, data channels and all other plugins. Pin the dependency versions (libnice, libsrtp2, libwebsockets, jansson, libconfig) and record them in `CONTEXT.md`.
+   - `janus.jcfg`: `nat_1_1_mapping` from `JANUS_PUBLIC_IP`, RTP port range 20000–20100 (published 1:1, UDP), `token_auth = true` with `token_auth_secret = JANUS_TOKEN_SECRET` (signed tokens), admin API protected by `admin_secret`, sensible `session_timeout`, debug level from env.
+   - `janus.plugin.videoroom.jcfg`: no static rooms; `admin_key = JANUS_ADMIN_SECRET` so only our backend can create rooms; `lock_rtp_forward = true`.
+   - The admin WebSocket (7188) is bound to localhost / the internal Docker network only — browsers never reach it.
+   - Add `janus` to `pnpm infra:up` (with a healthcheck) and a second node `janus-2` under compose profile `sfu-multi` for placement/failover tests. Document macOS Docker Desktop caveats the same way coturn's are documented.
+2. **`packages/sfu`** (server-only):
+   - Typed Janus admin client over WebSocket (transactions, timeouts, reconnect, Zod-validated responses): `ping`, `createRoom`, `destroyRoom`, `allowTokens` (VideoRoom `allowed` list), `listRooms`.
+   - Room creation: random numeric room id, random room `secret`, `publishers = 4`, `bitrate = SFU_PUBLISHER_BITRATE`, `notify_joining = true`, `require_pvtid = true`, VP8 + Opus, simulcast allowed, `audiolevel_event` on, recording off, and an `allowed` list containing one fresh token per participant.
+   - Join tokens: Janus **signed tokens** (`<expiry>,janus,janus.plugin.videoroom:<HMAC-SHA1 signature>` per Janus's token format) valid 10 minutes and restricted to the VideoRoom plugin, **plus** membership in the room's `allowed` list — so a token is useless for any other room.
+   - Node registry: `JANUS_NODES` from env; a health checker in the gateway (one leader at a time via `SET NX PX` lock) pings every node's admin API every 5 s and updates `sfu:nodes` (healthy, room count). Placement = healthy node with the fewest rooms.
+   - Orphan cleanup: rooms in `sfu:rooms` whose session has ended are destroyed by the sweeper; rooms that exist on a node but not in `sfu:rooms` are destroyed too.
+3. **Gateway orchestration:**
+   - `upgradeToSfu(sessionId)`: atomically set `topologyState = upgrading` (no double upgrades), create the room, store `sfuNodeId`/`sfuRoomId`, increment `topologyEpoch`, emit `call:topology { topology: 'sfu', epoch, sfu }` to every active participant (each with its own token). When every participant sent `call:topologyReady { epoch }` → `topology = sfu`, `topologyState = stable`. If not all are ready within `SFU_UPGRADE_TIMEOUT_MS`, or room creation fails → destroy the room, emit `call:topology { topology: 'mesh', reason }`, keep the P2P call running.
+   - New sessions can start directly on `sfu` (`match:found` with `topology: 'sfu'` and `sfu` info) — used when `DEV_FORCE_SFU=true` and by Part 12.
+   - A call never switches back from `sfu` to `mesh`, even if it shrinks to 2 people.
+   - Session end destroys the room. A participant leaving an SFU call is removed from the room's `allowed` list (kick from the room via the admin API).
+   - **SFU failover:** when the health checker marks a node unhealthy, every active session on it gets a new room on a healthy node and a new `call:topology` (`epoch + 1`); clients rejoin. Expect a few seconds of interruption; the session itself survives (works together with Session resilience).
+   - `rtc:*` relay is rejected for sessions whose topology is `sfu`.
+   - Dev-only trigger (registered only when `NODE_ENV=development`): socket event `dev:upgradeToSfu { sessionId }` so the switch can be tested with two people.
+4. **Web client — `SfuTransport`** (behind the `CallManager` transport interface from Part 7):
+   - Talk to Janus with the official `janus.js` from the **same pinned Janus release** (vendored and wrapped in a typed module) or a small typed client for the Janus WebSocket API — choose one and record it.
+   - One **publisher** PeerConnection (local audio + video, simulcast with 3 layers, `display` = own `participantId`) and one **multistream subscriber** PeerConnection receiving all other feeds. Map feeds to participants by `display`; ignore feeds whose `display` isn't a current session participant.
+   - Pass the same ICE servers (coturn credentials) to Janus PeerConnections for users on restrictive networks.
+   - Subscribe to a simulcast layer per tile size (high for a large tile, low for small tiles); switch layers on layout changes.
+   - Keepalive the Janus session; on Janus WebSocket loss, reconnect and rejoin the room with the same token while it is valid; otherwise wait for the gateway's failover `call:topology`.
+   - **Make-before-break:** on `call:topology sfu` keep the `MeshTransport` playing, join Janus, and only when media from every current peer arrives through Janus swap the tiles, close the P2P connections and send `call:topologyReady`. On rollback, close the Janus side and keep P2P.
+   - The Part 7 WebRTC lifecycle rules apply to `SfuTransport` too.
+5. **Moderation hooks:** existing client-side checks (NSFW, frame sampling, reports) must work identically on SFU calls. Document (do not build) how `rtp_forward` could feed a server-side moderation service in production.
+6. **Metrics:** SFU rooms active, upgrade attempts/successes/rollbacks, upgrade duration, failovers, per-node room count and health, Janus admin API latency.
 
-**Required tests:** `matchThird` concurrency (a session never gets two joiners; a solo ticket never joins two sessions); consent required from both; ineligible users (no opt-in, low trust, shadow pool) never join; one leave keeps the other two connected; Playwright E2E with three browser contexts.
+**Required tests:** `packages/sfu` integration tests against the real Janus container (create/destroy room; joining without a token, with an expired token, or with another room's token is rejected; admin API rejects a wrong secret); placement picks the least-loaded healthy node; health checker marks a stopped node unhealthy (profile `sfu-multi`); upgrade flow with a mocked Janus (ready → stable; timeout → rollback; concurrent upgrade requests → one upgrade); failover moves sessions to the other node; orphan rooms destroyed; `SfuTransport` unit tests with a mocked Janus client (feed ↔ participant mapping, unknown feeds ignored, make-before-break order); Playwright: a 2-person call with `DEV_FORCE_SFU=true` shows remote video (`videoWidth > 0`) and `chrome://webrtc-internals`-equivalent stats show the remote endpoint is Janus.
 
-**Acceptance criteria:** A and B match, both consent, opted-in C joins; all three see and hear each other; C leaves → A and B continue; quality gate green.
+**Acceptance criteria:**
+- With `DEV_FORCE_SFU=true`, two windows video chat through Janus.
+- A P2P call upgraded via `dev:upgradeToSfu` switches to Janus with no visible freeze longer than ~1 s; a forced failure rolls back and the P2P call keeps running.
+- With profile `sfu-multi`, stopping the node hosting a call moves it to the other node and the call recovers within a few seconds.
+- Janus admin port is not reachable from the browser; no room can be joined without a valid token for that room.
+- Quality gate green.
 
-**Manual check:** three browser windows (normal, incognito, another browser profile) — run the flow above.
+**Manual check:** `pnpm infra:up`, start everything with `DEV_FORCE_SFU=true`, call between two windows; then without the flag, start a P2P call and trigger the upgrade from the browser console (dev event); with `--profile sfu-multi`, `docker stop` the Janus node in use during a call.
 
-**Update CONTEXT.md:** new events, Redis keys, env vars (`GROUP_MIN_TRUST`, `SEEK_THIRD_TIMEOUT_MS`), group-call rules, metrics.
+**Update CONTEXT.md:** Janus version + build details, ports, env vars, `sfu:*` keys, events `call:topology` / `call:topologyReady`, token scheme, upgrade/rollback/failover behavior, macOS Docker caveats, metrics, capacity notes.
 
 ---
 
-## After Part 10 (and optional Part 11)
+## PART 12 — Group video: add a 3rd and 4th random person
+
+**Paste:** `Execute Part 12 of MASTER_IMPLEMENTATION_PROMPT.md`
+
+**Prerequisite:** Part 11 complete.
+
+**Goal:** People in a video call can jointly agree to add another random stranger, up to **4 people per call**. Group calls run on Janus (Part 11); 2-person calls stay P2P until a group is formed.
+
+**Tasks**
+1. Product rules (all enforced server-side):
+   - **Consent from everyone in the call:** `call:requestAdd { sessionId }` → the others receive `call:addRequested`; each answers `call:respondAdd { sessionId, accept }`. The request expires after 15 s; anyone can cancel. When all agree: if the call is still `mesh`, run `upgradeToSfu` first (the switch is hidden behind the search wait); then `state = seeking` and everyone receives `call:seeking`.
+   - Joiners come **only** from users who opted in: `queue:join { ..., allowGroup: true }` (landing-page toggle, off by default).
+   - Eligibility: video mode, same lang, not in the shadow pool, trust ≥ `GROUP_MIN_TRUST` for **every** participant and the joiner.
+   - `maxParticipants = 4`; "Add a person" is disabled at 4. Seeking times out after `SEEK_PARTICIPANT_TIMEOUT_MS` → `call:seekCancelled { reason }`, the call continues (on Janus) with the current people.
+   - One seek at a time per session; each new person requires a fresh consent round from everyone present.
+2. Matchmaking: hash-tagged queue `{tag}:q:seek` of sessions seeking a participant (entry stores sessionId + all current participants' visitorIds for recent-pair checks). Lua `matchJoiner`: opted-in solo tickets check `q:seek` first, then fall back to normal 1:1 matching; a session entering `seeking` checks waiting opted-in solo tickets. Atomic, stale-skipping, avoids recent pairs with **any** existing participant. Adding the participant is a second Lua step over `{<sessionId>}` (enforce `maxParticipants`); if it fails (session ended or full meanwhile), put the solo ticket back at the head of its queue.
+3. Gateway: on a joiner match, add the participant (status `pending`, normal `match:ack` rules), add a token for them to the Janus room's `allowed` list, emit `match:found` to the joiner with `topology: 'sfu'`, the peers and their own `sfu` join info, and `participant:joined` to everyone else. Text fan-out, leave, resume and report logic already work over the participant list: when someone leaves, the rest continue while ≥ 2 remain (still on Janus). `chat:next` in a group call means "leave this call and find a new one".
+4. Web: "Add a person" button + consent banner ("Stranger 2 wants to add someone — Accept / Decline"), "Looking for another person…" state, responsive grid for 2–4 tiles (2×2 on desktop, stacked/scrollable on mobile) labeled "Stranger 1/2/3", per-tile Report, quality badge and client NSFW check, active-speaker highlight from Janus audio-level events, simulcast layer per tile size.
+5. Safety & admin: reports target a specific participant; transcripts show which stranger sent each line; admin report view lists all participants of the session; an auto-flag or ban removes only the flagged participant (kicked from the Janus room).
+6. Metrics: add-person requests, consent rate, seek success rate, time-to-join, group sizes, group session duration.
+
+**Required tests:** `matchJoiner` concurrency (a session never gets more joiners than free slots; a solo ticket never joins two sessions); consent required from everyone present; ineligible users (no opt-in, low trust, shadow pool) never join; joining a full session is rejected; a P2P call is upgraded to Janus before seeking; one leave keeps the others connected; banned participant is removed from the room; Playwright E2E with **four** browser contexts (fake media): A+B match → both consent → C joins → all three consent → D joins → all four see each other (`videoWidth > 0` on every remote tile) → D leaves → A, B, C continue.
+
+**Acceptance criteria:** the four-person flow above works locally; consent and eligibility rules hold; the "Add a person" button is disabled at 4; quality gate green.
+
+**Manual check:** four browser windows (normal, incognito, two more browser profiles) — run the flow above.
+
+**Update CONTEXT.md:** new events (`call:requestAdd`, `call:addRequested`, `call:respondAdd`, `call:seeking`, `call:seekCancelled`), Redis keys, env vars (`GROUP_MIN_TRUST`, `SEEK_PARTICIPANT_TIMEOUT_MS`), group-call rules, metrics.
+
+---
+
+## After Part 10 (and Parts 11–12)
 
 The development build is complete. Next phase (separate plan): production infrastructure (Terraform + Kubernetes), staging environment, real vendors for age assurance and hash matching, bare-metal TURN, multi-region rollout, mobile apps. Ask the agent: *"Read CONTEXT.md and docs/PRODUCTION_CHECKLIST.md and write PRODUCTION_PLAN.md broken into parts like MASTER_IMPLEMENTATION_PROMPT.md."*
