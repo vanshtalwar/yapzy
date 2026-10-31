@@ -16,3 +16,8 @@ e2e/.stack.json
 .git
 .claude
 *.log
+Developer Files
+CLAUDE.md
+CONTEXT.md
+MASTER_IMPLEMENTATION_PROMPT.md
+.mcp.json

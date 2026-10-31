@@ -1,321 +1,305 @@
 # RandomChat
 
-Random 1:1 text & video chat platform (development build). Monorepo: pnpm workspaces +
-Turborepo, TypeScript everywhere.
+Anonymous random 1:1 text and video chat. Visitors pass an age and bot check, get paired with a
+random stranger in milliseconds, and can skip to the next one at any time. Video is peer-to-peer
+WebRTC; matchmaking, text relay and signalling run on a horizontally scalable Socket.io gateway
+backed by Redis. Trust & safety (text filtering, risk-based video sampling, reports with evidence,
+shadow and hard bans) and a moderator dashboard are built in.
 
-- Implementation plan: [`MASTER_IMPLEMENTATION_PROMPT.md`](./MASTER_IMPLEMENTATION_PROMPT.md)
-- Current state, decisions, ports, env vars, load-test results: [`CONTEXT.md`](./CONTEXT.md)
-- What is still missing before real users: [`docs/PRODUCTION_CHECKLIST.md`](./docs/PRODUCTION_CHECKLIST.md)
+|            |                                                                                                                                                                                               |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status** | Feature-complete development build (Parts 1–10). Group video for 3–4 people (Janus SFU, Parts 11–12) is in progress. **Not yet launched:** see [Production readiness](#production-readiness). |
+| **Tested** | 316 unit/integration tests, 8 Playwright end-to-end tests, load tests with 5,000 concurrent clients, crash drills for gateway, Redis and worker                                               |
+| **Docs**   | [Developer guide](docs/DEVELOPMENT.md) · [LAN testing](docs/LAN_TESTING.md)                                                                                                                   |
 
-## Prerequisites
+## Contents
 
-- **Node.js 24** (see `.nvmrc`)
-- **pnpm 12** via Corepack: `corepack enable pnpm` (if `/usr/local/bin` is not writable:
-  `corepack enable --install-directory ~/.local/bin pnpm`, with `~/.local/bin` on `PATH`)
-- **Docker** with Compose v2 (Docker Desktop on macOS)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
+- [Quick start (local)](#quick-start-local)
+- [Production deployment](#production-deployment)
+- [Scaling](#scaling)
+- [Security and privacy](#security-and-privacy)
+- [Production readiness](#production-readiness)
+- [Testing and CI](#testing-and-ci)
+- [Repository layout](#repository-layout)
 
-## Setup
+## Features
+
+**Chat**
+
+- Random 1:1 **text** or **video** chat, no account needed; optional interests and language.
+- Matching in milliseconds (p95 under 50 ms at 5,000 concurrent clients); **Next** skips, **Stop**
+  ends, auto-search for the next stranger.
+- Survives network drops and server restarts: a disconnected user has a grace period to reconnect
+  to any gateway and resume the same chat, including missed messages.
+- Video: pre-join camera/microphone check, device pickers, peer-to-peer WebRTC with TURN fallback,
+  optional relay-only mode that hides each user's IP address from the stranger.
+
+**Trust & safety**
+
+- Age confirmation, Terms acceptance and Cloudflare Turnstile before every session.
+- Text filter: links, emails, phone numbers, "add me on…" and slurs are blocked before relaying
+  (obfuscated forms too); other profanity is masked.
+- Video moderation: on-device NSFW check plus server-side frame sampling by risk tier (new and
+  low-trust users more often), capped by a global budget.
+- Reports with evidence (recent messages, the stranger's last few frames), trust scores, automatic
+  shadow bans (offenders are only matched with each other) and hard bans that take effect live.
+
+**Admin dashboard**
+
+- Live stats, prioritised report queue with keyboard triage, evidence blurred until clicked, ban
+  and trust decisions, visitor history, audit log, admin accounts with roles and mandatory TOTP.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  B[Browser<br/>Next.js web app] -- REST --> API[API<br/>Fastify]
+  B -- WebSocket --> GW[Gateway nodes<br/>Socket.io]
+  B <-. WebRTC media .-> P[Stranger's browser]
+  B -. relay when P2P fails .-> T[coturn<br/>TURN/STUN]
+  ADM[Admin dashboard<br/>Next.js] -- REST --> API
+  API --> R[(Redis)]
+  GW --> R
+  API --> PG[(PostgreSQL)]
+  W[Worker<br/>BullMQ] --> PG
+  W --> R
+  API --> S3[(S3 / MinIO<br/>evidence, frames)]
+  W --> S3
+```
+
+- **Gateways are stateless.** Matchmaking runs as atomic Lua scripts in Redis, so any number of
+  gateway nodes share the same queues without double-matching anyone. Nodes talk to each other
+  through the sharded Socket.io Redis adapter and a control channel.
+- **Media never touches the app servers.** Two-person video is peer-to-peer (DTLS-SRTP); coturn
+  relays only when a direct path fails or relay mode is forced.
+- **Redis holds everything live** (queues, sessions, presence, rate limits, caches); every key has
+  a TTL. **PostgreSQL holds only what must last:** visitors (hashed identifiers), reports,
+  evidence metadata, bans, moderation events, admins, audit logs, session metadata.
+- **The worker** handles background jobs: session logs, frame classification, moderation events,
+  report thresholds and data retention.
+
+## Tech stack
+
+| Layer               | Technology                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Language / monorepo | TypeScript 6 (strict, ESM), pnpm 12 workspaces, Turborepo                                                                                  |
+| Web and admin       | Next.js 16 (App Router), React 19, Tailwind CSS 4, shared UI kit in `packages/ui` (shadcn/ui-style, some components adapted from 21st.dev) |
+| API                 | Fastify 5, Zod validation, JWT visitor tokens (jose), argon2id + TOTP for admins                                                           |
+| Real-time           | Socket.io 4 with the sharded Redis adapter (ioredis)                                                                                       |
+| Data                | PostgreSQL 18 + Prisma 7, Redis 8 (Lua matchmaking), S3-compatible storage (MinIO in development)                                          |
+| Jobs                | BullMQ                                                                                                                                     |
+| Media               | WebRTC, coturn 4.18; Janus VideoRoom for group calls (in progress)                                                                         |
+| Safety              | Cloudflare Turnstile, obscenity text filter, NSFWJS in the browser, pluggable server classifier and CSAM hash matcher                      |
+| Observability       | pino logs (redacted), Prometheus metrics, Grafana dashboard                                                                                |
+| Quality             | Vitest, Testing Library, Playwright, ESLint, Prettier, GitHub Actions, gitleaks, Dependabot                                                |
+
+## Quick start (local)
+
+Requires **Node.js 24**, **pnpm 12** (`corepack enable pnpm`) and **Docker** with Compose v2.
 
 ```bash
 pnpm install
-cp .env.example .env    # then replace the "dev-only" secrets, e.g. `openssl rand -hex 32`
-pnpm infra:up           # Postgres, Redis, coturn, MinIO (+ bucket bootstrap)
-pnpm db:migrate         # apply migrations to the dev database
-pnpm db:seed            # dev admin + sample visitors, reports, a shadow ban
+cp .env.example .env    # replace the "dev-only" secrets, e.g. `openssl rand -hex 32`
+pnpm infra:up           # Postgres, Redis, coturn, MinIO
+pnpm db:migrate
+pnpm db:seed            # dev admin + sample data
+pnpm dev
 ```
 
-If port 5432 is already used (e.g. Homebrew Postgres), set `POSTGRES_PORT=5433` in `.env` and
-update `DATABASE_URL` / `DATABASE_URL_TEST` to match.
+| App           | URL                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| Chat          | <http://localhost:3000> (open two separate windows, e.g. one private, to chat with yourself)  |
+| Admin         | <http://localhost:3001> (sign in with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` from `.env`) |
+| API / gateway | <http://localhost:4000> / <http://localhost:4001>                                             |
 
-MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRET_KEY` from `.env`).
+The bot check uses Cloudflare's test keys but still needs internet access. Every script, run mode,
+test command and troubleshooting tip is in the [developer guide](docs/DEVELOPMENT.md).
 
-## Scripts
+## Production deployment
 
-| Command                        | What it does                                                           |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (web, admin, API, one gateway, worker)      |
-| `pnpm build`                   | Build all apps                                                         |
-| `pnpm lint`                    | ESLint (type-aware) in every package                                   |
-| `pnpm typecheck`               | `tsc` in every package                                                 |
-| `pnpm test`                    | Vitest in every package                                                |
-| `pnpm format` / `format:check` | Prettier write / check                                                 |
-| `pnpm infra:up`                | Start infrastructure, wait until healthy, create MinIO buckets         |
-| `pnpm infra:down`              | Stop infrastructure (keeps data)                                       |
-| `pnpm infra:reset`             | Stop infrastructure and **delete all data volumes**                    |
-| `pnpm infra:logs` / `infra:ps` | Follow logs / show container status                                    |
-| `pnpm db:migrate` / `db:seed`  | Apply migrations / load idempotent dev data (`db:studio` to browse)    |
-| `pnpm db:generate`             | Regenerate the Prisma client after editing the schema                  |
-| `pnpm test:coverage`           | Tests with coverage thresholds (CI runs this)                          |
-| `pnpm test:e2e`                | Build, boot the stack, run the Playwright suite (see Testing)          |
-| `pnpm obs:up` / `obs:down`     | Prometheus (9090) + Grafana (3002) for the running services            |
-| `pnpm stack:up` / `stack:down` | Every app in a container (Compose profile `full`)                      |
-| `pnpm admin:create`            | Create or reset an admin (`ADMIN_EMAIL`/`ADMIN_PASSWORD`/`ADMIN_ROLE`) |
-| `pnpm bots -- …`               | Chat-flow correctness bots (see Load testing for the `load` mode)      |
+Read [Production readiness](#production-readiness) first: the code is ready to deploy to a
+staging environment, but launching to real users needs the work listed there.
 
-Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-`@app/db`, `@app/redis`, `@app/matchmaking`, `@app/moderation`, `@app/storage`, `@app/api`,
-`@app/gateway` and `@app/worker` tests are integration tests: run `pnpm infra:up` first.
+### 1. Services to run
 
-## Run modes
+| Service | Image                                   | Port                              | Health              | Scale                                                                  |
+| ------- | --------------------------------------- | --------------------------------- | ------------------- | ---------------------------------------------------------------------- |
+| web     | `apps/web/Dockerfile`                   | 3000                              | `GET /`             | Stateless, behind a CDN                                                |
+| admin   | `apps/admin/Dockerfile`                 | 3001                              | `GET /login`        | 1–2 replicas, behind an access proxy/VPN                               |
+| api     | `apps/api/Dockerfile`                   | 4000                              | `/health`, `/ready` | Stateless, scale on CPU                                                |
+| gateway | `apps/gateway/Dockerfile`               | 4001                              | `/health`, `/ready` | Stateless, scale on socket count (~2,500 sockets per process measured) |
+| worker  | `apps/worker/Dockerfile`                | 4002 (`/health`, `/metrics` only) | `/health`           | Scale on job backlog                                                   |
+| migrate | `apps/api/Dockerfile`, target `migrate` | —                                 | exits 0             | Run once per release, before the apps                                  |
 
-| Mode              | How                                    | Notes                                                                                                                                                                                                                                           |
-| ----------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Development       | `pnpm dev`                             | Watch mode: web 3000, admin 3001, API 4000, one gateway 4001, worker (metrics 4002)                                                                                                                                                             |
-| Two gateways      | `pnpm --filter @app/gateway dev:multi` | gw-4001 + gw-4011 (stop the single gateway first)                                                                                                                                                                                               |
-| Production builds | `pnpm build`, then each app's `start`  | Bundled Node services, `next start` for web/admin                                                                                                                                                                                               |
-| Containers        | `pnpm stack:up` / `pnpm stack:down`    | Builds `apps/*/Dockerfile`, runs migrations, starts everything on the same ports with `NODE_ENV=production` (stop the dev servers first). Production rate limits apply: all browsers on this machine share one IP for the 10 sessions/min limit |
-| Observability     | `pnpm obs:up`                          | Grafana <http://localhost:3002> (dashboard "RandomChat — overview", viewers need no login), Prometheus <http://localhost:9090>; scrapes both the host services and the containers                                                               |
+Infrastructure: PostgreSQL (managed, HA, with PgBouncer), Redis with replicas and failover (split
+the BullMQ Redis with AOF from the ephemeral one), S3-compatible object storage, coturn on hosts
+with public IPs (start from [`infra/coturn/turnserver.production.conf`](infra/coturn/turnserver.production.conf)),
+Prometheus + Grafana.
 
-Every Node service exposes `/metrics` (Prometheus text format): API and gateway on their own
-port, the worker on `WORKER_METRICS_PORT` (4002) together with `/health`. With `METRICS_TOKEN`
-set they require `Authorization: Bearer <token>`; with `DEPLOY_ENV=production` and no token the
-endpoint is off. The metric list is in `CONTEXT.md` ("Metrics").
+### 2. Build the images
 
-## Web app (`apps/web`, port 3000)
+All images build from the repository root. They are multi-stage, run as the non-root `node` user
+and include a `HEALTHCHECK`. Web and admin inline their public URLs at build time, so build them
+once per environment:
 
 ```bash
-pnpm dev    # web + API + gateway + worker (needs `pnpm infra:up`)
+docker build -f apps/api/Dockerfile     -t randomchat/api .
+docker build -f apps/api/Dockerfile     -t randomchat/migrate --target migrate .
+docker build -f apps/gateway/Dockerfile -t randomchat/gateway .
+docker build -f apps/worker/Dockerfile  -t randomchat/worker .
+
+docker build -f apps/web/Dockerfile -t randomchat/web \
+  --build-arg DEPLOY_ENV=production \
+  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_GATEWAY_URL=wss://rt.example.com \
+  --build-arg NEXT_PUBLIC_TURNSTILE_SITE_KEY=<site key> \
+  --build-arg NEXT_PUBLIC_FORCE_TURN_RELAY=false .
+
+docker build -f apps/admin/Dockerfile -t randomchat/admin \
+  --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
+  --build-arg S3_PUBLIC_ENDPOINT=https://evidence.example.com .
 ```
 
-Open <http://localhost:3000> in two windows that don't share storage (one normal, one
-incognito), click **Start chatting** in both, tick the three boxes and wait for the bot check
-(Cloudflare's always-pass test key, so it needs internet), then chat. **Next** needs a second
-press within 3 s (or Esc twice); **Stop** leaves the chat. With "Auto-find next stranger" on,
-both windows search again after a chat ends. A tab left in the background for 60 s while
-searching pauses itself ("Keep searching").
+To try the production images locally, `pnpm stack:up` builds and runs all of them with Docker
+Compose (`pnpm stack:down` stops them).
+
+### 3. Configure
+
+Every variable and its development default is listed in [`.env.example`](.env.example). In production, inject them from a secrets manager (never commit
+`.env`). With `DEPLOY_ENV=production` the services **refuse to start** with placeholder secrets,
+Turnstile test keys or `NODE_ENV` other than `production`.
+
+| Group         | Variables                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Environment   | `NODE_ENV=production`, `DEPLOY_ENV=production` (`staging` in staging), `LOG_LEVEL=info`                                                                                              |
+| Secrets       | `JWT_SECRET`, `IP_HASH_PEPPER`, `DEVICE_HASH_PEPPER`, `TURN_SECRET`, `ADMIN_TOTP_ENC_KEY`, `TURNSTILE_SECRET_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `METRICS_TOKEN`                 |
+| Data stores   | `DATABASE_URL` (via PgBouncer; migrations use a direct URL), `REDIS_URL` (`rediss://`), `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET_EVIDENCE`, `S3_BUCKET_FRAMES`   |
+| Network       | `CORS_ORIGINS` (web origins, also the WebSocket allowlist), `ADMIN_ORIGINS`, `TRUST_PROXY` (exact hop count or CIDRs of your CDN/load balancer, never `true`), `TURNSTILE_HOSTNAMES` |
+| Media         | `TURN_HOST`, `TURN_PORT`, `TURN_TLS_PORT=443`, `STUN_URLS`, `TURN_CREDENTIAL_TTL_SECONDS`                                                                                            |
+| Capacity      | `MM_REGION`, `MM_BUCKETS`, `MM_BUCKETS_BY_QUEUE`, `DEADLINE_SHARDS=64`, `STATS_COUNTER_SHARDS`, `WORKER_CONCURRENCY`, `MOD_FRAME_BUDGET_PER_SEC`, `HANDSHAKE_LIMIT_PER_IP`           |
+| Must stay off | `RATE_LIMIT_DISABLED`, `DEV_FORCE_FLAG_VISITOR_IDS` (both ignored outside development)                                                                                               |
+
+Bucket and shard counts can only be **raised** on a live fleet; lowering them orphans waiting
+tickets or deadlines.
+
+### 4. Release
+
+1. Run the `migrate` image against the database (`prisma migrate deploy`). Migrations must stay
+   backward compatible with the running version.
+2. Roll out api, worker, gateway, then web and admin.
+3. Gateways drain on `SIGTERM`: they stop accepting connections, tell clients to reconnect
+   elsewhere and exit within 20 s, and the clients resume their chats on another node. Set
+   `terminationGracePeriodSeconds` above 20 s and use a PodDisruptionBudget.
+4. First release only: create the first admin, then enrol TOTP immediately (it is mandatory in
+   production):
+
+   ```bash
+   ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='<at least 12 chars>' ADMIN_ROLE=ADMIN pnpm admin:create
+   ```
+
+### 5. Networking
+
+- HTTPS/WSS everywhere with HSTS; a CDN + WAF in front of web, API and admin, with edge rate
+  limits on `/v1/session`, `/v1/reports`, `/v1/moderation/frames` and admin login.
+- The gateway uses WebSocket transport only, so **no sticky sessions** are needed. Set the load
+  balancer idle timeout above 45 s (ping 25 s + timeout 20 s).
+- Keep `/ready`, `/health` and `/metrics` off the public ingress. Prometheus scrapes `/metrics`
+  with `Authorization: Bearer $METRICS_TOKEN`; without a token, `/metrics` is disabled in
+  production.
+- Admin dashboard behind an access proxy, VPN or IP allowlist, on the same registrable domain as
+  the API (the admin cookie is `SameSite=Lax`).
+- TURN needs public IPs, a wide UDP relay port range, TLS on 443 and network-level DDoS protection.
+
+### 6. Monitor
+
+Import [`infra/docker/grafana/dashboards/randomchat.json`](infra/docker/grafana/dashboards/randomchat.json).
+Alert at least on: `gateway_adapter_subscriber_oldest_pending_seconds` > 15 (cross-node delivery
+failing; the gateway's `/health` also turns 503 so the pod is replaced), drops in
+`gateway_sockets_connected`, time-to-match p99, error rates, Redis latency and memory, BullMQ
+backlog and failures, TURN relay share.
+
+## Scaling
+
+Measured on one laptop (Apple M2 Pro) with two gateway nodes and an aggressive profile (sessions
+of ~20 s, half video):
+
+| Concurrent clients | Time to match p50 / p95 / p99 | Message latency p95 | Gateway CPU per node |
+| ------------------ | ----------------------------- | ------------------- | -------------------- |
+| 2,000              | 9 / 35 / 62 ms                | 3 ms                | ~28 % of one core    |
+| 5,000              | 14 / 28 / 38 ms               | 7 ms                | ~62 % of one core    |
+
+- **Gateways** scale out linearly: ~2,500 sockets per Node.js process at ~60 % of a core and
+  ~550 MB.
+- **Redis** is the first limit: one instance handles an estimated 10–20k concurrent users. Beyond that,
+  Redis Cluster is needed. Keys are already hash-tagged for it: matchmaking queues are split into
+  buckets that land on different shards, and hot keys (deadlines, counters) are sharded.
+- **TURN bandwidth** is the largest cost: each relayed call is up to 800 kbps per direction.
+- **Projection for 1M concurrent users** (not yet validated): ~150–400 gateway processes,
+  ~50–120 Redis shards, a TURN fleet in the hundreds of Gbps. Validating it needs a distributed
+  bot fleet.
+
+## Security and privacy
+
+- Anonymous by design: no accounts for visitors; IP addresses and device ids are stored only as
+  HMAC hashes; chat text is never logged or stored outside report evidence.
+- Visitor JWTs (12-hour lifetime, kept in memory and `sessionStorage`, no cookies); admin sessions in Redis
+  with CSRF tokens, argon2id passwords, mandatory TOTP and RBAC; every admin action audited.
+- Zod validation on every HTTP route and socket event; per-socket rate limits and abuse
+  disconnects; per-IP and per-visitor handshake limits; WebSocket Origin allowlist.
+- Nonce-based Content Security Policy on web and admin; uploads size-limited, magic-byte checked
+  and re-encoded; evidence served only through 5-minute presigned URLs, blurred by default.
+- TURN credentials are short-lived HMAC credentials; the production coturn config denies relays to
+  private and reserved ranges (checked in CI).
+- Logs are redacted (tokens, IPs, device ids, chat text) and tests assert it.
+
+Found a vulnerability? Please report it privately to the maintainer rather than opening a public
+issue.
+
+## Production readiness
+
+The software side is complete for 1:1 chat. What remains before real users is mostly
+infrastructure, legal and operational work. The launch blockers include:
+
+- **Legal:** launch countries decided with counsel; reviewed Terms, Privacy Policy and Community
+  Guidelines (the current pages are placeholders); NCMEC registration (US); GDPR, DSA, UK Online
+  Safety Act and India IT Rules obligations; licence checks.
+- **Safety:** an age-assurance vendor where required; a real image classifier and CSAM hash
+  matching (PhotoDNA or Thorn Safer) in place of the development mock and no-op; 24/7 moderation
+  staffing, moderator wellbeing and an appeals process.
+- **Infrastructure:** Kubernetes, HA Postgres + PgBouncer, replicated Redis, TURN fleet, CDN/WAF,
+  secrets manager, backups with restore drills, alerting, on-call runbooks, a penetration test.
+
+## Testing and CI
 
 ```bash
-pnpm --filter @app/web build && pnpm --filter @app/web start   # production build
-pnpm --filter @app/web test                                     # store/controller unit tests
+pnpm lint && pnpm typecheck && pnpm test && pnpm build   # quality gate (needs `pnpm infra:up`)
+pnpm test:coverage                                       # with coverage thresholds
+pnpm test:e2e                                            # Playwright: text, video, restart, reports, bans
 ```
 
-The UI kit lives in `packages/ui` (`@app/ui`): shadcn-style components adapted from
-[21st.dev](https://21st.dev) via the `21st` MCP (provenance in each file and in `CONTEXT.md`).
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, typecheck,
+tests with coverage against real Postgres, Redis and MinIO, the build, `pnpm audit`, a gitleaks
+secret scan and a check of the production TURN config. The end-to-end workflow runs manually.
+Load testing and Redis inspection tools are described in the
+[developer guide](docs/DEVELOPMENT.md#load-testing).
 
-### Video chat
-
-Pick **Video chat** on the landing page (or open <http://localhost:3000/chat?mode=video>). The
-pre-join screen asks for camera and microphone, shows a preview, device pickers and a mic
-meter; **Start video chat** only enables once both work, so nobody is matched without media.
-Calls are peer-to-peer WebRTC with coturn as fallback; text chat stays available next to the
-video (a drawer on phones).
-
-- Relay-only mode: set `NEXT_PUBLIC_FORCE_TURN_RELAY=true` in `.env` and restart the web app;
-  `chrome://webrtc-internals` then shows a `relay` candidate pair.
-- Restarting the gateway during a call does not interrupt the video; text chat resumes once the
-  socket reconnects.
-- Phones and other devices on the LAN: see [`docs/LAN_TESTING.md`](./docs/LAN_TESTING.md)
-  (the camera needs https or localhost).
-
-### Trust & safety
-
-- Links, emails, phone numbers and "add me on …" requests are blocked before they reach the
-  stranger (also obfuscated forms like `w w w . x . c o m`); slurs are blocked, other
-  profanity is masked.
-- **Report** (flag button) ends the chat and sends the recent messages — and, in video, the
-  stranger's last few frames, which the browser kept in memory only — to the moderation queue.
-  Check the result in `pnpm db:studio` (`Report`, `Evidence`) and in the MinIO console
-  (<http://localhost:9001>, bucket `evidence`).
-- Video is sampled server-side by risk tier (new visitors, low trust or recent reports more
-  often); the worker classifies frames (mock classifier in development) and shadow-bans
-  above the threshold. Shadow-banned or low-trust visitors only meet each other.
-- To see a live shadow ban: create a session for a known device id
-  (`curl -X POST localhost:4000/v1/session …`, see the API section), start the worker with
-  `DEV_FORCE_FLAG_VISITOR_IDS=<that visitorId> pnpm --filter @app/worker dev`, then video chat
-  as that device (`localStorage['rc.deviceId']`). Its first sampled frame is flagged and the
-  chat ends silently; from then on it is matched only within the shadow pool.
-
-Overrides for `pnpm dev` go in `.env`: Turborepo runs tasks in strict env mode, so variables
-set on the command line (`FOO=1 pnpm dev`) do not reach the apps. To override one app only, run
-it directly, e.g. `RECENT_PAIR_TTL_MS=0 pnpm --filter @app/gateway dev`.
-
-## Admin dashboard (`apps/admin`, port 3001)
-
-```bash
-pnpm db:seed                 # dev admin from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD (.env)
-pnpm dev                     # also starts the admin app on http://localhost:3001
-```
-
-Sign in with the seeded admin. The dashboard shows live stats (online, active chats, queues,
-matches per minute, open reports) refreshing every 5 s. **Reports** is the review queue (filter
-chips, priority badges; `j`/`k` to move, `Enter` to open, `d` dismiss, `s` shadow-ban — both
-ask for confirmation). A report page shows the transcript, the evidence frames **blurred until
-you click them**, both visitors' history and the decision panel (shadow or hard ban with
-duration presets, trust adjustment, notes). Bans, moderation events, visitor profiles, the
-audit log and admin accounts have their own pages; ⌘K / Ctrl+K jumps to a page, a visitor id
-or a report id. Turn on two-factor authentication under **Settings**.
-
-Create admins in the UI (**Admin users**, ADMIN only) or from the command line — the only
-way to bootstrap the first admin in production, where the seed refuses to run:
-
-```bash
-ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='at least 12 chars' ADMIN_ROLE=ADMIN pnpm admin:create
-```
-
-## REST API (`apps/api`, port 4000)
-
-```bash
-pnpm --filter @app/api dev     # tsx watch (or `pnpm dev` for everything)
-pnpm --filter @app/api build && pnpm --filter @app/api start   # bundled build
-```
-
-Try it with curl. In development the Turnstile test secret accepts any token, but the API still
-calls Cloudflare's siteverify, so this needs internet access.
-
-```bash
-curl localhost:4000/health          # {"status":"ok"}
-curl localhost:4000/ready           # Postgres + Redis checks (503 if either is down)
-curl localhost:4000/v1/config
-
-# Start an anonymous session (deviceId = any UUID; the web app keeps one in localStorage)
-TOKEN=$(curl -s -X POST localhost:4000/v1/session -H 'content-type: application/json' \
-  -d "{\"turnstileToken\":\"XXXX.DUMMY.TOKEN.XXXX\",\"ageConfirmed\":true,\"tosVersion\":\"2026-10-dev\",\"deviceId\":\"$(uuidgen | tr A-Z a-z)\"}" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-
-curl localhost:4000/v1/turn-credentials -H "authorization: Bearer $TOKEN"
-curl localhost:4000/v1/stats/online   # 0 until the gateway exists
-```
-
-Errors always look like `{"error":{"code":"…","message":"…","requestId":"…"}}`; the same id is
-in the `x-request-id` response header and the server logs.
-
-## Real-time gateway (`apps/gateway`, port 4001)
-
-```bash
-pnpm --filter @app/gateway dev         # one node on 4001
-pnpm --filter @app/gateway dev:multi   # two nodes: gw-4001 and gw-4011
-pnpm --filter @app/gateway build && pnpm --filter @app/gateway start
-curl localhost:4001/health && curl localhost:4001/ready
-```
-
-Watch the online count across both nodes (API and `dev:multi` running):
-
-```bash
-pnpm --filter @app/bots connect --count 5 --gateway http://localhost:4001,http://localhost:4011
-curl localhost:4000/v1/stats/online   # {"online":5} within ~5 s; drops when you Ctrl-C the bots
-```
-
-Each bot starts a real session through the API, so more than 10 bots per minute from one IP hit
-the session rate limit unless `RATE_LIMIT_DISABLED=true` (honoured only in development).
-
-## Worker (`apps/worker`)
-
-Consumes BullMQ jobs: `session-log` (session metadata rows, never messages), `classify-frame`,
-`moderation-event`, `report-filed` and an hourly `retention` job that deletes expired evidence and
-old transcripts. `/health` and `/metrics` on port 4002.
-
-```bash
-pnpm --filter @app/worker dev     # or build + start
-```
-
-## Load bots: full chat flow
-
-With the API, both gateway nodes and the worker running (four terminals):
-
-```bash
-RATE_LIMIT_DISABLED=true pnpm --filter @app/api dev   # lets 50 bots start sessions at once
-pnpm --filter @app/gateway dev:multi
-pnpm --filter @app/worker dev
-pnpm bots -- --clients 50 --gateways http://localhost:4001,http://localhost:4011 \
-  --mode text --duration 120 --ghost-rate 0.1 --reconnect-rate 0.1
-```
-
-Each bot queues with random interests, acks its match, chats, then skips or ends, and repeats.
-`--ghost-rate` bots never send `match:ack` (their sessions must end after `MATCH_ACK_TIMEOUT_MS`);
-`--reconnect-rate` bots drop their socket mid-session, reconnect to another gateway and resume.
-Restart one gateway node during a run (Ctrl-C it and start it again): its bots reconnect to the
-other node and resume, and no session ends. The summary lists sessions (and any asymmetric
-matches), undelivered messages, resumes, ghost-session end times, protocol errors and p50/p95
-time-to-match; the exit code is 1 if anything was wrong. Browse the persisted sessions with
-`pnpm db:studio` → `ChatSessionLog`.
-
-To compare queue bucketing, start the gateways with `MM_BUCKETS=1` and then `MM_BUCKETS=4`.
-
-## Testing
-
-- **Unit + integration:** `pnpm test` (needs `pnpm infra:up`; each package has its own Redis DB
-  index so packages run in parallel). `pnpm test:coverage` enforces the thresholds:
-  `@app/matchmaking` and `@app/moderation` ≥ 90 % of lines, the apps' business logic ≥ 70 %.
-  Log-privacy tests scan API and gateway logs of a full flow for tokens, raw IPs, device ids
-  and chat text.
-- **End to end:** `pnpm test:e2e` builds the apps, starts API, gateway, worker, web and admin
-  from the builds on the usual ports (stop `pnpm dev` first), creates an e2e admin and runs
-  `e2e/tests/*.spec.ts` in Chromium with fake camera/microphone: text chat, video (connected
-  per `data-rtc-state` and remote frames), a gateway restart mid-call, a tab that never acks,
-  Next with three strangers, reporting, a banned visitor and a moderator banning a live user.
-  Needs `pnpm infra:up` and internet (Cloudflare Turnstile test key). Browser: run
-  `pnpm --filter @app/e2e exec playwright install chromium` once, or use an installed Chrome
-  with `E2E_BROWSER_CHANNEL=chrome pnpm test:e2e`. `E2E_REUSE_STACK=1` tests whatever is already
-  running instead (the gateway-restart test is then skipped). Reports and traces end up in
-  `e2e/test-results/`.
-- **CI** (`.github/workflows/ci.yml`): lint, typecheck, tests with coverage (Postgres + Redis
-  service containers, MinIO), build, `pnpm audit`, a gitleaks scan and a check that the
-  production TURN config keeps its SSRF rules. The e2e workflow (`e2e.yml`) is manual.
-
-## Load testing
-
-`tools/bots` has a `load` mode for many clients. Bots mint visitor tokens locally with
-`JWT_SECRET` (no API calls, no Turnstile), so only the gateways and the worker need to run —
-best from builds, with a raised handshake limit because every bot shares 127.0.0.1:
-
-```bash
-pnpm --filter @app/gateway build
-cd apps/gateway
-GATEWAY_PORT=4001 GATEWAY_NODE_ID=gw-a MM_BUCKETS=8 HANDSHAKE_LIMIT_PER_IP=10000000 LOG_LEVEL=warn node dist/server.js &
-GATEWAY_PORT=4011 GATEWAY_NODE_ID=gw-b MM_BUCKETS=8 HANDSHAKE_LIMIT_PER_IP=10000000 LOG_LEVEL=warn node dist/server.js &
-cd ../..
-pnpm --filter @app/bots load -- --clients 5000 --ramp 30 --duration 60 --workers 6 \
-  --gateways http://localhost:4001,http://localhost:4011 --json /tmp/load.json
-```
-
-Options: `--video-share` (0.5; video bots exchange fake SDP of `--sdp-bytes` and `--ice-count`
-candidates), `--session-mean` (s, exponential → skip rate), `--msg-rate` (messages/s per bot),
-`--lang`. The report has p50/p95/p99 time to match and message latency, ack errors by code and,
-per gateway from `/metrics`, CPU, peak memory, sockets, matches/s per queue bucket, hops per
-match and sessions ended by reason. Watch it live in Grafana (`pnpm obs:up`).
-
-Redis inspection during or after a run:
-
-```bash
-pnpm --filter @app/bots inspect -- monitor --seconds 10   # ops/s per key family + hottest keys
-pnpm --filter @app/bots inspect -- keys                   # key families + stuck-state check
-```
-
-Results of the Part 10 runs (2 nodes, 2,000 and 5,000 clients, 1 vs 8 buckets, hot keys,
-gateway kill / Redis restart / worker kill drills) and the 1M projection are in `CONTEXT.md`.
-
-## Troubleshooting
-
-- **A port is busy** (`EADDRINUSE`, or `pnpm test:e2e` refuses to start): another dev server or
-  the container stack still runs — `pnpm stack:down`, Ctrl-C `pnpm dev`, or find it with
-  `lsof -nP -iTCP:<port> -sTCP:LISTEN`. Killing the child of `tsx watch` leaves the watcher.
-- **`/v1/session` returns 503 or the bot check never finishes:** Cloudflare Turnstile needs
-  internet even with the test keys.
-- **`RATE_LIMITED` on session creation:** 10 sessions/min per IP. `RATE_LIMIT_DISABLED=true` in
-  `.env` lifts it, but only with `NODE_ENV=development` (never in the containers).
-- **Video never connects between two machines:** see `docs/LAN_TESTING.md` — the camera needs
-  https (or a Chrome flag) on non-localhost origins, and coturn must advertise the LAN IP
-  (`TURN_EXTERNAL_IP`) and listen on it (`TURN_BIND_IP=0.0.0.0`). On macOS, relay↔relay works
-  between browsers on the same Mac; mixed relay↔host can fail under Docker Desktop's NAT.
-- **Headless Chrome hangs when starting video on macOS:** it hangs capturing even fake audio;
-  the e2e suite synthesizes the microphone with Web Audio (real browsers are fine).
-- **Overrides on the command line are ignored by `pnpm dev`:** Turborepo's strict env mode passes
-  only `.env`; run that app directly instead (see above).
-- **Gateway `/health` is 503 `subscriber_stuck`:** its Socket.io adapter subscriber stopped
-  answering Redis, so cross-node delivery fails; the process should be restarted (see D-101).
-
-## Layout
+## Repository layout
 
 ```
-apps/        web (Next.js), admin (Next.js), api (Fastify REST), gateway (Socket.io), worker (BullMQ);
-             each with a Dockerfile
-packages/    config, env, logger, metrics (Prometheus), shared, ui (React kit), db (Prisma), redis,
-             matchmaking (Lua), moderation (text filter, bans, trust, sampling), storage (S3/MinIO)
-e2e/         Playwright suite + stack harness
-infra/docker docker-compose.yml (profiles: default infra, observability, full), coturn, Postgres and
-             MinIO init, Prometheus config, Grafana provisioning + dashboard
-infra/coturn turnserver.production.conf (production TURN template)
-tools/bots   socket bots: `connect`, `bots` (correctness), `load` (load mode), `inspect` (Redis)
-docs/        LAN_TESTING.md, PRODUCTION_CHECKLIST.md
-.github/     CI and e2e workflows, Dependabot
+apps/
+  web/        Next.js chat app (port 3000)
+  admin/      Next.js moderator dashboard (port 3001)
+  api/        Fastify REST API (port 4000)
+  gateway/    Socket.io gateway: matchmaking, text relay, WebRTC signalling (port 4001)
+  worker/     BullMQ jobs: session logs, moderation, retention (metrics on 4002)
+packages/     config, env, logger, metrics, shared (types + schemas), ui, db (Prisma), redis,
+              matchmaking (Lua), moderation, storage, sfu (Janus, in progress)
+e2e/          Playwright suite
+infra/        Docker Compose (local infra, `full` and `observability` profiles), coturn, Janus,
+              Prometheus, Grafana
+tools/bots/   Correctness bots, load generator, Redis inspector
+docs/         Developer guide, LAN testing
 ```

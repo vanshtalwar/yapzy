@@ -37,3 +37,11 @@ playwright/.cache/
 **/src/generated/
 # Generated from node_modules by apps/web/scripts/prepare-nsfw-model.mjs
 apps/web/public/models/
+
+# developer-only docs (plan, agent context, production checklist, MCP config); the root
+# CLAUDE.md / CONTEXT.md / MASTER_IMPLEMENTATION_PROMPT.md are local symlinks into it for agents
+/Developer Files/
+/CLAUDE.md
+/CONTEXT.md
+/MASTER_IMPLEMENTATION_PROMPT.md
+/.mcp.json
