@@ -35,6 +35,14 @@ describe.each([
     await objects.copy({ bucket: env.S3_BUCKET_FRAMES, key }, copy);
     expect(await objects.get(copy.bucket, copy.key)).toEqual(body);
 
+    const url = await objects.presignGet(copy.bucket, copy.key, 300);
+    if (url.startsWith('http')) {
+      // A real presigned URL serves the object without credentials, for 5 minutes.
+      const response = await fetch(url);
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
+      expect(new URL(url).searchParams.get('X-Amz-Expires')).toBe('300');
+    }
+
     await objects.delete(env.S3_BUCKET_FRAMES, key);
     await objects.delete(copy.bucket, copy.key);
     expect(await objects.get(env.S3_BUCKET_FRAMES, key)).toBeNull();

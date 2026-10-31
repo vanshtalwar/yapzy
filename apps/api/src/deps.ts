@@ -23,6 +23,8 @@ export interface AppDeps {
   objects: ObjectStore;
   /** Background jobs for the worker (BullMQ). */
   jobs: ApiJobs;
+  /** Tests only: `gw:control` channel for `ban_applied` (pub/sub ignores the DB index). */
+  controlChannel?: string;
   clock?: Clock;
   logger?: Logger;
 }

@@ -51,6 +51,8 @@ export const s3Env = baseEnv.extend({
   S3_SECRET_KEY: z.string().min(8),
   S3_BUCKET_EVIDENCE: z.string().min(3).default('evidence'),
   S3_BUCKET_FRAMES: z.string().min(3).default('frames'),
+  /** Host used in presigned URLs given to browsers (admin evidence); defaults to S3_ENDPOINT. */
+  S3_PUBLIC_ENDPOINT: z.url().optional(),
 });
 export type S3Env = z.output<typeof s3Env>;
 
@@ -119,6 +121,16 @@ export const apiEnv = baseEnv.extend({
   TURN_CREDENTIAL_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
   STUN_URLS: commaList.pipe(z.array(z.string().regex(/^stuns?:/, 'must start with stun:')).min(1)),
   ...s3Env.shape,
+  STATS_COUNTER_SHARDS: z.coerce.number().int().min(1).max(1_024).default(16),
+  // --- Admin (Part 9) ---
+  /** AES-256-GCM key (64 hex chars) encrypting admin TOTP secrets at rest. */
+  ADMIN_TOTP_ENC_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/, 'must be 64 hex characters (32 bytes)'),
+  ADMIN_SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(7 * 24 * 3_600)
+    .default(28_800),
 });
 
 export type ApiEnv = z.output<typeof apiEnv>;
@@ -243,5 +255,13 @@ export const webEnv = baseEnv.extend({
   /** Relay-only ICE for video (verify TURN, or hide IPs from peers at a bandwidth cost). */
   NEXT_PUBLIC_FORCE_TURN_RELAY: z.stringbool().default(false),
 });
+
+/** apps/admin (Next.js): its API and the origin of presigned evidence URLs (CSP img-src). */
+export const adminWebEnv = baseEnv.extend({
+  NEXT_PUBLIC_API_URL: z.url().default('http://localhost:4000'),
+  S3_PUBLIC_ENDPOINT: z.url().optional(),
+  S3_ENDPOINT: z.url().default('http://localhost:9000'),
+});
+export type AdminWebEnv = z.output<typeof adminWebEnv>;
 
 export type WebEnv = z.output<typeof webEnv>;

@@ -18,6 +18,7 @@ const objects = createObjectStore({
   region: config.S3_REGION,
   accessKeyId: config.S3_ACCESS_KEY,
   secretAccessKey: config.S3_SECRET_KEY,
+  ...(config.S3_PUBLIC_ENDPOINT === undefined ? {} : { publicEndpoint: config.S3_PUBLIC_ENDPOINT }),
 });
 const jobs = createBullJobs(config.REDIS_URL);
 

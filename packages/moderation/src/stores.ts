@@ -1,4 +1,4 @@
-import { type PrismaClient } from '@app/db';
+import { type Prisma, type PrismaClient } from '@app/db';
 import {
   getJson,
   type Redis,
@@ -41,10 +41,17 @@ export function createTrustStore(deps: { prisma: PrismaClient; redis: Redis }) {
       return score;
     },
 
-    /** Atomic clamped update in Postgres, then the cache. null if the visitor is gone. */
-    async adjust(visitorId: string, delta: number): Promise<number | null> {
-      if (delta === 0) return this.get(visitorId);
-      const rows = await prisma.$queryRaw<{ trust_score: number }[]>`
+    /**
+     * Atomic clamped update in Postgres, then the cache. null if the visitor is gone. Inside a
+     * transaction (`tx`) the cache is NOT written: call `cache()` after the commit.
+     */
+    async adjust(
+      visitorId: string,
+      delta: number,
+      tx?: Prisma.TransactionClient,
+    ): Promise<number | null> {
+      if (delta === 0 && tx === undefined) return this.get(visitorId);
+      const rows = await (tx ?? prisma).$queryRaw<{ trust_score: number }[]>`
         UPDATE visitors
         SET trust_score = LEAST(100, GREATEST(0, trust_score + ${Math.round(delta)})),
             updated_at = now()
@@ -52,7 +59,7 @@ export function createTrustStore(deps: { prisma: PrismaClient; redis: Redis }) {
         RETURNING trust_score`;
       const score = rows[0]?.trust_score;
       if (score === undefined) return null;
-      await cache(visitorId, clampTrust(score));
+      if (tx === undefined) await cache(visitorId, clampTrust(score));
       return score;
     },
   };

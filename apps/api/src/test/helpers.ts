@@ -36,6 +36,8 @@ export const testConfig = createEnv(apiEnv, {
     STUN_URLS: 'stun:stun.test:3478',
     S3_ACCESS_KEY: 'unused-in-tests',
     S3_SECRET_KEY: 'unused-in-tests',
+    ADMIN_TOTP_ENC_KEY: '0f'.repeat(32),
+    ADMIN_SESSION_TTL_SECONDS: '3600',
   },
 });
 

@@ -23,6 +23,11 @@ export function createMemoryObjectStore() {
       objects.set(id(to.bucket, to.key), { ...source });
       return Promise.resolve();
     },
+    presignGet(bucket, key, expiresInSeconds) {
+      return Promise.resolve(
+        `memory://${bucket}/${encodeURIComponent(key)}?expires=${String(expiresInSeconds)}`,
+      );
+    },
     destroy() {
       objects.clear();
     },

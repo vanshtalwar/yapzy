@@ -7,6 +7,8 @@ export {
 } from './create-env.ts';
 export { applyEnvFileContent, findWorkspaceRoot, loadRootEnvFile } from './load-env-file.ts';
 export {
+  type AdminWebEnv,
+  adminWebEnv,
   type ApiEnv,
   apiEnv,
   type BaseEnv,

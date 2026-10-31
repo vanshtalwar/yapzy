@@ -6,12 +6,15 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface ObjectStoreConfig {
   endpoint: string;
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /** Host browsers use for presigned URLs (defaults to `endpoint`). */
+  publicEndpoint?: string;
 }
 
 /** The few S3 operations the app needs; MinIO in development, any S3-compatible store later. */
@@ -21,17 +24,23 @@ export interface ObjectStore {
   get(bucket: string, key: string): Promise<Uint8Array | null>;
   delete(bucket: string, key: string): Promise<void>;
   copy(from: { bucket: string; key: string }, to: { bucket: string; key: string }): Promise<void>;
+  /** Time-limited GET URL for a browser (admin evidence viewer). */
+  presignGet(bucket: string, key: string, expiresInSeconds: number): Promise<string>;
   destroy(): void;
 }
 
 export function createObjectStore(config: ObjectStoreConfig): ObjectStore {
-  const client = new S3Client({
-    endpoint: config.endpoint,
+  const options = (endpoint: string) => ({
+    endpoint,
     region: config.region,
     credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
     // MinIO (and most self-hosted S3) serve buckets as paths, not subdomains.
     forcePathStyle: true,
   });
+  const client = new S3Client(options(config.endpoint));
+  // Signatures cover the host, so URLs for browsers are signed for the public endpoint.
+  const signer =
+    config.publicEndpoint === undefined ? client : new S3Client(options(config.publicEndpoint));
 
   return {
     async put(bucket, key, body, contentType) {
@@ -64,8 +73,15 @@ export function createObjectStore(config: ObjectStoreConfig): ObjectStore {
       );
     },
 
+    presignGet(bucket, key, expiresInSeconds) {
+      return getSignedUrl(signer, new GetObjectCommand({ Bucket: bucket, Key: key }), {
+        expiresIn: expiresInSeconds,
+      });
+    },
+
     destroy() {
       client.destroy();
+      if (signer !== client) signer.destroy();
     },
   };
 }

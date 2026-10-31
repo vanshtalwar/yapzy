@@ -16,7 +16,8 @@
     "studio": "prisma studio",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "admin:create": "tsx prisma/create-admin.ts"
   },
   "dependencies": {
     "@app/env": "workspace:*",

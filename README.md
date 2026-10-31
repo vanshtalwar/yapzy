@@ -32,7 +32,7 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 
 | Command                        | What it does                                                        |
 | ------------------------------ | ------------------------------------------------------------------- |
-| `pnpm dev`                     | Run all apps in watch mode (web, API, one gateway node, worker)     |
+| `pnpm dev`                     | Run all apps in watch mode (web, admin, API, one gateway, worker)   |
 | `pnpm build`                   | Build all apps                                                      |
 | `pnpm lint`                    | ESLint (type-aware) in every package                                |
 | `pnpm typecheck`               | `tsc` in every package                                              |
@@ -106,6 +106,29 @@ video (a drawer on phones).
 Overrides for `pnpm dev` go in `.env`: Turborepo runs tasks in strict env mode, so variables
 set on the command line (`FOO=1 pnpm dev`) do not reach the apps. To override one app only, run
 it directly, e.g. `RECENT_PAIR_TTL_MS=0 pnpm --filter @app/gateway dev`.
+
+## Admin dashboard (`apps/admin`, port 3001)
+
+```bash
+pnpm db:seed                 # dev admin from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD (.env)
+pnpm dev                     # also starts the admin app on http://localhost:3001
+```
+
+Sign in with the seeded admin. The dashboard shows live stats (online, active chats, queues,
+matches per minute, open reports) refreshing every 5 s. **Reports** is the review queue (filter
+chips, priority badges; `j`/`k` to move, `Enter` to open, `d` dismiss, `s` shadow-ban — both
+ask for confirmation). A report page shows the transcript, the evidence frames **blurred until
+you click them**, both visitors' history and the decision panel (shadow or hard ban with
+duration presets, trust adjustment, notes). Bans, moderation events, visitor profiles, the
+audit log and admin accounts have their own pages; ⌘K / Ctrl+K jumps to a page, a visitor id
+or a report id. Turn on two-factor authentication under **Settings**.
+
+Create admins in the UI (**Admin users**, ADMIN only) or from the command line — the only
+way to bootstrap the first admin in production, where the seed refuses to run:
+
+```bash
+ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='at least 12 chars' ADMIN_ROLE=ADMIN pnpm admin:create
+```
 
 ## REST API (`apps/api`, port 4000)
 
@@ -188,7 +211,7 @@ To compare queue bucketing, start the gateways with `MM_BUCKETS=1` and then `MM_
 ## Layout
 
 ```
-apps/        web (Next.js), api (Fastify REST), gateway (Socket.io), worker (BullMQ); admin in Part 9
+apps/        web (Next.js), admin (Next.js), api (Fastify REST), gateway (Socket.io), worker (BullMQ)
 packages/    config, env, logger, shared, ui (React kit), db (Prisma), redis, matchmaking (Lua),
              moderation (text filter, bans, trust, sampling), storage (S3/MinIO)
 infra/docker docker-compose.yml, coturn, Postgres init, MinIO init

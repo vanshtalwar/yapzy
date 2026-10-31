@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (12 parts, executed one at a time) |
 | Planned group calls | Up to **4 people per video call** via **Janus VideoRoom** (Parts 11–12); 2-person calls stay P2P. Parts 1–10 must stay participant-list based and keep the `CallManager` transport interface |
-| Current status | Parts 1–8 done (text + video chat, trust & safety) — **next: Part 9** (Admin & moderation dashboard) |
+| Current status | Parts 1–9 done (chat, video, trust & safety, admin dashboard) — **next: Part 10** (Hardening, observability, testing & DX) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -27,7 +27,7 @@
 | 6 | Web app & text chat | ✅ Done | 2026-10-31 | Next.js 16.4 + React 19.3 + Tailwind 4; `@app/ui` from 21st.dev; Zustand store + controller. Headless-Chrome smoke (2 browsers): gate → match → chat both ways (HTML shown as text) → typing → Next (auto-requeue rematch) → network drop + resume with missed message → Stop → mobile 390 px, no overflow |
 | 7 | Video chat (WebRTC) | ✅ Done | 2026-10-31 | Headless Chrome, fake camera + synthesized mic: connected ≈ 0.2–0.3 s after both start; rapid Next ×20 → 21 PCs created, 1 open per side, camera acquired once, 2 live local tracks; relay-only → relay↔relay through coturn; gateway restart mid-call → 0 video stalls, same PC kept, text resumed; camera denied → no Start; 390 px layout + chat drawer OK |
 | 8 | Trust & safety | ✅ Done | 2026-10-31 | Headless Chrome: link blocked (not relayed), profanity masked; text report → Postgres; video report → 2–3 evidence frames in MinIO; DEV_FORCE_FLAG → first sampled frame (≈ 5 s with fast intervals) flagged → auto report + trust 30 + live SHADOW ban; afterwards matched only with a low-trust (shadow-pool) visitor, never the waiting normal one |
-| 9 | Admin & moderation dashboard | ⬜ Not started | | |
+| 9 | Admin & moderation dashboard | ✅ Done | 2026-10-31 | Headless Chrome: seeded admin signs in → dashboard → queue → opens a Part 8 video report → 2 frames blurred, reveal loads the presigned MinIO image under the strict CSP → hard ban 24 h → the banned visitor sees the blocked screen 78 ms later, the stranger sees them leave → audit log shows `report.action` |
 | 10 | Hardening, observability, testing & DX | ⬜ Not started | | |
 | 11 | Janus SFU & call topology switch | ⬜ Not started | | After 1–10 |
 | 12 | Group video: add a 3rd and 4th random person | ⬜ Not started | | After 11 |
@@ -88,6 +88,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/app.ts       buildApp(deps) — plugins, rate limit, auth, routes (DI: config, prisma, redis, turnstile, clock, logger)
 │     ├─ src/plugins/     auth.ts (Bearer JWT → request.visitor), error-handler.ts (envelope, 404)
 │     ├─ src/routes/      health.ts, config.ts, session.ts, turn.ts, stats.ts, reports.ts (multipart), frames.ts
+│     ├─ src/admin/       /v1/admin/*: index.ts (cookie plugin, guard, noindex), guard.ts (session → admin → CSRF →
+│     │                   RBAC), rbac.ts, sessions.ts (admsess:<id>), login-guard.ts, crypto.ts (AES-256-GCM),
+│     │                   audit.ts, views.ts, routes/ (auth, reports, moderation, system)
 │     ├─ src/services/    turnstile.ts, turn.ts (coturn creds), online.ts, jobs.ts (BullMQ producers),
 │     │                   session-state.ts (read gateway session keys, frame-accept Lua), images.ts (sharp)
 │     ├─ src/test/        helpers.ts (test config, fakes, Redis DB 14); src/**/*.test.ts
@@ -110,6 +113,12 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ worker/             BullMQ consumers: src/worker.ts (createWorkers: session-log, classify-frame, moderation-event,
 │  │                      report-filed + 10 s budget timer), src/jobs/session-log.ts, src/moderation/ (classify-frame,
 │  │                      moderation-event, report-filed, session-trust, budget, deps), src/server.ts
+│  ├─ admin/              Next.js 16 moderator dashboard (port 3001): proxy.ts (per-request nonce CSP), next.config.mjs
+│  │                      (adminWebEnv, noindex + security headers), app/login (password + TOTP step), app/(console)/
+│  │                      (layout: AppShell + ⌘K palette + auth guard; page = dashboard; reports, reports/[id], bans,
+│  │                      visitors/[id], events, audit, admins, settings), components/ (badges, ban-fields,
+│  │                      evidence-image, visitor-summary, paged-list), lib/ (api client with CSRF header, session
+│  │                      context, useApi, labels, triage keys)
 │  └─ web/                Next.js 16 App Router (port 3000)
 │     ├─ next.config.mjs  env via @app/env `webEnv` (validated at start), security headers + CSP, transpilePackages
 │     ├─ scripts/         prepare-nsfw-model.mjs (NSFWJS MobileNetV2 → public/models/nsfw/, gitignored; run by dev/build)
@@ -141,7 +150,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  │                      server-only subpaths `@app/shared/crypto` (hmacHash), `@app/shared/jobs`
 │  │                      (QUEUE_NAMES, BULLMQ_PREFIX, LEAVE_REASONS, sessionLogJobSchema),
 │  │                      `@app/shared/visitor-token` (createVisitorTokenService: issue/verify visitor JWTs)
-│  ├─ db/                 prisma.config.ts, prisma/schema.prisma, prisma/migrations/, prisma/seed.ts,
+│  ├─ db/                 prisma.config.ts, prisma/schema.prisma, prisma/migrations/, prisma/seed.ts, prisma/create-admin.ts,
 │  │                      src/client.ts (createPrismaClient), src/prisma.ts (singleton), src/ban.ts, src/generated/ (gitignored)
 │  ├─ matchmaking/        lua.ts (ENQUEUE_OR_MATCH, CANCEL_TICKET, DROP_TICKETS_IF_UNCHANGED), matchmaker.ts
 │  │                      (createMatchmaker: enqueueOrMatch, promoteToAny, cancelTicket, getTicket, sweepStale), ticket.ts
@@ -153,7 +162,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  ├─ storage/            `@app/storage`: createObjectStore (S3 client, MinIO in dev, path-style), createMemoryObjectStore
 │  ├─ ui/                 `@app/ui` React kit (TS source, no build): src/styles.css (theme tokens, `@theme inline`),
 │  │                      src/lib/cn.ts, src/components/ (button, card, badge, input, label, checkbox, switch, dialog,
-│  │                      select, sheet, toaster, spinner, status-dot, tag-input, consent-gate, chat/*, video/*:
+│  │                      select, sheet, radio-group, toaster, spinner, status-dot, tag-input, consent-gate, chat/*,
+│  │                      dashboard/* (app-shell, command-palette, confirm-dialog, filter-chips, line-chart (SVG),
+│  │                      otp-input, stat-card, table), video/*:
 │  │                      video-tile, video-grid, call-controls, quality-badge, level-meter, device-fields),
 │  │                      components.json
 │  └─ redis/              src/client.ts (createRedis), keys.ts (ALL key builders), json.ts (Zod JSON helpers),
@@ -259,6 +270,25 @@ Conventions established in Part 6:
 - **Client NSFW** (web, video only): NSFWJS MobileNetV2 (self-hosted `/models/nsfw/`, tfjs loaded lazily on the first call), stranger every 2 s, own video every 5 s, inference in `requestIdleCallback`. Stranger flagged (≥ 0.85; "sexy" × 0.6) → video blurred with Next / Report and `moderation:signal` (≤ 1 per 5 s); own video flagged → warning toast (≤ 1 per 30 s).
 - **Privacy / retention:** chat text lives only in the Redis ring buffer (≤ 100 messages, 24 h live / 1 h after the end) and in reports (`Report.transcript`). The stranger's frames stay in the reporter's browser memory (last ~9 s, 3 frames) and are uploaded only with a report. Moderation frames: frames bucket, deleted after classification when clean, 1-day lifecycle otherwise; flagged ones become evidence (90 days; hash matches kept for the legal process). Client NSFW sends scores only, never images. ModerationEvent rows hold labels and scores, no content. `risk:<id>` (first seen, flags) lives 8 days in Redis; trust in Postgres + 1 h cache.
 
+### Admin & moderation design (Part 9)
+- **Auth:** `POST /v1/admin/auth/login` → argon2id verify (an unknown email still verifies against a dummy hash, same error `INVALID_CREDENTIALS`), disabled admins refused; per-IP route limit 5/min (IP HMAC) + per-email 5/min (`rl:admin-login:<emailHmac>`) + lockout: 10 failures within 15 min lock the email for 15 min (`423 ACCOUNT_LOCKED`). With TOTP on: no code → `401 TOTP_REQUIRED` (the UI shows the code step), wrong → `TOTP_INVALID`; codes are single-use (last time step in `rl:admin-totp-step:<adminId>`, otplib `afterTimeStep`), ±30 s tolerance. Session: opaque 256-bit id in cookie `rc_admin` (httpOnly, SameSite=Lax, Path=/v1/admin, Secure in production, `ADMIN_SESSION_TTL_SECONDS`), stored as `admsess:<id>` `{ adminId, csrf, createdAt }`. `GET /auth/me` returns the CSRF token; every POST needs `x-admin-csrf` equal to it (timing-safe) → else `403 CSRF_FAILED`. The guard re-reads the admin on every request (disabling takes effect at once).
+- **TOTP enrolment:** `/auth/totp/setup` stores a new secret encrypted (AES-256-GCM, `ADMIN_TOTP_ENC_KEY`, format `v1:<iv>:<tag>:<ciphertext>`) and returns the otpauth URL + a QR PNG data URL generated server-side (`qrcode`, no third-party QR service); `/auth/totp/verify` turns it on. ADMINs can reset another admin's TOTP.
+- **RBAC matrix:**
+
+  | Permission | ADMIN | MODERATOR |
+  |---|---|---|
+  | stats, reports (list/detail/assign/dismiss/note/action), bans list, events, visitors | ✅ | ✅ |
+  | shadow bans (any duration) / hard bans ≤ 30 days | ✅ | ✅ |
+  | hard bans > 30 days or permanent | ✅ | ❌ (403) |
+  | revoke bans | ✅ | ❌ |
+  | trust adjustment (±50 per action) | ✅ | ✅ |
+  | audit log, admin users (create, disable, reset TOTP) | ✅ | ❌ |
+- **Audit:** every mutation writes `AuditLog` inside the same Prisma transaction as the change (`auth.login`, `auth.logout`, `totp.setup`, `totp.enable`, `report.assign|note|dismiss|action`, `ban.create`, `ban.revoke`, `admin.create|disable|reset_totp`); opening a report with evidence logs `report.view_evidence`. Bans from report actions: `BanService.create(tx)` inside the transaction, `activate()` (cache + `ban_applied`) after the commit; trust changes likewise (`trust.adjust(…, tx)`, cache after commit).
+- **Evidence:** presigned GET URLs (5 min, `@aws-sdk/s3-request-presigner`, signed for `S3_PUBLIC_ENDPOINT` ?? `S3_ENDPOINT`) only for the evidence rows of the requested report; the UI blurs every frame until clicked (moderator wellbeing), `referrerPolicy=no-referrer`.
+- **Live stats:** online = presence sum; waiting = SCAN `visitor:*:ticket` refs grouped by pool:mode:lang; active chats = SCAN `visitor:*:session` / 2; matches per minute = last 60 minutes of `stats:matches:<minute>:<shard>` (all `STATS_COUNTER_SHARDS`); open reports by priority (≥ 80 high, ≥ 50 medium). SCANs are fine for a dashboard but not at scale (Part 10 metrics).
+- **Admin UI:** Next.js 16, all pages dynamic; `proxy.ts` sets a per-request nonce CSP: `script-src 'self' 'nonce-…' 'strict-dynamic'` (+ `'unsafe-eval'` in dev only), `style-src 'self' 'unsafe-inline'` (Radix/toast inline styles), `img-src 'self' data: blob: <evidence origin>`, `connect-src 'self' <API>`, `frame-ancestors 'none'`, `object-src 'none'`; plus `X-Robots-Tag: noindex, nofollow, noarchive`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, COOP, all device permissions off; `robots` metadata noindex. No third-party scripts, fonts or images. The API answers admin routes with `x-robots-tag` and `cache-control: no-store`; CORS allows credentials only for `CORS_ORIGINS`.
+- **Creating admins:** dev: `pnpm db:seed` (SEED_ADMIN_*); anywhere incl. production: `ADMIN_EMAIL=… ADMIN_PASSWORD=… ADMIN_ROLE=ADMIN pnpm admin:create` (upsert; resetting re-enables the account and clears its TOTP; the password comes from the environment only); later admins from the **Admin users** page.
+
 ### Matchmaking & session design (Part 5 + follow-up)
 - **Buckets (D-052, D-056):** a queue family `(region, pool, mode, lang)` has `MM_BUCKETS_BY_QUEUE["<mode>:<lang>"] ?? MM_BUCKETS` buckets, each its own hash tag `{mm:<region>:<pool>:<mode>:<lang>:<bucket>}`. Join: `chooseBucket` samples up to `BUCKET_CHOICES` = 4 random buckets in one pipelined call (LLEN of `q:any` + the ticket's interest queues) and takes the one with the most waiters (random among ties). Interest matching and recent-pair avoidance are per bucket (a rematch across buckets is possible but negligible in busy queues; small queues use 1 bucket).
 - **Hopping:** a waiting ticket's node timer fires every `MM_BUCKET_HOP_MS` (jittered 75–125 %, D-059): `hop` = cancel-if-waiting in the old bucket (a concurrent match wins) → choose another bucket → enqueue with **priority** (LPUSH, head of queue), same ticketId/createdAt/phase; the visitor ref moves to the new bucket only if it still names the ticket (else the new ticket is cancelled). A ticket id may be re-enqueued into a bucket where it is `cancelled` (hopping back).
@@ -302,6 +332,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | Call controls bar + buttons | `packages/ui/src/components/video/call-controls.tsx` | Design inspired by "Video Call Controls Bar" by cnippet-dev — https://21st.dev/r/cnippet-dev/v-toggle-9 (id 22214) and the "Toolbar" video-call demo by cnippet-dev; only the preview images were used (daily code quota exhausted), written in-house | own code |
 | Video tile, video grid, quality badge, level meter, device fields, sheet | `packages/ui/src/components/video/*.tsx`, `sheet.tsx` | Written in-house (21st search found no fitting component; quota exhausted) | own code |
 | Radio group; report dialog, blur overlay, blocked-message notice (app) | `packages/ui/src/components/radio-group.tsx`, `apps/web/components/report/`, video screen | shadcn-style on `radix-ui`, in-house (21st daily quota exhausted on 2026-10-31) | own code |
+| App shell, command palette, confirm dialog, filter chips, SVG line chart, OTP input, stat card, table primitives | `packages/ui/src/components/dashboard/*.tsx` | In-house, shadcn/ui conventions (21st daily quota exhausted) | own code |
 | NSFWJS MobileNetV2 model | `apps/web/public/models/nsfw/` (generated from `nsfwjs`) | infinitered/nsfwjs | MIT |
 
 ### MCP servers for agents
@@ -314,7 +345,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | Service | Port | Start command | Status |
 |---|---|---|---|
 | web | 3000 | `pnpm --filter @app/web dev` (`next dev`, Turbopack) · `build` · `start`; also started by root `pnpm dev` | ✅ two-browser text and video chat verified (headless Chrome, fake devices) |
-| admin | 3001 | TBD | not built |
+| admin | 3001 | `pnpm --filter @app/admin dev` · `build` · `start`; also started by root `pnpm dev` | ✅ moderation flow verified in headless Chrome |
 | api | 4000 (`API_HOST`, default 0.0.0.0) | `pnpm --filter @app/api dev` (tsx watch) · `build` (tsup) · `start` (`node dist/server.js`) | ✅ running in dev; graceful shutdown verified |
 | gateway | 4001 (+4011 via `dev:multi`), `GATEWAY_HOST` default 0.0.0.0 | `pnpm --filter @app/gateway dev` · `dev:multi` · `build` (tsup) · `start` | ✅ two nodes verified; graceful drain verified |
 | worker | — (no HTTP) | `pnpm --filter @app/worker dev` · `build` · `start` | ✅ processed 4 600+ session-log jobs in the bot runs; graceful shutdown waits for in-flight jobs |
@@ -381,7 +412,11 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | WORKER_CONCURRENCY | worker (`workerEnv`) | Parallel jobs per worker process (1–100; new, not in master design) | 10 |
 | RATE_LIMIT_DISABLED | api, gateway (token bucket + abuse guard) | Disables rate limits **only if NODE_ENV=development** (ignored + warning otherwise); parsed with `z.stringbool()` | false |
 | SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD | `db:seed` (`seedEnv`: email, password ≥ 12 chars) | Dev admin login (password: see your `.env`) | admin@randomchat.local, placeholder |
-| ADMIN_SESSION_TTL_SECONDS | (Part 9) | Admin session lifetime | 28800 |
+| ADMIN_SESSION_TTL_SECONDS | api (`apiEnv`, 300 s – 7 d) | Admin session lifetime (cookie + `admsess:<id>`) | 28800 |
+| ADMIN_TOTP_ENC_KEY | api (`apiEnv`, 64 hex chars) | AES-256-GCM key for admin TOTP secrets at rest; rotating it invalidates enrolled TOTPs (new) | `.env.example`: dev-only zeros; `.env`: random |
+| S3_PUBLIC_ENDPOINT | api (presigned URLs), admin (CSP img-src) | Optional host for browser-facing presigned URLs (new) | unset → S3_ENDPOINT |
+| STATS_COUNTER_SHARDS (api) | api (`apiEnv`) | Shards summed for the admin matches-per-minute chart | 16 |
+| ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_ROLE | `pnpm admin:create` only (not in .env) | Admin bootstrap CLI input | — |
 | TRUST_SHADOW_BELOW, TRUST_HIGH_RISK_BELOW, TRUST_TRUSTED_FROM | gateway, worker (`trustEnv`) | Trust thresholds: shadow pool / `high` sampling tier / `trusted` tier (new, not in master design) | 10, 40, 70 |
 | MOD_FRAME_INTERVALS_MS | gateway | JSON per risk tier (`trusted: 0` = spot checks only); each ≥ 5000 except trusted | {"high": 20000, "new": 30000, "normal": 120000, "trusted": 0} |
 | MOD_NORMAL_SAMPLE_RATE, MOD_TRUSTED_SPOTCHECK_RATE | gateway | Share of normal participants sampled / of trusted ones spot-checked | 0.3, 0.1 |
@@ -418,6 +453,8 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | `pnpm --filter @app/api test` | API integration tests (needs `pnpm infra:up`; turbo `pnpm test` also migrates `app_test` first) |
 | `pnpm --filter @app/web dev` / `build` / `start` / `test` | Web app (Next dev on 3000 / production build / serve it / Vitest store + controller tests). `typecheck` runs `next typegen` first (route types for `PageProps`) |
 | `RECENT_PAIR_TTL_MS=0 pnpm --filter @app/gateway dev` | Gateway with the no-rematch window off, for skip tests with only two browsers. Real env vars reach an app only when it is run directly: `pnpm dev` (turbo, strict env mode) passes only `.env` values |
+| `pnpm --filter @app/admin dev` / `build` / `start` / `test` | Admin dashboard on 3001 |
+| `ADMIN_EMAIL=… ADMIN_PASSWORD=… ADMIN_ROLE=ADMIN pnpm admin:create` | Create or reset an admin account (works in production; password from env only) |
 | `pnpm --filter @app/<pkg> test` | Run one package's tests |
 
 ## 10. Data model (implemented)
@@ -494,6 +531,23 @@ Part 8 keys: `trust:<visitorId>` (STRING score, 1 h; API at session start, worke
 | POST | `/v1/reports` | Bearer | 10/h per visitor | Multipart: `sessionId`, `reportedParticipantId`, `reason` (ReportReason), `details?` ≤ 500 + ≤ 3 `frames` (JPEG ≤ 300 KB). 201 `{ reportId }`; 403 not a participant / self; 400 invalid fields or image; 413 too large / too many files |
 | POST | `/v1/moderation/frames?sessionId=` | Bearer | 30/min per visitor | Body `image/jpeg` ≤ 60 KB, ≤ 320 px (own video). 202 `{ accepted: true }`; 403 not a sampled participant of an active video session; 429 faster than 80 % of the assigned interval or `maxFrames` reached; 400 not a JPEG / too big; 415 other content types |
 | GET | `/v1/stats/online` | — | — | `{ online }` = Σ `presence:node:<id>` over `presence:nodes` (expired nodes count 0); cached 2 s in memory, `cache-control: public, max-age=2` |
+
+**Admin API** (`/v1/admin`, cookie session + `x-admin-csrf` on POST; contract in `@app/shared` `admin.ts`):
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST | `/auth/login` | — | `{ email, password, totp? }` → `AdminMe` (+ cookie); 401 `INVALID_CREDENTIALS` / `TOTP_REQUIRED` / `TOTP_INVALID`, 423 `ACCOUNT_LOCKED`, 429 |
+| POST | `/auth/logout` · GET `/auth/me` | signed in | me = `{ id, email, role, totpEnabled, csrfToken }` |
+| POST | `/auth/totp/setup` · `/auth/totp/verify` | signed in | setup → `{ otpauthUrl, qrDataUrl }`; verify `{ code }` |
+| GET | `/reports?status&reason&minPriority&from&to&cursor&limit` | reports.read | queue order priority ↓, created ↑; cursor pagination |
+| GET | `/reports/:id` | reports.read | report + transcript + evidence (presigned 5 min) + reporter/reported profiles |
+| POST | `/reports/:id/assign` · `/dismiss` · `/note` · `/action` | reports.review | action `{ ban?: { type, durationHours \| null }, trustDelta? (±50), note? }` |
+| GET | `/bans?visitorId&active&cursor` · POST `/bans` | bans.read / bans.create | create `{ visitorId, type, durationHours, reason }` (RBAC limits) |
+| POST | `/bans/:id/revoke` | bans.revoke (ADMIN) | |
+| GET | `/moderation-events?source&visitorId&cursor` · `/visitors/:id` | events.read / visitors.read | metadata only |
+| GET | `/stats` | stats.read | online, activeSessions, waiting, matchesPerMinute (60), openReports |
+| GET | `/audit?action&cursor` | audit.read (ADMIN) | |
+| GET/POST | `/admins` · POST `/admins/:id/disable` · `/admins/:id/reset-totp` | admins.manage (ADMIN) | can't disable yourself |
 
 Request/response schemas live in `@app/shared` (`rest.ts`: `sessionRequestSchema`, `sessionResponseSchema`, `publicConfigSchema`, `turnCredentialsSchema`, `onlineStatsSchema`, `errorEnvelopeSchema`), shared by the API routes, the web client (validates every response) and the bots.
 
@@ -628,6 +682,13 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-090 | 2026-10-31 | New `@app/storage` package (S3 client, path-style for MinIO) with an in-memory store for tests | API and worker share one small object-store interface; tests don't need MinIO (except the storage package's own integration test) |
 | D-091 | 2026-10-31 | `nsfwjs` pinned to 4.3.0 (4.4.0 declares `engines.node: "22.13.0"`, rejected by engineStrict on Node 24); its MobileNetV2 model is converted from the package into `public/models/nsfw/` by `scripts/prepare-nsfw-model.mjs` (dev/build), gitignored; tfjs is imported lazily on the first video call | Self-hosted model (CSP `connect-src 'self'`), no binary blobs in git, no CDN, chat pages don't pay for the ML bundle |
 | D-092 | 2026-10-31 | `BanService` invalidates the identifiers' cache keys and re-reads from Postgres (most severe active ban wins) instead of writing the new ban blindly; device bans are resolved to the current visitor for `ban_applied` | A new SHADOW ban must not overwrite a cached HARD ban; gateways only know visitor ids and IP hashes |
+| D-093 | 2026-10-31 | Admin sessions: opaque id cookie (`rc_admin`, httpOnly, SameSite=Lax, path `/v1/admin`) + Redis record holding a per-session CSRF token returned by `/auth/me` and required in `x-admin-csrf` on every POST; the admin UI talks to the API cross-origin with `credentials: 'include'` | SameSite=Lax blocks cross-site POSTs, the header defeats same-site/forged requests; no CSRF cookie to steal; admin requests keep the real client IP for rate limits (no proxying through Next) |
+| D-094 | 2026-10-31 | Login hardening: dummy argon2 verify for unknown emails, one generic error, per-IP + per-email limits, 15-min lockout after 10 failures, single-use TOTP steps | Constant-ish timing, no user enumeration, brute-force and replay resistance |
+| D-095 | 2026-10-31 | `BanService` split into `create(tx)` + `activate()`; `apply(request, { audit })` wraps both | "Audit in the same transaction" for bans while cache refresh and `ban_applied` only happen after the commit |
+| D-096 | 2026-10-31 | Admin CSP via `proxy.ts` nonces (`'strict-dynamic'`), all admin pages dynamic; styles allow `'unsafe-inline'` | Strict script policy for the most sensitive UI; inline style attributes (Radix positioning, toasts) can't carry nonces and are far lower risk |
+| D-097 | 2026-10-31 | Dashboard stats use SCANs over visitor refs and the sharded match counters | No new hot-path counters needed for a dev dashboard; replaced by Prometheus metrics in Part 10 |
+| D-098 | 2026-10-31 | `pnpm admin:create` (env-only password, upsert that re-enables and clears TOTP) is the bootstrap path for the first admin anywhere | The seed refuses production; passwords must not appear in shell history or process lists |
+| D-099 | 2026-10-31 | Dashboard components (table, stat card, SVG line chart, OTP input, filter chips, confirm dialog, command palette, app shell) live in `@app/ui`, in-house | Reusable by any app; no chart library or third-party assets under the strict admin CSP; 21st daily code quota exhausted on 2026-10-31 |
 
 ## 15. Known issues / TODOs / production gaps
 
@@ -669,6 +730,8 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - **Trust & safety:** "report received" lowers trust immediately even for false reports (mitigated by the distinct-reporter threshold and human review in Part 9). The `new` tier uses first-seen < 24 h only (the "first 10 sessions" rule needs a session counter — not implemented).
 - **Trust & safety:** a report does not raise the sampling of a still-running session (1:1 chats end on report; matters for group calls, Part 12). Blocked chat messages count as violations even when the user was only sharing a harmless link.
 - **Client NSFW:** the model (2.6 MB) and tfjs (~1 MB) download on the first video call; inference uses WebGL (CPU fallback on devices without it); thresholds are untuned defaults. Headless Chrome: works with SwiftShader.
+- **Admin (Part 9):** no appeals workflow and no SSO (out of scope, TODO); bans by IP hash have no UI (visitor id only); evidence purge is still missing (see trust & safety). Dashboard stats use Redis SCAN (fine for development, replace with metrics at scale). Session cookies are not rotated on privilege change (sessions are short: `ADMIN_SESSION_TTL_SECONDS`).
+- **Admin:** a moderator's own reports queue can be large; the queue sorts the loaded page client-side (server order is priority ↓, oldest first). Disabling an admin ends their access on the next request but does not delete their Redis session keys (they expire).
 - **21st.dev licenses** of the adapted components (theme, Chat Messages, consent gate) were not returned by the MCP — verify on each component page before production (listed in §6 "UI components list").
 - Redis test DBs: worker moderation tests use DB 9 (the session-log tests use DB 10 for BullMQ in parallel).
 - The Part 6 browser smoke test (two Chrome contexts via playwright-core, network drop simulated by proxying the gateway WebSocket with `routeWebSocket`, because Chrome's offline emulation does not close open WebSockets) lived outside the repo; Part 10 adds Playwright e2e tests to the repo.
@@ -693,3 +756,4 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | 2026-10-31 | 6 | Web app & text chat: `apps/web` (Next.js 16.4, React 19.3, Tailwind 4) with landing (mode cards, language, interests, auto-requeue, live online count), age gate (consents + Turnstile → `/v1/session`, banned screen), `/chat` (state machine store + socket controller: match ack, resume with drop-time cursor + dedupe, stale-session filtering, optimistic messages with retry/blocked, typing, Next confirm/Esc×2, Stop, auto-requeue, ghost-tab pause, single-tab handling), placeholder legal pages, security headers/CSP; `packages/ui` (`@app/ui`, shadcn-style kit adapted from 21st.dev: theme, chat components, consent gate); shared REST schemas in `@app/shared`; `webEnv`; ESLint react/next presets and `tsconfig.react.json`. Tests: 9 store + 7 controller (fake socket) + 3 HTML-escaping component tests; headless-Chrome two-browser smoke passed. |
 | 2026-10-31 | 7 | Video chat (WebRTC): `lib/rtc` (LocalMedia, PeerSession with perfect negotiation, candidate queuing, restart policy, 800 kbps cap, stats/quality, summaries; MeshTransport behind a `CallTransport` interface; CallManager; TURN credential cache with refresh), controller integration (call follows the store, ack after the call exists, rtc signal routing, `rtc_failed`, throttled-skip retry, `pagehide`/`online`, `SERVER_RESTARTING` reconnect, Zod-validated server payloads), `/chat?mode=video` (pre-join check, call screen, device settings, mobile chat drawer, autoplay fallback), Video enabled on the landing page; `@app/ui` video components + sheet + stage tokens; gateway: `chat:next` reason `rtc_failed`, `rtc:summary` membership check + counters; `NEXT_PUBLIC_FORCE_TURN_RELAY` in `webEnv`; `docs/LAN_TESTING.md`; `agentRules: false`. Tests: PeerSession (16), CallManager (7), stats (3), ICE cache (2), LocalMedia (5), controller video (7) + throttle/restart/validation (4), gateway (3). |
 | 2026-10-31 | 8 | Trust & safety: `@app/moderation` (text filter with obfuscation handling, MockImageClassifier/NoopHashMatcher interfaces, TrustRules, risk tiers + frame schedules + budget multiplier, BanService, trust store, risk profiles, report priority), `@app/storage` (S3/MinIO + memory store), API `POST /v1/reports` (multipart, sharp re-encode, participant check, transcript snapshot, priority, MinIO evidence) and `POST /v1/moderation/frames` (schedule-enforcing Lua), trust/risk caching at session start, `features.reports`; worker jobs classify-frame / moderation-event / report-filed, session trust + missing-frame penalty, budget publisher; gateway text filter, `moderation:signal`, `ban_applied` (HARD/SHADOW across nodes), pool from ban + trust on handshake and every join, per-participant frame schedules in `match:found`, FRAME_SCHEDULE notices; web report dialog + buttons, evidence ring buffer, own-frame sampler, lazy NSFWJS watcher with blur overlay, blocked/masked message UX; migration `report_reporter_optional`; env `s3Env`, `trustEnv`, MOD_* + DEV_FORCE_FLAG_VISITOR_IDS. Tests: moderation 23, storage 2, API +6, worker +8, gateway +7, web +10, env +2. |
+| 2026-10-31 | 9 | Admin & moderation dashboard: API `/v1/admin/*` (cookie sessions in Redis, CSRF header, argon2 login with per-IP/per-email limits + lockout, AES-GCM-encrypted single-use TOTP with server-side QR, RBAC matrix, audited transactions, reports queue/detail with presigned evidence, actions with bans + trust, bans, events, visitors, live stats, audit log, admin users); `BanService.create/activate` + audited `apply`/`revoke`; trust adjust in transactions; storage `presignGet`; `apps/admin` (Next 16, nonce CSP via proxy.ts, noindex; login + TOTP step, dashboard with stat cards + SVG chart (5 s refresh), reports queue with filter chips/sorting/j-k-d-s triage, report detail with blurred evidence + transcript + decision panel, bans, visitor, events, audit, admins, settings/TOTP, ⌘K palette); `@app/ui` dashboard components; shared `admin.ts` contract + error codes; env `ADMIN_TOTP_ENC_KEY`, `ADMIN_SESSION_TTL_SECONDS`, `S3_PUBLIC_ENDPOINT`, `adminWebEnv`; `pnpm admin:create`. Tests: API admin 9 (auth/lockout/TOTP, CSRF, RBAC matrix, audit, presign scope, ban → ban_applied), admin triage 2, storage presign, env +1. |

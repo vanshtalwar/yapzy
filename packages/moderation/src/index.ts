@@ -1,4 +1,9 @@
-export { type BanRequest, type BanService, createBanService } from './ban-service.ts';
+export {
+  type BanRequest,
+  type BanService,
+  createBanService,
+  type CreatedBan,
+} from './ban-service.ts';
 export { type ActiveBan, type BanChecker, type BanIdentifiers, createBanChecker } from './bans.ts';
 export {
   type ClassifyContext,

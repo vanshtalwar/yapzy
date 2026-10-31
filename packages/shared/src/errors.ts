@@ -27,6 +27,12 @@ export const ErrorCode = {
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
   NOT_IMPLEMENTED: 'NOT_IMPLEMENTED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  // Admin authentication (Part 9)
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  TOTP_REQUIRED: 'TOTP_REQUIRED',
+  TOTP_INVALID: 'TOTP_INVALID',
+  ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',
+  CSRF_FAILED: 'CSRF_FAILED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

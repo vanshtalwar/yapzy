@@ -24,6 +24,22 @@ export {
   type ConsentGateProps,
   type ConsentItem,
 } from './components/consent-gate.tsx';
+export { AppShell, navItemClass } from './components/dashboard/app-shell.tsx';
+export { type Command, CommandPalette } from './components/dashboard/command-palette.tsx';
+export { ConfirmDialog } from './components/dashboard/confirm-dialog.tsx';
+export { type ChipOption, FilterChips } from './components/dashboard/filter-chips.tsx';
+export { LineChart, type LinePoint } from './components/dashboard/line-chart.tsx';
+export { OtpInput } from './components/dashboard/otp-input.tsx';
+export { StatCard } from './components/dashboard/stat-card.tsx';
+export {
+  SortButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from './components/dashboard/table.tsx';
 export {
   Dialog,
   DialogClose,

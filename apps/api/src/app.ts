@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { createLogger } from '@app/logger';
-import { createBanChecker, createRiskProfiles, createTrustStore } from '@app/moderation';
+import {
+  createBanChecker,
+  createBanService,
+  createRiskProfiles,
+  createTrustStore,
+} from '@app/moderation';
 import { API_RATE_LIMIT_PREFIX } from '@app/redis';
-import { ErrorCode } from '@app/shared';
+import { ADMIN_CSRF_HEADER, ErrorCode } from '@app/shared';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -16,6 +21,7 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 
+import { adminRoutes } from './admin/index.ts';
 import { type AppDeps, systemClock } from './deps.ts';
 import { AppError } from './errors.ts';
 import { authPlugin } from './plugins/auth.ts';
@@ -72,7 +78,9 @@ export async function buildApp(deps: AppDeps) {
       callback(null, origin === undefined || allowedOrigins.has(origin));
     },
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['authorization', 'content-type'],
+    allowedHeaders: ['authorization', 'content-type', ADMIN_CSRF_HEADER],
+    // Admin sessions are cookies; credentials are only ever sent to allow-listed origins.
+    credentials: true,
     exposedHeaders: ['x-request-id', 'retry-after'],
     maxAge: 600,
   });
@@ -126,6 +134,25 @@ export async function buildApp(deps: AppDeps) {
   const sessions = createSessionState(redis);
   await app.register(reportRoutes, { config, prisma, objects, jobs, sessions, clock });
   await app.register(frameRoutes, { config, redis, objects, jobs, sessions, clock });
+
+  const banService = createBanService({
+    prisma,
+    redis,
+    logger: app.log,
+    originNodeId: 'api',
+    ...(deps.controlChannel === undefined ? {} : { controlChannel: deps.controlChannel }),
+  });
+  await app.register(adminRoutes, {
+    prefix: '/v1/admin',
+    config,
+    prisma,
+    redis,
+    objects,
+    bans: banService,
+    trust,
+    online,
+    clock,
+  });
 
   return app;
 }

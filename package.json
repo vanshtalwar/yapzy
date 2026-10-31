@@ -28,7 +28,8 @@
     "db:reset": "pnpm --filter @app/db reset",
     "db:seed": "pnpm --filter @app/db seed",
     "db:studio": "pnpm --filter @app/db studio",
-    "bots": "pnpm --filter @app/bots bots"
+    "bots": "pnpm --filter @app/bots bots",
+    "admin:create": "pnpm --filter @app/db admin:create"
   },
   "devDependencies": {
     "@app/config": "workspace:*",

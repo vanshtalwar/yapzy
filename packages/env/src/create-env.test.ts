@@ -121,7 +121,15 @@ describe('apiEnv', () => {
     STUN_URLS: 'stun:localhost:3478',
     S3_ACCESS_KEY: 'randomchat',
     S3_SECRET_KEY: 'minio-secret',
+    ADMIN_TOTP_ENC_KEY: 'ab'.repeat(32),
   };
+
+  it('requires a 32-byte hex key for admin TOTP secrets', () => {
+    expect(() => createEnv(apiEnv, { source: { ...valid, ADMIN_TOTP_ENC_KEY: 'short' } })).toThrow(
+      /ADMIN_TOTP_ENC_KEY/,
+    );
+    expect(createEnv(apiEnv, { source: valid }).ADMIN_SESSION_TTL_SECONDS).toBe(28_800);
+  });
 
   it('parses lists, booleans and defaults', () => {
     const env = createEnv(apiEnv, { source: { ...valid, RATE_LIMIT_DISABLED: 'true' } });
