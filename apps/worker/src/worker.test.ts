@@ -5,9 +5,12 @@ import { createEnv, databaseTestEnv, redisTestEnv } from '@app/env';
 import { createLogger } from '@app/logger';
 import { createTestRedis } from '@app/redis/testing';
 import { BULLMQ_PREFIX, QUEUE_NAMES, type SessionLogJob } from '@app/shared/jobs';
+import { createMemoryObjectStore } from '@app/storage';
 import { Queue, QueueEvents } from 'bullmq';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { startWorkerHttp } from './http.ts';
+import { purgeExpiredData } from './jobs/retention.ts';
 import { persistSessionLog } from './jobs/session-log.ts';
 import { moderationDeps } from './test/moderation.ts';
 import { createWorkers } from './worker.ts';
@@ -115,6 +118,7 @@ describe('session-log job', () => {
       moderation: moderationDeps(),
       frameBudgetPerSec: 50,
       budgetIntervalMs: 0,
+      retentionEveryMs: 0,
     });
     const queue = new Queue<SessionLogJob>(QUEUE_NAMES.SESSION_LOG, {
       connection: { url: redisUrl },
@@ -134,8 +138,90 @@ describe('session-log job', () => {
       );
       await added.waitUntilFinished(events, 10_000);
       expect(await prisma.sessionParticipant.count({ where: { sessionId } })).toBe(2);
+
+      // Job metrics and queue depths, served by the worker's HTTP endpoint.
+      const http = await startWorkerHttp({
+        host: '127.0.0.1',
+        port: 0,
+        registry: workers.metrics.registry,
+        access: { token: undefined, requireToken: false },
+      });
+      try {
+        const base = `http://127.0.0.1:${String(http.port)}`;
+        expect((await fetch(`${base}/health`)).status).toBe(200);
+        const body = await (await fetch(`${base}/metrics`)).text();
+        expect(body).toMatch(
+          /bullmq_jobs_total\{[^}]*queue="session-log"[^}]*status="completed"[^}]*\} 1/,
+        );
+        expect(body).toMatch(/bullmq_job_duration_seconds_count\{[^}]*queue="session-log"/);
+        expect(body).toMatch(/bullmq_queue_jobs\{[^}]*queue="classify-frame"[^}]*state="waiting"/);
+      } finally {
+        await http.close();
+      }
     } finally {
       await Promise.all([workers.close(), queue.close(), events.close()]);
     }
+  });
+});
+
+describe('retention job', () => {
+  it('deletes expired evidence (object + row) and old transcripts of closed reports', async () => {
+    const objects = createMemoryObjectStore();
+    const now = new Date('2026-10-31T12:00:00.000Z');
+    const reportedId = await newVisitor();
+    const transcript = [{ role: 'reported', text: 'hi', at: now.toISOString() }];
+    const oldClosed = await prisma.report.create({
+      data: {
+        sessionId: randomUUID(),
+        reportedId,
+        reportedParticipantId: 'pRetention01',
+        reason: 'OTHER',
+        status: 'DISMISSED',
+        resolvedAt: new Date(now.getTime() - 91 * 24 * 3_600_000),
+        transcript,
+      },
+    });
+    const open = await prisma.report.create({
+      data: {
+        sessionId: randomUUID(),
+        reportedId,
+        reportedParticipantId: 'pRetention02',
+        reason: 'OTHER',
+        transcript,
+      },
+    });
+    const evidence = async (key: string, expiresAt: Date | null) => {
+      await objects.put('evidence', key, new Uint8Array([1]), 'image/jpeg');
+      return prisma.evidence.create({
+        data: {
+          reportId: open.id,
+          type: 'FRAME',
+          storageKey: key,
+          sha256: 'a'.repeat(64),
+          expiresAt,
+        },
+      });
+    };
+    const expired = await evidence(`r/${randomUUID()}.jpg`, new Date(now.getTime() - 1_000));
+    const current = await evidence(`r/${randomUUID()}.jpg`, new Date(now.getTime() + 60_000));
+    const legalHold = await evidence(`r/${randomUUID()}.jpg`, null);
+
+    const purged = await purgeExpiredData({ prisma, objects, evidenceBucket: 'evidence', now });
+    expect(purged.evidence).toBeGreaterThanOrEqual(1);
+    expect(purged.transcripts).toBeGreaterThanOrEqual(1);
+    expect(await prisma.evidence.findUnique({ where: { id: expired.id } })).toBeNull();
+    expect(await objects.get('evidence', expired.storageKey)).toBeNull();
+    for (const kept of [current, legalHold]) {
+      expect(await prisma.evidence.findUnique({ where: { id: kept.id } })).not.toBeNull();
+      expect(await objects.get('evidence', kept.storageKey)).not.toBeNull();
+    }
+    const reports = await prisma.report.findMany({
+      where: { id: { in: [oldClosed.id, open.id] } },
+      select: { id: true, transcript: true },
+    });
+    expect(reports.find((r) => r.id === oldClosed.id)?.transcript).toBeNull();
+    expect(reports.find((r) => r.id === open.id)?.transcript).toEqual(transcript);
+
+    await prisma.report.deleteMany({ where: { reportedId } });
   });
 });

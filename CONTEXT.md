@@ -12,7 +12,7 @@
 | Phase | Development build (local only) |
 | Implementation plan | `MASTER_IMPLEMENTATION_PROMPT.md` (12 parts, executed one at a time) |
 | Planned group calls | Up to **4 people per video call** via **Janus VideoRoom** (Parts 11–12); 2-person calls stay P2P. Parts 1–10 must stay participant-list based and keep the `CallManager` transport interface |
-| Current status | Parts 1–9 done (chat, video, trust & safety, admin dashboard) — **next: Part 10** (Hardening, observability, testing & DX) |
+| Current status | **Parts 1–10 done — the development build is complete** (chat, video, trust & safety, admin, hardening, observability, tests, load tests, containers, CI). Next: Parts 11–12 (Janus group calls) and the production plan (`docs/PRODUCTION_CHECKLIST.md`) |
 | Last updated | 2026-10-31 |
 
 ## 2. Progress tracker
@@ -28,7 +28,7 @@
 | 7 | Video chat (WebRTC) | ✅ Done | 2026-10-31 | Headless Chrome, fake camera + synthesized mic: connected ≈ 0.2–0.3 s after both start; rapid Next ×20 → 21 PCs created, 1 open per side, camera acquired once, 2 live local tracks; relay-only → relay↔relay through coturn; gateway restart mid-call → 0 video stalls, same PC kept, text resumed; camera denied → no Start; 390 px layout + chat drawer OK |
 | 8 | Trust & safety | ✅ Done | 2026-10-31 | Headless Chrome: link blocked (not relayed), profanity masked; text report → Postgres; video report → 2–3 evidence frames in MinIO; DEV_FORCE_FLAG → first sampled frame (≈ 5 s with fast intervals) flagged → auto report + trust 30 + live SHADOW ban; afterwards matched only with a low-trust (shadow-pool) visitor, never the waiting normal one |
 | 9 | Admin & moderation dashboard | ✅ Done | 2026-10-31 | Headless Chrome: seeded admin signs in → dashboard → queue → opens a Part 8 video report → 2 frames blurred, reveal loads the presigned MinIO image under the strict CSP → hard ban 24 h → the banned visitor sees the blocked screen 78 ms later, the stranger sees them leave → audit log shows `report.action` |
-| 10 | Hardening, observability, testing & DX | ⬜ Not started | | |
+| 10 | Hardening, observability, testing & DX | ✅ Done | 2026-10-31 | Security audit fixed 9 gaps (gateway crash on non-string event names, report spam → trust, admin CORS, TURN SSRF, handshake limits, stale pool on Next, prod env guards, IPv6 /64, mandatory TOTP); nonce CSPs; Prometheus metrics + Grafana; 8 Playwright e2e tests; coverage thresholds; load tests (2 × gateways, 2k/5k clients, 1 vs 8 buckets) found a node-redis adapter wedge → ioredis (D-101); resilience drills; Dockerfiles + Compose `full`/`observability`; CI. 316 unit/integration tests + 8 e2e |
 | 11 | Janus SFU & call topology switch | ⬜ Not started | | After 1–10 |
 | 12 | Group video: add a 3rd and 4th random person | ⬜ Not started | | After 11 |
 
@@ -59,7 +59,7 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Client state | Zustand vanilla store + `useStore` | zustand 5.0; socket.io-client 4.8.4 |
 | UI components | 21st.dev components (via `21st` MCP) in shared `packages/ui` (`@app/ui`), shadcn-style conventions (D-018) | radix-ui 1.8 (unified package), class-variance-authority 0.7, clsx 2.1 + tailwind-merge 3.7 (`cn()`), lucide-react 1.66, sonner 2.0 |
 | REST API | Node.js + Fastify + Zod | Fastify 5.12, fastify-type-provider-zod 7, @fastify/cors 11, helmet 13, rate-limit 11 (Redis store), sensible 6; bundled with tsup 9, dev via tsx 4 |
-| Real-time | Socket.io + `@socket.io/redis-adapter` (sharded) | socket.io 4.8.4 (+ socket.io-client 4.8.4), @socket.io/redis-adapter 8.3 `createShardedAdapter` (`subscriptionMode: 'dynamic'`) on **node-redis 6.3** (adapter only; D-031), proxy-addr 2 |
+| Real-time | Socket.io + `@socket.io/redis-adapter` (sharded) | socket.io 4.8.4 (+ socket.io-client 4.8.4), @socket.io/redis-adapter 8.3 `createShardedAdapter` (`subscriptionMode: 'dynamic'`) on **ioredis** connections (D-101; node-redis removed), proxy-addr 2 |
 | Database | PostgreSQL + Prisma ORM | Postgres 18.6 (image `postgres:18.6-alpine`); Prisma **7.10.1** (`prisma-client` generator, `@prisma/adapter-pg` driver adapter, pinned exactly — D-020) |
 | Cache / queues / matchmaking | Redis (≥ 7.2) + ioredis + Lua | Redis 8.10.3 (`redis:8.10.3-alpine`); ioredis **6.0** (RESP2 forced — D-019) |
 | Background jobs | BullMQ (`apps/worker`) | BullMQ 6.5 (queue prefix `{bull}`), connection by URL; ulid 3 for message ids |
@@ -67,8 +67,9 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 | Media | WebRTC (P2P) + coturn (TURN/STUN) for 2-person calls; **Janus VideoRoom** (SFU) for 3–4-person calls (Part 11, D-050) | coturn 4.18 (`coturn/coturn:4.18-alpine`); Janus TBD (Part 11) |
 | Auth | `jose` JWT (visitors), argon2id + TOTP (admins) | jose 6.2 (HS256 visitor tokens, `@app/shared/visitor-token`); `@node-rs/argon2` 2.2 (argon2id default) |
 | Bot protection | Cloudflare Turnstile (test keys in dev) | — |
-| Testing | Vitest, Testing Library, Playwright | Vitest 5.0 (jsdom 30 for React packages), @testing-library/react 16.3; WebRTC unit tests use fakes (`apps/web/lib/rtc/testing.ts`); Playwright in Part 10 (Parts 6–7 browser checks used playwright-core 1.64 + installed Google Chrome with fake devices, outside the repo) |
-| Observability | pino, prom-client, Prometheus, Grafana | TBD |
+| Testing | Vitest, Testing Library, Playwright | Vitest 5.0 + @vitest/coverage-v8 5.0 (jsdom 30 for React packages), @testing-library/react 16.3; WebRTC unit tests use fakes (`apps/web/lib/rtc/testing.ts`); @playwright/test 1.64.1 in `e2e/` (Chromium, or installed Chrome via `E2E_BROWSER_CHANNEL=chrome`) |
+| Observability | pino, prom-client, Prometheus, Grafana | prom-client 15.1.3 (`@app/metrics`), Prometheus `prom/prometheus:v3.15.1`, Grafana `grafana/grafana:13.3.0` (Compose profile `observability`) |
+| Containers / CI | Docker multi-stage, GitHub Actions | `node:24.22.2-alpine3.24`, turbo prune + `pnpm deploy`, Next.js standalone; actions/checkout v7, setup-node v7, pnpm/action-setup v6, upload-artifact v7; gitleaks v8.30.1; Dependabot |
 
 ## 5. Architecture (summary)
 
@@ -93,6 +94,8 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     │                   audit.ts, views.ts, routes/ (auth, reports, moderation, system)
 │     ├─ src/services/    turnstile.ts, turn.ts (coturn creds), online.ts, jobs.ts (BullMQ producers),
 │     │                   session-state.ts (read gateway session keys, frame-accept Lua), images.ts (sharp)
+│     ├─ src/metrics.ts   Prometheus metrics (HTTP latency by route pattern, 429s, reports, admin actions)
+│     ├─ Dockerfile       multi-stage (prune → install → build → deploy --prod → non-root runtime) + `migrate` target
 │     ├─ src/test/        helpers.ts (test config, fakes, Redis DB 14); src/**/*.test.ts
 │  │  └─ tsup.config.ts   bundles @app/* into dist/server.js; npm deps stay external
 │  ├─ gateway/            Socket.io gateway (port 4001; second node 4011)
@@ -107,20 +110,27 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │     ├─ src/sweeper.ts   stale-ticket sweeper (30 s, SET NX PX lock)
 │     ├─ src/moderation.ts  createGatewayModeration: text filter, pools, frame schedules (Redis caches only)
 │     ├─ src/single-socket.ts, presence.ts, client-ip.ts, token-bucket.ts, node-id.ts, errors.ts, types.ts,
-│     │   rtc-stats.ts (node-local counters from rtc:summary, exported as metrics in Part 10)
+│     │   rtc-stats.ts (rtc:summary counters + Prometheus), metrics.ts (gateway metrics),
+│     │   adapter-subscriber.ts (watch of the sharded adapter's subscriber, D-101)
+│     ├─ Dockerfile
 │     ├─ src/test/        helpers.ts (2 real nodes on random ports, Redis DB 13, unique channels)
 │  │  └─ scripts/dev-multi.ts   runs gw-4001 + gw-4011
 │  ├─ worker/             BullMQ consumers: src/worker.ts (createWorkers: session-log, classify-frame, moderation-event,
-│  │                      report-filed + 10 s budget timer), src/jobs/session-log.ts, src/moderation/ (classify-frame,
-│  │                      moderation-event, report-filed, session-trust, budget, deps), src/server.ts
-│  ├─ admin/              Next.js 16 moderator dashboard (port 3001): proxy.ts (per-request nonce CSP), next.config.mjs
+│  │                      report-filed, retention (hourly job scheduler) + 10 s budget timer; job metrics, queue depths),
+│  │                      src/jobs/ (session-log, retention), src/moderation/ (classify-frame, moderation-event,
+│  │                      report-filed, session-trust, budget, deps), src/metrics.ts, src/http.ts (/health, /metrics on
+│  │                      WORKER_METRICS_PORT), src/server.ts, Dockerfile
+│  ├─ admin/              Next.js 16 moderator dashboard (port 3001): proxy.ts (per-request nonce CSP),
+│  │                      instrumentation-client.ts (Zod jitless), Dockerfile (standalone), next.config.mjs
 │  │                      (adminWebEnv, noindex + security headers), app/login (password + TOTP step), app/(console)/
 │  │                      (layout: AppShell + ⌘K palette + auth guard; page = dashboard; reports, reports/[id], bans,
 │  │                      visitors/[id], events, audit, admins, settings), components/ (badges, ban-fields,
 │  │                      evidence-image, visitor-summary, paged-list), lib/ (api client with CSRF header, session
 │  │                      context, useApi, labels, triage keys)
 │  └─ web/                Next.js 16 App Router (port 3000)
-│     ├─ next.config.mjs  env via @app/env `webEnv` (validated at start), security headers + CSP, transpilePackages
+│     ├─ next.config.mjs  env via @app/env `webEnv` (validated at start), static security headers, HSTS (prod),
+│     │                   transpilePackages, opt-in standalone output (NEXT_OUTPUT=standalone, Dockerfile)
+│     ├─ proxy.ts         per-request nonce CSP (D-100); instrumentation-client.ts (Zod jitless); Dockerfile
 │     ├─ scripts/         prepare-nsfw-model.mjs (NSFWJS MobileNetV2 → public/models/nsfw/, gitignored; run by dev/build)
 │     ├─ app/             layout.tsx (Toaster, theme colours), page.tsx (landing), chat/page.tsx (/chat?mode=),
 │     │                   terms|privacy|guidelines/page.tsx (placeholder legal), globals.css, icon.svg
@@ -143,7 +153,10 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  │                      prettier.config.js
 │  ├─ env/                createEnv(schema), EnvValidationError, root .env loader; schemas: baseEnv, databaseEnv,
 │  │                      databaseTestEnv, redisEnv, redisTestEnv, hashPepperEnv, seedEnv, apiEnv, webEnv
-│  ├─ logger/             createLogger({ service, level, nodeEnv, destination }), REDACT_PATHS
+│  ├─ logger/             createLogger({ service, level, nodeEnv, destination }), REDACT_PATHS (headers under any
+│  │                      parent); `@app/logger/testing`: createCapturingLogger, findSecrets (log-privacy tests)
+│  ├─ metrics/            `@app/metrics`: createMetricsRegistry (per instance, service label, process metrics),
+│  │                      metricsAccess (METRICS_TOKEN), serveMetrics (node:http)
 │  ├─ shared/             constants.ts, errors.ts (ErrorCode), schemas.ts, rest.ts (REST request/response schemas),
 │  │                      socket/ (events.ts names + NOTICE_CODES,
 │  │                      schemas.ts payload Zod schemas both directions, types.ts event maps/acks/SocketData);
@@ -170,16 +183,24 @@ Status legend: ⬜ Not started · 🟨 In progress · ✅ Done · ⚠️ Done wi
 │  └─ redis/              src/client.ts (createRedis), keys.ts (ALL key builders), json.ts (Zod JSON helpers),
 │                         control.ts (gw:control pub/sub), bans.ts (ban cache schema + TTLs), ttl.ts,
 │                         testing.ts (`@app/redis/testing`: createTestRedis(name, { dbIndex }))
+├─ e2e/                  `@app/e2e`: playwright.config.ts, support/ (stack.ts harness: start/stop/restartGateway,
+│                         global-setup/teardown, fixtures.ts `visitor`, visitors.ts helpers, admin-api.ts), tests/*.spec.ts
+├─ .github/              workflows/ci.yml (quality + gitleaks), workflows/e2e.yml (manual), dependabot.yml
+├─ infra/coturn/         turnserver.production.conf (production TURN template; CI checks its SSRF rules)
 ├─ infra/docker/
-│  ├─ docker-compose.yml  project name `randomchat`: postgres, redis, coturn, minio, minio-init
+│  ├─ docker-compose.yml  project name `randomchat`: postgres, redis, coturn, minio, minio-init; profile
+│  │                      `observability` (prometheus, grafana); profile `full` (migrate, api, gateway, worker, web, admin)
+│  ├─ prometheus/prometheus.yml, grafana/provisioning/ (datasource, dashboards), grafana/dashboards/randomchat.json
 │  ├─ coturn/turnserver.conf
 │  ├─ postgres/init/01-create-test-db.sql   (creates app_test on first boot)
 │  └─ minio/init.sh, minio/frames-lifecycle.json
 ├─ tools/
-│  └─ bots/               `connect` (hold N connections) and `bots` (full chat-flow load test; `pnpm bots -- …`)
+│  └─ bots/               `connect` (hold N connections), `bots` (chat-flow correctness), `load` (load mode: local
+│                         JWTs, forked workers, /metrics scraping), `inspect` (Redis key families, stuck state, MONITOR)
 ├─ package.json  pnpm-workspace.yaml (workspaces + version catalog)  turbo.json
 ├─ prettier.config.js  .prettierignore  .editorconfig  .nvmrc  .npmrc  .gitignore
-├─ docs/                 LAN_TESTING.md (phones/LAN: secure context, Chrome flag or Caddy HTTPS proxy, TURN IPs)
+├─ docs/                 LAN_TESTING.md (phones/LAN: secure context, Chrome flag or Caddy HTTPS proxy, TURN IPs),
+│                         PRODUCTION_CHECKLIST.md (everything left before real users)
 └─ .env.example  README.md  CONTEXT.md  CLAUDE.md  MASTER_IMPLEMENTATION_PROMPT.md
 ```
 
@@ -236,6 +257,15 @@ Conventions established in Part 6:
 - The chat UI never talks to the socket directly: components read the Zustand store (`useChat(selector)`) and call controller methods (`getChatController()`); all protocol rules live in `lib/chat-controller.ts`, all state transitions in `lib/chat-store.ts` (pure, unit-tested).
 - Browser storage: `rc.deviceId`, `rc.acceptedTos`, `rc.preferences` in `localStorage`; the visitor token `rc.session` in `sessionStorage` (+ memory). All access goes through `lib/storage.ts` (try/catch; works with storage disabled).
 
+Conventions established in Part 10:
+- Metrics live in each app's `metrics.ts` on a per-instance `@app/metrics` registry (tests build several apps per process). Labels must be bounded: route patterns (never raw URLs), event names, enums — never ids. New code that adds a hot path adds a counter/histogram there and, if useful, a panel to `infra/docker/grafana/dashboards/randomchat.json`.
+- `DEPLOY_ENV` (development | staging | production) is the deployment switch; `NODE_ENV` only says how code runs. Production-only guards key on `DEPLOY_ENV=production`.
+- Logs carry ids only; `findSecrets` log-privacy tests (api, gateway) must stay green — add the new secret to them when a feature handles one. Headers are redacted under any parent.
+- The bundled Node apps (api, gateway, worker) list `@app/*` packages as **devDependencies** (tsup bundles them); every npm package they use at run time stays in `dependencies` (D-116).
+- Gateway socket listeners never throw (try/catch in every raw `on`/`onAny` listener); the process drains on `uncaughtException` (D-108).
+- E2E tests use the `visitor` fixture (`e2e/support/fixtures.ts`), never `browser.newContext()` directly, so every context closes; the suite runs with one worker (shared queues).
+- Coverage thresholds live in each package's `vitest.config.ts`; browser-only glue may be excluded with a reason in the config (D-113).
+
 ### Web app design (Part 6)
 - **Pages:** `/` landing (hero, safety card, start panel: Text/Video cards — Video "Coming soon" until Part 7 —, native language select, interest tag input ≤ 5 normalized with `interestSchema`, auto-requeue switch, live online count polled every 10 s); `/chat?mode=text` (async `searchParams`; `mode=video` shows "coming soon"); `/terms`, `/privacy`, `/guidelines` (placeholder, labelled "Placeholder — requires legal review", mention frame sampling and evidence retention).
 - **Age gate** (`components/age-gate.tsx`): opens on the first Start without a session token, or on `/chat` when the token is missing/expired/rejected. Loads `/v1/config` (ToS version), three required consents (18+, Terms + Guidelines, Privacy; pre-checked if `rc.acceptedTos` equals the current version), Turnstile (explicit render, remounted for a fresh single-use token after any failure) → `POST /v1/session` → `rc.session`. `BANNED` → blocked screen with expiry; `TOS_OUTDATED` → reload config and re-accept; `TURNSTILE_FAILED`/`RATE_LIMITED` → message + new check.
@@ -244,7 +274,7 @@ Conventions established in Part 6:
 - **Controller** (`lib/chat-controller.ts`): every ack-emit has an 8 s timeout (→ `SERVICE_UNAVAILABLE`). `connect` → `session:resume` with the snapshot cursor if matched, else `queue:join` if searching; `disconnect` → "Connection lost — reconnecting…" banner (chat stays on screen); `io server disconnect` (gateway drain / `SERVER_RESTARTING`) → manual reconnect after 500–1000 ms; `connect_error` `BANNED` → blocked, `TOKEN_*`/`UNAUTHORIZED` → clear token + gate, middleware rejection → retry after 1–2 s; `system:notice` `SESSION_REPLACED` → "open in another tab" with "Use RandomChat here" (no auto-reconnect), `BANNED` → blocked, `RATE_LIMITED` → toast. `match:found` → `match:ack` immediately. `peer:left` (ended) or a failed resume → auto-requeue after 400 ms if enabled and the server hasn't already requeued us (`INVALID_STATE` on join = already waiting). Typing: `true` once, `false` after 3 s idle or on send. Ghost tab: hidden ≥ 60 s while waiting → `queue:leave` + paused.
 - **Lifecycle:** one store + controller per tab (`lib/chat.ts`); the chat page releases the controller on unmount with a 250 ms delay (StrictMode's dev double-mount re-acquires it), and `dispose()` sends `chat:end`/`queue:leave` before disconnecting.
 - **Next/Stop:** Next needs a second press within 3 s (button turns into "Really skip?") or Esc twice; Stop leaves immediately. When a chat ends: "Stranger has left the chat." / "Stranger has disconnected." + New chat / Home + auto-requeue switch.
-- **Security headers** (`next.config.mjs`): CSP `default-src 'self'`, `script-src 'self' 'unsafe-inline'` (+ `'unsafe-eval'` in dev) `https://challenges.cloudflare.com`, `connect-src` = self + API + gateway (http/ws) origins, `frame-src` Turnstile, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri`/`form-action 'self'`; plus nosniff, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, COOP same-origin, `Permissions-Policy: camera=(self), microphone=(self), …=()`, no `X-Powered-By`. Final (nonce) CSP in Part 10.
+- **Security headers:** `proxy.ts` sets a per-request nonce CSP (Part 10, D-100): `script-src 'self' 'nonce-…' 'strict-dynamic' 'wasm-unsafe-eval' https://challenges.cloudflare.com` (+ `'unsafe-eval'` only in dev), `style-src 'self' 'unsafe-inline'`, `img-src 'self' data: blob:`, `connect-src` = self + API + gateway (http + ws/wss) origins (+ `ws:` in dev for HMR), `media-src 'self' blob: mediastream:`, `worker-src 'self' blob:`, `frame-src` Turnstile, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri`/`form-action 'self'`; every page is dynamic (`await headers()` in the root layout) so Next adds the nonce. `next.config.mjs` adds nosniff, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, COOP same-origin, `Permissions-Policy: camera=(self), microphone=(self), …=()`, HSTS (production builds only), no `X-Powered-By`. `instrumentation-client.ts` sets Zod `jitless` (no `Function('')` probe → no CSP violation). Verified in production builds: Turnstile, NSFWJS (tfjs) and WebRTC run with **zero** `securitypolicyviolation` events.
 - **Theme:** light/dark from `prefers-color-scheme` only (no toggle); system font stacks (no web fonts); mobile-first (chat fills the viewport, composer uses 16 px text on mobile to avoid iOS zoom).
 
 ### WebRTC design (Part 7)
@@ -255,7 +285,7 @@ Conventions established in Part 6:
 - **Media:** constraints ideal 640×480, ≤ 30 fps, echoCancellation/noiseSuppression/autoGainControl; video track `contentHint = 'motion'`; mute / camera off = `track.enabled` (no renegotiation); device switch = new `getUserMedia` for that kind + `replaceTrack` in every connection, old track stopped; a track ending (device unplugged) falls back to the default device once. On connect, video senders get `maxBitrate` 800 kbps + `degradationPreference: 'maintain-framerate'` (retried without the preference if a browser rejects it).
 - **ICE servers:** `GET /v1/turn-credentials` cached until 60 s before expiry (`createIceServerCache`), fetched before `queue:join` in video mode, refreshed on a timer; fresh servers go to running connections via `setConfiguration`, and a connection whose selected local candidate is `relay` restarts ICE so coturn allocations are re-made with valid credentials (D-073). `NEXT_PUBLIC_FORCE_TURN_RELAY=true` → `iceTransportPolicy: 'relay'` (hides IPs; all media via TURN).
 - **Stats:** every 2 s `getStats()` → selected pair (transport `selectedCandidatePairId`, fallback nominated pair) candidate **types only** (no addresses kept), RTT, inbound loss, send/receive kbps → quality badge (`poor`: loss > 8 % or RTT > 500 ms; `fair`: loss > 3 % or RTT > 250 ms). Summary on close: candidate types, avg RTT, avg send kbps, time to connected, failed (bounded to the schema's limits).
-- **Gateway:** `rtc:summary` needs only membership in the (possibly ended) video session — session keys live 1 h after the end — and `peer` must be another participant; duplicates per socket are dropped; counters in `rtc-stats.ts` (summaries, failed, relayed, local candidate types, sums of connect time / RTT / bitrate) for Part 10 (D-069). `chat:next { reason: 'rtc_failed' }` in a video session leaves with `RTC_FAILED` + early-failure requeue of the others; in text it is a plain skip (D-070).
+- **Gateway:** `rtc:summary` needs only membership in the (possibly ended) video session — session keys live 1 h after the end — and `peer` must be another participant; duplicates per socket are dropped; `rtc-stats.ts` keeps node-local counters and feeds Prometheus (`rtc_summaries_total{outcome}`, `rtc_local_candidates_total{type}`, `rtc_time_to_connected_seconds`, `rtc_rtt_seconds`) (D-069). `chat:next { reason: 'rtc_failed' }` in a video session leaves with `RTC_FAILED` + early-failure requeue of the others; in text it is a plain skip (D-070).
 - **UI:** `/chat?mode=video` → pre-join (preview, device pickers, mic meter via Web Audio analyser, mute/camera toggles, "Start video chat" only when media is ready; denied / no device / busy / insecure-context messages with "Try again" and a link to text chat) → age gate if there is no session token → call screen: stage with remote tiles (`VideoGrid`, ready for 1–3 remote tiles), mirrored local PiP, quality badge, "Reconnecting to RandomChat…" / "Stranger's connection is unstable…" banners, searching / ended / paused overlays over a dimmed local preview, controls bar (Mute, Camera, Chat with unread badge on phones, Settings dialog, Report disabled until Part 8, Next with confirm / Esc×2, Stop / New chat), text chat as a side panel (≥ md) or bottom sheet (phones). Autoplay refused → plays muted with "Tap to unmute". The camera stays on across matches and is released (deferred 250 ms) when leaving the page.
 - **Page/network events:** `pagehide` → close the call and send `chat:end` (or `queue:leave`) immediately (D-077); `SERVER_RESTARTING` notice → disconnect and reconnect after 250–500 ms to another node (D-076).
 
@@ -285,7 +315,9 @@ Conventions established in Part 6:
   | audit log, admin users (create, disable, reset TOTP) | ✅ | ❌ |
 - **Audit:** every mutation writes `AuditLog` inside the same Prisma transaction as the change (`auth.login`, `auth.logout`, `totp.setup`, `totp.enable`, `report.assign|note|dismiss|action`, `ban.create`, `ban.revoke`, `admin.create|disable|reset_totp`); opening a report with evidence logs `report.view_evidence`. Bans from report actions: `BanService.create(tx)` inside the transaction, `activate()` (cache + `ban_applied`) after the commit; trust changes likewise (`trust.adjust(…, tx)`, cache after commit).
 - **Evidence:** presigned GET URLs (5 min, `@aws-sdk/s3-request-presigner`, signed for `S3_PUBLIC_ENDPOINT` ?? `S3_ENDPOINT`) only for the evidence rows of the requested report; the UI blurs every frame until clicked (moderator wellbeing), `referrerPolicy=no-referrer`.
-- **Live stats:** online = presence sum; waiting = SCAN `visitor:*:ticket` refs grouped by pool:mode:lang; active chats = SCAN `visitor:*:session` / 2; matches per minute = last 60 minutes of `stats:matches:<minute>:<shard>` (all `STATS_COUNTER_SHARDS`); open reports by priority (≥ 80 high, ≥ 50 medium). SCANs are fine for a dashboard but not at scale (Part 10 metrics).
+- **Live stats:** online = presence sum; waiting = SCAN `visitor:*:ticket` refs grouped by pool:mode:lang; active chats = SCAN `visitor:*:session` / 2; matches per minute = last 60 minutes of `stats:matches:<minute>:<shard>` (all `STATS_COUNTER_SHARDS`); open reports by priority (≥ 80 high, ≥ 50 medium). SCANs are fine for a dashboard but not at scale: operations use the Prometheus metrics and the Grafana dashboard (Part 10).
+- **CORS (Part 10, D-103):** only `ADMIN_ORIGINS` may call `/v1/admin/*` with credentials and the `x-admin-csrf` header; public routes allow `CORS_ORIGINS` without credentials or the admin header.
+- **TOTP enforcement (D-104):** with `DEPLOY_ENV=production` an admin without TOTP gets `403 TOTP_ENROLLMENT_REQUIRED` everywhere except `/auth/me`, `/auth/totp/*` and `/auth/logout`; `AdminMe.totpRequired` makes the dashboard redirect to **Settings**.
 - **Admin UI:** Next.js 16, all pages dynamic; `proxy.ts` sets a per-request nonce CSP: `script-src 'self' 'nonce-…' 'strict-dynamic'` (+ `'unsafe-eval'` in dev only), `style-src 'self' 'unsafe-inline'` (Radix/toast inline styles), `img-src 'self' data: blob: <evidence origin>`, `connect-src 'self' <API>`, `frame-ancestors 'none'`, `object-src 'none'`; plus `X-Robots-Tag: noindex, nofollow, noarchive`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, COOP, all device permissions off; `robots` metadata noindex. No third-party scripts, fonts or images. The API answers admin routes with `x-robots-tag` and `cache-control: no-store`; CORS allows credentials only for `CORS_ORIGINS`.
 - **Creating admins:** dev: `pnpm db:seed` (SEED_ADMIN_*); anywhere incl. production: `ADMIN_EMAIL=… ADMIN_PASSWORD=… ADMIN_ROLE=ADMIN pnpm admin:create` (upsert; resetting re-enables the account and clears its TOTP; the password comes from the environment only); later admins from the **Admin users** page.
 
@@ -305,12 +337,12 @@ Conventions established in Part 6:
 - **Shutdown hook (D-058):** stops the deadline poller and wait timers, cancels local waiting tickets and marks local in-session participants `reconnecting` (grace deadlines in Redis, handled by the other nodes) — **sessions are never ended**; clients get `SERVER_RESTARTING`, reconnect elsewhere and resume. Disconnect handlers are skipped while draining.
 
 ### Gateway design (Part 4)
-- **Transport:** plain `node:http` server; Socket.io with `transports: ['websocket']`, `perMessageDeflate: false`, `maxHttpBufferSize` 32 KB, ping 25 s / timeout 20 s, `serveClient: false`. `GET /health` (liveness) and `GET /ready` (Redis app client + adapter client + Postgres; 503 while draining).
+- **Transport:** plain `node:http` server; Socket.io with `transports: ['websocket']`, `perMessageDeflate: false`, `maxHttpBufferSize` 32 KB, ping 25 s / timeout 20 s, `serveClient: false`. `GET /health` (liveness; 503 `subscriber_stuck`, D-101), `GET /ready` (Redis app client + adapter publisher; 503 while draining or stuck; `postgres: ok|fail` is reported but not required, D-108) and `GET /metrics`.
 - **Origin check:** `allowRequest` rejects any `Origin` not in `CORS_ORIGINS` (CORS doesn't protect WebSockets); requests without `Origin` (bots/tests) are allowed but still need a JWT. Also rejects everything while draining.
-- **Adapter:** `createShardedAdapter(pub, sub, { subscriptionMode: 'dynamic' })` with node-redis clients; channel prefix `socket.io` (tests override). ioredis is used for app data and for a dedicated `gw:control` subscriber.
+- **Adapter:** `createShardedAdapter(pub, sub, { subscriptionMode: 'dynamic' })` on two dedicated **ioredis** connections (`gateway:<node>:adapter-pub|sub`; D-101 supersedes D-031); channel prefix `socket.io` (tests override). The subscriber is wrapped by `watchShardedSubscriber`: every room SSUBSCRIBE/SUNSUBSCRIBE in flight is tracked; one older than 15 s means the subscriber is stuck → error log with the stuck operation, `gateway_adapter_subscriber_oldest_pending_seconds`, `/ready` and `/health` 503. ioredis is also used for app data and the `gw:control` subscriber.
 - **Handshake** (`auth.ts`): `auth.token` → visitor JWT verify → client IP via proxy-addr with `TRUST_PROXY` semantics → `ipHash` → ban check (`@app/moderation`, visitor id + IP hash) → HARD ban rejects with `BANNED` (+`expiresAt`); SHADOW → `pool: 'shadow'`. Sets `socket.data = { visitorId, ipHash, pool, state: 'idle' }`. Errors reach the client as `connect_error` with `data: { code, message }` (`UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED`, `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`).
 - **One socket per visitor** (`single-socket.ts`): on connect `SET visitor:<id>:socket <socketId> EX 86400` → publish `kick_visitor { keepSocketId }` on `gw:control` → join `visitor:<id>` → evict stale. Every node, on `kick_visitor`, disconnects its local sockets of that visitor whose id ≠ the Redis value (after emitting `system:notice SESSION_REPLACED`). On disconnect the key is deleted only if it still names this socket (Lua compare-and-delete).
-- **Guards** (`register-handler.ts`): per-socket token bucket (capacity 20, refill 5/s) with per-event costs; strikes (rate-limited, invalid payload, unknown event) drain an abuse bucket (capacity 30, refill 0.5/s) — when empty: `system:notice RATE_LIMITED` + disconnect. Unknown events are acked with `VALIDATION_FAILED "Unknown event"`. `RATE_LIMIT_DISABLED=true` disables both only in development.
+- **Guards** (`register-handler.ts`): per-socket token bucket (capacity 20, refill 5/s) with per-event costs; strikes (rate-limited, invalid payload, unknown event) drain an abuse bucket (capacity 30, refill 0.5/s) — when empty: `system:notice RATE_LIMITED` + disconnect. Unknown events (also non-string names, which socket.io-parser accepts as numbers) are acked with `VALIDATION_FAILED "Unknown event"`; listeners never throw. Handshakes are limited per visitor and per IP hash (Redis fixed window, `HANDSHAKE_LIMIT_*`, `connect_error RATE_LIMITED`, fails open). `RATE_LIMIT_DISABLED=true` disables all of them only in development.
 - **Event costs** (`handlers/index.ts` `EVENT_COSTS`): queue:join 2, queue:leave 1, chat:next 3, chat:end 1, chat:message 1, chat:typing 0.25, rtc:offer 1, rtc:answer 1, rtc:ice 0.125, rtc:summary 1, moderation:signal 0.5, ping 1.
 - **Presence** (`presence.ts`): every 5 s `SET presence:node:<nodeId> <localSocketCount> EX 15` + `SADD presence:nodes`; each tick also `SREM`s members whose node key has expired (crashed nodes). Graceful stop deletes the key and set member.
 - **Shutdown** (`gateway.shutdown()`): draining on (handshakes and `/ready` refused) → run `onShutdown` hooks (Part 5: end sessions) → `system:notice SERVER_RESTARTING` to local sockets → wait until all leave or 10 s → disconnect the rest → unsubscribe control, presence cleanup, `io.close()` (HTTP server + adapter) → quit all Redis clients. `server.ts` force-exits after 20 s.
@@ -348,10 +380,13 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 | admin | 3001 | `pnpm --filter @app/admin dev` · `build` · `start`; also started by root `pnpm dev` | ✅ moderation flow verified in headless Chrome |
 | api | 4000 (`API_HOST`, default 0.0.0.0) | `pnpm --filter @app/api dev` (tsx watch) · `build` (tsup) · `start` (`node dist/server.js`) | ✅ running in dev; graceful shutdown verified |
 | gateway | 4001 (+4011 via `dev:multi`), `GATEWAY_HOST` default 0.0.0.0 | `pnpm --filter @app/gateway dev` · `dev:multi` · `build` (tsup) · `start` | ✅ two nodes verified; graceful drain verified |
-| worker | — (no HTTP) | `pnpm --filter @app/worker dev` · `build` · `start` | ✅ processed 4 600+ session-log jobs in the bot runs; graceful shutdown waits for in-flight jobs |
+| worker | 4002 (`WORKER_METRICS_PORT`: `/health`, `/metrics` only) | `pnpm --filter @app/worker dev` · `build` · `start` | ✅ no job lost in the SIGKILL drill (6 077 sessions → 6 077 rows); graceful shutdown waits for in-flight jobs |
+| Prometheus | 9090 (127.0.0.1) | `pnpm obs:up` (Compose profile `observability`) | ✅ scrapes host services (`host.docker.internal`) and `full`-profile containers |
+| Grafana | 3002 (127.0.0.1) | `pnpm obs:up` | ✅ provisioned "RandomChat — overview" (40 panels), anonymous viewer, admin password `GRAFANA_ADMIN_PASSWORD` |
+| Container stack | same ports as above | `pnpm stack:up` / `stack:down` (profile `full`; images from `apps/*/Dockerfile`) | ✅ all healthy; 7/7 applicable e2e tests pass against it (gateway restart skipped) |
 | PostgreSQL | 5432 (host port = `POSTGRES_PORT`; **5433 on this machine**), bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; dbs `app`, `app_test` |
 | Redis | 6379, bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; AOF and RDB off |
-| coturn | 3478 udp/tcp, 49160–49200/udp, bound to 0.0.0.0 (LAN testing) | `pnpm infra:up` | ✅ healthy; HMAC auth + relay↔relay verified |
+| coturn | 3478 udp/tcp, 49160–49200/udp, bound to `TURN_BIND_IP` (default 127.0.0.1; 0.0.0.0 for LAN testing) | `pnpm infra:up` | ✅ healthy; HMAC auth + relay↔relay verified; relays to private/Docker ranges denied, no TCP relays (D-109) |
 | MinIO | 9000 (S3) / 9001 (console), bound to 127.0.0.1 | `pnpm infra:up` | ✅ healthy; buckets `evidence`, `frames` (1-day expiry) |
 
 ### coturn on macOS Docker Desktop (verified 2026-10-31)
@@ -362,7 +397,7 @@ _Filled from Part 6 onward: component — file in `@app/ui` or app — 21st.dev 
 - Mixed relay↔host may fail on Docker Desktop: the host peer's packets reach coturn NATed from the Docker VM gateway IP, not the IP in its permission. Not a production concern (TURN runs on a real host with a public IP).
 - To test from a phone on the LAN, set `TURN_EXTERNAL_IP` (and later `TURN_HOST`/`STUN_URLS`) to the Mac's LAN IP and `pnpm infra:up` again.
 - `static-auth-secret` is passed as a CLI flag (visible in `docker inspect`) — acceptable for dev only. The coturn image entrypoint `eval`s each argument, so `TURN_SECRET` must not contain shell metacharacters (hex is safe).
-- Production SSRF protection (`denied-peer-ip` for private/loopback ranges, `no-loopback-peers`) is present but commented out in `turnserver.conf`, with the reason.
+- SSRF protection (Part 10, D-109): the dev config denies TCP relays and every private/reserved range except loopback (inside the container that is coturn itself) and 192.168/16 (LAN testing); `--allowed-peer-ip=$(hostname -i)` exempts coturn's own container address, which relay↔relay maps the external IP to. Verified: a relay to the Redis container is refused (`403`, "peer IP … denied"), TCP relays fail with `442`, relay↔relay video works. Production uses `infra/coturn/turnserver.production.conf` (all private + loopback ranges denied, TLS 443, quotas).
 
 ## 8. Environment variables (implemented)
 
@@ -386,7 +421,19 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | IP_HASH_PEPPER, DEVICE_HASH_PEPPER | seed, api; gateway reads IP_HASH_PEPPER only (`hashPepperEnv`, min 16 chars) | HMAC peppers — rotating one invalidates all stored hashes (bans by device/IP) | placeholders |
 | TOS_VERSION | api (`/v1/config`, session check); web reads it from `/v1/config` | Current ToS version clients must accept | 2026-10-dev |
 | TURNSTILE_SECRET_KEY | api (siteverify) | Cloudflare secret; dev = always-pass test secret | 1x0000000000000000000000000000000AA |
-| NEXT_PUBLIC_TURNSTILE_SITE_KEY | web (`webEnv`, inlined at build) | Cloudflare site key (production must not use the test key — check added in Part 10, D-063) | 1x00000000000000000000AA (always-pass test key) |
+| NEXT_PUBLIC_TURNSTILE_SITE_KEY | web (`webEnv`, inlined at build) | Cloudflare site key; test keys refused when `DEPLOY_ENV=production` (D-106) | 1x00000000000000000000AA (always-pass test key) |
+| DEPLOY_ENV | every service (`baseEnv`), web build | `development` \| `staging` \| `production`. `production`: Turnstile test keys refused, `TURNSTILE_HOSTNAMES` required, `NODE_ENV=production` required, `.env.example` placeholder secrets refused, `/metrics` needs `METRICS_TOKEN`, admin TOTP mandatory (D-106) | development |
+| TURNSTILE_HOSTNAMES | api | Comma list of hostnames siteverify results may come from; empty = unchecked (test keys answer `example.com`) | empty |
+| METRICS_TOKEN | api, gateway, worker (`metricsEnv`, ≥ 16 chars) | Bearer token for `/metrics`; unset = open in dev, disabled with `DEPLOY_ENV=production` | unset |
+| WORKER_METRICS_HOST, WORKER_METRICS_PORT | worker | Listen address/port of the worker's `/health` + `/metrics` server | 0.0.0.0, 4002 |
+| ADMIN_ORIGINS | api | Admin dashboard origins: the only ones allowed to call `/v1/admin/*` with credentials + CSRF header (D-103) | http://localhost:3001 |
+| HANDSHAKE_LIMIT_PER_VISITOR, HANDSHAKE_LIMIT_PER_IP | gateway | Socket handshakes per minute per visitor / per IP hash (D-107); load tests raise the IP one | 30, 600 |
+| TURN_TLS_PORT | api | Optional TURN-over-TLS port → extra `turns:<host>:<port>?transport=tcp` URL | unset |
+| TURN_BIND_IP | docker-compose (coturn published ports) | 127.0.0.1 = this machine only; 0.0.0.0 = LAN testing | 127.0.0.1 |
+| GRAFANA_ADMIN_PASSWORD | docker-compose (grafana, profile `observability`) | Grafana admin login (viewers need none) | random in `.env` |
+| ADMIN_EVIDENCE_ORIGIN | admin runtime (set by `next.config.mjs` in dev; container env in the `full` profile) | Evidence origin for the admin CSP `img-src` | derived from S3_PUBLIC_ENDPOINT/S3_ENDPOINT |
+| NEXT_OUTPUT | web/admin build (Dockerfiles) | `standalone` → Next.js standalone output | unset |
+| E2E_BROWSER_CHANNEL, E2E_REUSE_STACK | e2e (Playwright) | `chrome` = installed Chrome instead of Playwright's Chromium; `1` = test the running stack | unset |
 | TURN_SECRET | docker-compose (coturn `--static-auth-secret`), api (credential HMAC) | Shared TURN HMAC secret (≥ 16 chars) | placeholder |
 | TURN_EXTERNAL_IP | docker-compose (coturn `--external-ip`) | IP in relay candidates (new, not in master design) | 127.0.0.1 |
 | TURN_HOST, TURN_PORT, TURN_CREDENTIAL_TTL_SECONDS, STUN_URLS | api (`/v1/turn-credentials`) | TURN/STUN servers handed to clients; STUN_URLS comma list of `stun:`/`stuns:` URLs | localhost, 3478, 600, stun:localhost:3478 |
@@ -456,6 +503,12 @@ Loading: `@app/env` `createEnv()` finds the workspace root (directory containing
 | `pnpm --filter @app/admin dev` / `build` / `start` / `test` | Admin dashboard on 3001 |
 | `ADMIN_EMAIL=… ADMIN_PASSWORD=… ADMIN_ROLE=ADMIN pnpm admin:create` | Create or reset an admin account (works in production; password from env only) |
 | `pnpm --filter @app/<pkg> test` | Run one package's tests |
+| `pnpm test:coverage` | `turbo run test -- --coverage` with per-package thresholds (CI) |
+| `pnpm test:e2e` | Build the 5 apps (turbo cache), start them from the builds, run the Playwright suite (`E2E_BROWSER_CHANNEL=chrome` locally); ports 3000/3001/4000–4002 must be free |
+| `pnpm obs:up` / `obs:down` | Prometheus + Grafana (profile `observability`) |
+| `pnpm stack:up` / `stack:down` | Build images and run the whole stack in containers (profile `full`) / stop the app containers |
+| `pnpm --filter @app/bots load -- --clients N --ramp S --duration S --workers W --gateways URLs [--json file]` | Load mode (see README "Load testing") |
+| `pnpm --filter @app/bots inspect -- keys` / `monitor --seconds N` | Redis key families + stuck-state check / ops/s per key family via MONITOR |
 
 ## 10. Data model (implemented)
 
@@ -518,6 +571,8 @@ Builders in `packages/redis/src/keys.ts` (functions/constants in parentheses). B
 `createRedis(url, { connectionName, lazyConnect, logger, redisOptions })`: RESP2, `maxRetriesPerRequest` 3 (pass `{ maxRetriesPerRequest: null }` for BullMQ), jittered exponential reconnect capped at 2 s, reconnect on `READONLY`. Subscribers need a dedicated connection.
 
 
+Part 10 keys: `report:penalty:<reporterId>:<reportedId>` (SET NX, 24 h: one trust penalty per reporter → reported per day, D-105), `lock:report-threshold:<visitorId>` (PX 30 s, threshold check + auto ban), `lock:mod:budget:<windowStart>` (SET NX, 60 s: one budget update per window), `rl:handshake:visitor:<minute>:<visitorId>` / `rl:handshake:ip:<minute>:<ipHash>` (INCR, 61 s; D-107), BullMQ queue `{bull}:retention:*` with job scheduler `retention-purge` (hourly). Builders: `reportPenaltyKey`, `reportThresholdLockKey`, `moderationBudgetClaimKey`, `rateLimitKey`.
+
 Part 8 keys: `trust:<visitorId>` (STRING score, 1 h; API at session start, worker on changes), `risk:<visitorId>` (JSON `{ firstSeenAt, flaggedUntil, lastReportedAt }`, 8 days), `session:{<id>}:frames` (HASH participantId → `{ received, lastAt }`, same tag as the session, 24 h live / 1 h after the end), `mod:frames:<windowStart>` (accepted frames per 10 s window, 120 s), `mod:budget:multiplier` (STRING ≥ 1, 60 s). Participant records gained `frameIntervalMs`, `maxFrames`, `tier`. BullMQ queues (prefix `{bull}`): `classify-frame`, `moderation-event`, `report-filed` (jobId = reportId).
 ## 12. REST endpoints (implemented)
 
@@ -531,6 +586,9 @@ Part 8 keys: `trust:<visitorId>` (STRING score, 1 h; API at session start, worke
 | POST | `/v1/reports` | Bearer | 10/h per visitor | Multipart: `sessionId`, `reportedParticipantId`, `reason` (ReportReason), `details?` ≤ 500 + ≤ 3 `frames` (JPEG ≤ 300 KB). 201 `{ reportId }`; 403 not a participant / self; 400 invalid fields or image; 413 too large / too many files |
 | POST | `/v1/moderation/frames?sessionId=` | Bearer | 30/min per visitor | Body `image/jpeg` ≤ 60 KB, ≤ 320 px (own video). 202 `{ accepted: true }`; 403 not a sampled participant of an active video session; 429 faster than 80 % of the assigned interval or `maxFrames` reached; 400 not a JPEG / too big; 415 other content types |
 | GET | `/v1/stats/online` | — | — | `{ online }` = Σ `presence:node:<id>` over `presence:nodes` (expired nodes count 0); cached 2 s in memory, `cache-control: public, max-age=2` |
+| GET | `/metrics` | `METRICS_TOKEN` bearer (if set; off in production without it) | — | Prometheus text format (Part 10); same on the gateway (port 4001) and the worker (4002, with `/health`) |
+
+Part 10 changes: `POST /v1/reports` → `200 { reportId }` (the existing report) when the same reporter already reported that participant in that session; `403 BANNED` for HARD-banned reporters; images are decoded only after the membership check. `GET /v1/turn-credentials` → `403 BANNED` for HARD-banned visitors and an extra `turns:` URL with `TURN_TLS_PORT`. Siteverify results must match `TURNSTILE_HOSTNAMES` and the `session` action (D-106). CORS: see D-103.
 
 **Admin API** (`/v1/admin`, cookie session + `x-admin-csrf` on POST; contract in `@app/shared` `admin.ts`):
 
@@ -572,19 +630,110 @@ Contract: `packages/shared/src/socket/` (names, Zod schemas, types). Acks: `{ ok
 | C→S | `match:ack` | ✅ | `{ sessionId }` within `MATCH_ACK_TIMEOUT_MS`; `NOT_IN_SESSION` if the session is over |
 | C→S | `session:resume` | ✅ | `{ sessionId, lastMessageId? }` on any node → ack `{ selfParticipantId, peers, missedMessages }` or `SESSION_NOT_RESUMABLE` |
 | C→S | `queue:leave` | ✅ | waiting only (`INVALID_STATE` otherwise) |
-| C→S | `chat:next` / `chat:end` | ✅ | current `sessionId` only (`NOT_IN_SESSION` otherwise); next = leave (SKIP) + requeue with the socket's last preferences; `chat:next { reason: 'rtc_failed' }` (video) = leave as RTC_FAILED, others count as innocent (priority requeue if early); end = leave (STOP) → idle |
+| C→S | `chat:next` / `chat:end` | ✅ | current `sessionId` only (`NOT_IN_SESSION` otherwise); next = leave (SKIP) + requeue with the socket's last preferences and a freshly resolved pool (Part 10); `chat:next { reason: 'rtc_failed' }` (video) = leave as RTC_FAILED, others count as innocent (priority requeue if early); end = leave (STOP) → idle |
 | C→S | `chat:message` | ✅ | text filter first: blocked → `MESSAGE_BLOCKED` ack + notice; ack `{ ok: true, data: { id, at, text? } }` (`text` = masked version when profanity was masked); `NOT_IN_SESSION` for stale/ended sessions |
 | C→S | `chat:typing` | ✅ | relayed on change, repeats ≤ 1 per 2 s |
 | C→S | `rtc:offer` / `rtc:answer` / `rtc:ice` | ✅ | video sessions only (`INVALID_STATE`), `to` must be an active other participant (`FORBIDDEN`) |
 | C→S | `rtc:summary` | ✅ | accepted from any participant of the video session, also after it ended (≤ 1 h); `peer` must be another participant (`FORBIDDEN`); duplicates per socket dropped; node-local counters (`rtc-stats.ts`), debug log |
 | C→S | `moderation:signal` | ✅ | `{ sessionId, about: participantId \| 'self', kind, score }`; ≤ 1 per 5 s per socket (`RATE_LIMITED`); recorded as CLIENT_NSFW event (no trust change); score ≥ 0.8 about the stranger raises the session to the `high` tier |
-| C→S | any other event | ✅ | ack `VALIDATION_FAILED "Unknown event"` + abuse strike |
+| C→S | any other event | ✅ | ack `VALIDATION_FAILED "Unknown event"` + abuse strike (also numeric event names; other non-string names are parse errors and close only that connection) |
 | S→C | `system:notice` | ✅ `SESSION_REPLACED`, `SERVER_RESTARTING`, `RATE_LIMITED`, `BANNED` (live HARD ban), `MESSAGE_BLOCKED` (reason text), `FRAME_SCHEDULE` (+`sessionId`, `moderation`) | |
 | S→C | `queue:waiting`, `match:found` (+ `moderation: { frameIntervalMs, maxFrames }` per participant, D-054), `chat:message`, `chat:typing`, `rtc:offer`, `rtc:answer`, `rtc:ice`, `peer:reconnecting`, `peer:resumed`, `peer:left` | ✅ | always delivered via `visitor:<id>` rooms (cross-node) |
 | S→C | `participant:joined`, `call:topology` | ⬜ | Parts 11–12 (`participant:joined` is typed with the old Part 11 shape; Part 12 changes it) |
-| handshake | `connect_error` | ✅ | `data.code`: `UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED` (+`expiresAt`), `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`; bad Origin → plain websocket error |
+| handshake | `connect_error` | ✅ | `data.code`: `UNAUTHORIZED`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `BANNED` (+`expiresAt`), `RATE_LIMITED` (handshake limits, Part 10), `SERVER_RESTARTING`, `SERVICE_UNAVAILABLE`; bad Origin → plain websocket error |
 
 Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; chat text ≤ 500 after trim; clientMsgId ≤ 64; SDP ≤ 16 KB (`MAX_SDP_BYTES`); ICE candidate string ≤ 1024 (`MAX_ICE_CANDIDATE_LENGTH`); rtc:summary metrics bounded, candidate types host/srflx/prflx/relay/unknown; moderation:signal `kind` `[a-z_]{1,32}`, score 0–1; whole message ≤ 32 KB (`maxHttpBufferSize`).
+
+## 13a. Security audit (Part 10)
+
+Independent read of every route and event (2026-10-31), then fixes. Columns: auth · validation · size · rate limit · authorization.
+
+| HTTP route | Auth | Validation | Size | Rate limit | Authorization / membership |
+|---|---|---|---|---|---|
+| `GET /health`, `/ready` (api, gateway) | — | response schema | — | — | public; keep internal (`/ready` pings DB/Redis) |
+| `GET /v1/config`, `/v1/stats/online` | — | response | — | — (cached 60 s / 2 s) | public |
+| `POST /v1/session` | Turnstile (+ hostname, action, no test keys in prod) | body + response Zod | 64 KB | 10/min per IP hash (IPv6 /64) | ban check visitor + device + IP; HARD → 403 |
+| `GET /v1/turn-credentials` | Bearer JWT | response | — | 30/min per visitor | HARD-banned → 403 |
+| `POST /v1/reports` | Bearer JWT | multipart fields Zod, JPEG magic bytes, sharp re-encode | 3 × 300 KB, 8 fields × 2 KB | 10/h per visitor | session participant (≤ 1 h after end), not self, not HARD-banned; deduped per chat; trust penalty once per reporter → reported per 24 h |
+| `POST /v1/moderation/frames` | Bearer JWT | query UUID, JPEG ≤ 320 px | 60 KB | 30/min per visitor + schedule Lua | own active, sampled video session |
+| `GET /metrics` (api, gateway, worker) | `METRICS_TOKEN` | — | — | — | off in production without a token |
+| `POST /v1/admin/auth/login` | — | Zod | 64 KB | 5/min per IP hash + 5/min per email + 15-min lockout | dummy argon2 for unknown emails |
+| other `/v1/admin/*` | cookie session + `x-admin-csrf` on mutations (timing-safe) | params/query/body/response Zod | 64 KB | — | RBAC per route, admin re-read per request, TOTP enforced in production, CORS `ADMIN_ORIGINS` only |
+| WebSocket `/socket.io` | JWT in `auth.token` | — | 32 KB messages | 30 handshakes/min per visitor, 600 per IP hash | Origin allowlist, ban check, refused while draining |
+
+| Socket event | Payload (Zod) | Cost | State & membership |
+|---|---|---|---|
+| `ping` | empty | 1 | — |
+| `queue:join` / `queue:leave` | mode/lang enums, ≤ 5 normalized interests / empty | 2 / 1 | per-visitor lock; idle / waiting only; pool re-resolved (HARD → BANNED) |
+| `match:ack`, `chat:end` | `{ sessionId }` | 0.5 / 1 | own session ref; Lua checks session active, participant not left |
+| `chat:next` | `{ sessionId, reason? }` | 3 | own session; pool re-resolved before the requeue |
+| `session:resume` | `{ sessionId, lastMessageId? }` | 2 | ref = sessionId; Lua checks the record is the caller's |
+| `chat:message` / `chat:typing` | text ≤ 500 trimmed, clientMsgId ≤ 64 / boolean | 1 / 0.25 | in session; text filter before relaying |
+| `rtc:offer` / `rtc:answer` / `rtc:ice` | SDP ≤ 16 KB / candidate ≤ 1024 | 1 / 1 / 0.125 | video session, `to` = another non-left participant |
+| `rtc:summary` | enums + bounded numbers | 1 | participant of the (≤ 1 h ended) video session; deduped |
+| `moderation:signal` | `{ sessionId, about, kind, score }` | 0.5 + 1 per 5 s | in session; `about` = self or a non-left participant |
+| unknown / non-string name | anything | strike | acked `VALIDATION_FAILED`; never throws |
+
+Checklist: JWT (HS256 pinned, iss/aud/exp/iat/jti required, read only from `Authorization`/`auth.token`, never logged) ✅ · CORS/Origin (D-103, WS allowlist) ✅ · admin CSRF (per-session token, timing-safe, SameSite=Lax, Secure in production) ✅ · SSRF (the only server-side fetch is the fixed siteverify URL; TURN deny lists, D-109) ✅ · uploads (limits, magic bytes, decode limits, re-encode, membership before decode) ✅ · presigned URLs (GET only, 5 min, only the report's evidence rows) ✅ · Redis Lua inputs (keys only from validating builders, ARGV schema-validated) ✅ · Prisma raw queries (only tagged templates: `SELECT 1` health checks, trust adjust) ✅ · logs (redaction incl. headers under any parent; log-privacy tests) ✅ · HTML rendering (no `dangerouslySetInnerHTML`/`innerHTML`; e2e asserts HTML shown as text) ✅ · CSP (nonce, zero violations) ✅ · `pnpm audit`: 0 high/critical (1 moderate: minimatch via ESLint, dev tooling only) ✅.
+
+Fixed in Part 10 (with tests): **High** — a numeric Socket.io event name crashed a gateway (`event.slice` in `onAny`, uncaught) → type check, try/catch in every listener, drain on `uncaughtException` (D-108). **Medium** — one reporter could push anyone into the shadow pool with repeated reports → per-chat dedupe, one penalty per reporter → reported per 24 h, HARD-banned reporters refused (D-105); public-site origin could use admin credentials via CORS → `ADMIN_ORIGINS` (D-103); TURN could relay to internal services → dev deny list + no TCP relay + 127.0.0.1 binding, production template, CI check (D-109). **Low** — no handshake rate limit (D-107); `chat:next` kept a stale pool; production accepted placeholder secrets / non-production `NODE_ENV` (D-106); IPv6 hashed per address (now /64, D-107); admin TOTP optional (D-104). Also found: @fastify/multipart trace-logged the `Authorization` header (D-110), TURN credentials for HARD-banned visitors, unchecked Turnstile hostname/action (D-106), worker-replica races (D-105), gateway readiness tied to Postgres (D-108). Residual risks are in `docs/PRODUCTION_CHECKLIST.md` (shared HS256 secret, no token revocation, client-chosen device id, admin lockout DoS, Redis Cluster validation).
+
+## 13b. Metrics (Part 10)
+
+Every series carries `service`; Prometheus adds `instance`. Labels are bounded (route patterns, event names, enums — never ids).
+
+| Service | Metric | Labels | Meaning |
+|---|---|---|---|
+| all | `process_*`, `nodejs_*` (prom-client defaults) | — | CPU, memory, event-loop lag, GC, handles |
+| api | `http_request_duration_seconds` (histogram) | method, route, status | latency per route pattern (`unmatched` for 404s) |
+| api, gateway | `rate_limit_hits_total` | route (HTTP route, socket event, `handshake`) | refused requests/events |
+| api, worker | `reports_total` | reason, source (`user` / `auto`) | reports filed |
+| api, gateway, worker | `moderation_actions_total` | source (`admin`, `text_filter`, `client_nsfw`, `live_ban`, `server_classifier`, `hash_match`, `report_threshold`), action | moderation actions |
+| gateway | `gateway_sockets_connected` (gauge) | — | sockets on the node |
+| gateway | `gateway_events_total` | event, outcome (`ok`, `error`, `rate_limited`, `invalid`, `internal_error`) | events/s by type |
+| gateway | `gateway_abuse_disconnects_total` | — | abusive sockets dropped |
+| gateway | `matchmaking_matches_total` | mode, pool, bucket | matches (per-bucket rate) |
+| gateway | `matchmaking_time_to_match_seconds` (histogram) | mode | ticket created → match, per visitor |
+| gateway | `matchmaking_bucket_hops_total` | mode | hops (÷ matches = hops per match) |
+| gateway | `matchmaking_waiting_visitors` (gauge) | — | searches whose timers run on the node (sum = waiting) |
+| gateway | `sessions_ended_total` / `session_duration_seconds` | mode, reason / mode | session ends and lengths |
+| gateway | `session_resumes_total` | outcome (`ok`, `not_resumable`) | resumes after reconnects |
+| gateway | `rtc_summaries_total`, `rtc_local_candidates_total`, `rtc_time_to_connected_seconds`, `rtc_rtt_seconds` | outcome / type / — / — | connected %, relay %, time to connected, RTT |
+| gateway | `gateway_adapter_subscriber_pending`, `gateway_adapter_subscriber_oldest_pending_seconds` | — | room (un)subscriptions in flight (stuck > 15 s, D-101) |
+| worker | `bullmq_jobs_total`, `bullmq_job_duration_seconds` | queue, status | job outcomes and durations |
+| worker | `bullmq_queue_jobs` (gauge) | queue, state | queue depth (waiting/active/delayed/failed) |
+| worker | `moderation_frames_classified_total` | outcome | classifier throughput |
+| worker | `moderation_frame_budget_multiplier` (gauge) | — | sampling stretch (1 = within budget) |
+| worker | `retention_purged_total` | kind (`evidence`, `transcript`) | retention job |
+
+Dashboard: `infra/docker/grafana/dashboards/randomchat.json` (overview stats, matchmaking, sessions & events, media, API, trust & safety, jobs, processes).
+
+## 13c. Load test results & capacity projection (Part 10, 2026-10-31)
+
+Setup: Apple M2 Pro (12 cores, 16 GB), Docker Desktop Redis 8.10 (no persistence), two gateway nodes from the tsup build (`LOG_LEVEL=warn`, ioredis adapter), dev worker; `pnpm --filter @app/bots load`: ramp 30 s, steady 60 s, 50 % video (4 KB SDP + 8 ICE candidates each way), exponential sessions with mean 20 s (skip-heavy), 0.2 messages/s per bot, `en` only (one hot family — worst case), auto-requeue. Bots and gateways share the machine, so absolute numbers are conservative.
+
+| Run | Clients | `MM_BUCKETS` | Time to match p50 / p95 / p99 | Message latency p50 / p95 / p99 | Matches/s | Events/s | Gateway CPU (1 core) / RSS | Errors |
+|---|---|---|---|---|---|---|---|---|
+| A | 2,000 | 1 | 9 / 35 / 62 ms | 2 / 3 / 5 ms | 96 | 1,670 | 27 % / 436 MB | 26 (skip races) |
+| B | 2,000 | 8 | 11 / 69 / 123 ms | 2 / 3 / 5 ms | 99 | 1,682 | 28 % / 429 MB | 20 |
+| C | 5,000 | 1 | 14 / 28 / 38 ms | 3 / 7 / 10 ms | 248 | 4,157 | 62 % / 548 MB | 198 (103 = `chat:end` acks lost at the bots' own shutdown) |
+| D | 5,000 | 8 | 17 / 44 / 62 ms | 3 / 8 / 12 ms | 253 | 4,298 | 64 % / 546 MB | 116 |
+
+- **Per-bucket match rates (D):** 15.0–16.5 matches/s per bucket per node (max/min 1.10) — buckets spread evenly. **Hops per match: 0** in every run (nobody waited the 1 s hop interval at these volumes). Buckets cost a little tail latency when queues are sparse (B vs A) and nothing measurable at 5,000 clients; they exist to spread one hot family over Redis shards at scale.
+- **Errors** are ≤ 0.04 % of acked events: `NOT_IN_SESSION` races (a message or ICE candidate crossing the stranger's skip) and acks lost when the bots shut down. No rate-limit hits, no protocol errors.
+- **Redis (5,000 clients, D-like run):** ≈ 58k commands/s at 44 % of one core, 638 MB (session keys live 1 h). MONITOR (6 s) ops per key family: BullMQ `session-log` 23.6 % · session meta 11.3 % · session participants 11.3 % · visitor session refs 11.3 % · adapter sharded pub/sub 7.3 % (one channel per room) · session log 5.5 % · visitor ticket refs 5.4 % · queue lists 5.2 % · deadlines 3.6 % · tickets 3.5 % · recent pairs 1.7 % · ban cache 1.7 % · trust 1.3 % · frames 0.9 % · match counters 0.9 % · risk 0.4 %. Hottest single keys: `{bull}:session-log:*` (≤ 2,083 ops/s = 3.6 %) and `ban:ip:<hash>` of the one test IP (506 ops/s — a load-test artifact, but a real CGNAT hot spot). `redis-cli --hotkeys` (LFU) after the run: the per-bucket `{mm:…}:recent` sets lead, evenly (counters 20–26 across all 16 buckets). **No family dominates except the single BullMQ queue** → shard it / move session logs off BullMQ (D-055).
+- **Found by the load runs:** node-redis 6.3's sharded subscriber wedged after a few runs (a SUNSUBSCRIBE reply never matched; every later room subscription queued behind it → cross-node delivery silently lost, MATCH_TIMEOUTs) → ioredis adapter + watchdog (D-101); 4 consecutive 5k runs clean afterwards.
+
+**Resilience drills (2,000 clients, two nodes):**
+- **Gateway SIGKILL** mid-run (1,000 sockets on it): all 1,000 bots reconnected to the other node; 937 of 959 in-session bots resumed (97.7 %), 22 found their session ended (the stranger skipped while they were reconnecting) and requeued; p99 time to match 105 ms during the event. After grace + sweeper: 0 session refs, 0 ticket refs, 0 active sessions, 0 waiting tickets, 0 deadlines; the dead node left `presence:nodes`.
+- **Redis restart** (no persistence: all live state lost): both gateways stayed ready, ioredis reconnected in ~1 s, the adapter re-subscribed all 1,002 shard channels, matching continued immediately (~30 → ~40 matches/s per node within 15 s); in-flight chats were gone (`NOT_IN_SESSION`, clients requeue). No crash anywhere. Production Redis needs replication + AOF (checklist).
+- **Worker SIGKILL**, restarted after 10 s: 1,001 jobs queued meanwhile and were processed; 6,077 sessions ended in the run → 6,077 `chat_session_logs` rows, 0 failed jobs.
+
+**Projection for 1M concurrent** (linear scaling of the measured profile; validate with the distributed bot fleet in the checklist):
+- **Activity:** this profile is ~0.84 events/s and ~0.05 matches/s per client → ~50k matches/s at 1M (the design assumes ~22k/s with longer sessions; numbers below are for the measured, more aggressive profile).
+- **Gateways:** ~2,500 sockets per Node process at ~60 % of a core and ~550 MB → **~400 gateway processes** (e.g. 100 pods × 4 processes or 4-vCPU nodes) for 1M at this activity; ~150–200 at the design's ~22k matches/s. Memory ≈ 300 MB baseline + ~100 KB per socket.
+- **Redis:** ~11.6 commands/s per client → ~11.6M/s at 1M (~5M/s at the design activity). At ~100k ops/s per shard primary: **~120 shards** for this profile, **~50–60** at the design activity; moving session logs off BullMQ removes ~24 %. Matchmaking keys are bucket-tagged, sessions are session-tagged, deadlines and counters sharded (`DEADLINE_SHARDS=64`).
+- **Buckets:** one bucket handled 125 matches/s per node here (single-family run C); keep ≤ ~250 matches/s per bucket → `MM_BUCKETS_BY_QUEUE` `video:en` ≈ 64, `text:en` ≈ 32, mid-size languages 8, small ones 1–4.
 
 ## 14. Decisions log (ADR-lite)
 
@@ -620,7 +769,7 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-028 | 2026-10-31 | `TRUST_PROXY` accepts only a hop count or proxy IP/CIDR list, never `true`; request ids are server-generated | Trusting every X-Forwarded-For would let clients spoof IPs past IP rate limits/bans; client-chosen request ids could pollute log correlation |
 | D-029 | 2026-10-31 | Visitor-token issue/verify lives in `@app/shared/visitor-token` (server-only subpath, jose) | API issues and gateway verifies with identical claims/algorithm checks — one implementation |
 | D-030 | 2026-10-31 | New `ErrorCode`s: `TOKEN_EXPIRED`, `TOKEN_INVALID`, `PAYLOAD_TOO_LARGE`, `SERVICE_UNAVAILABLE` | Clients must tell "start a new session" (expired) from other auth failures |
-| D-031 | 2026-10-31 | Sharded Socket.io adapter uses **node-redis** (`redis` 6.x) clients; ioredis stays the app client | The adapter documents node-redis ≥ 4.6 for `createShardedAdapter`; it cannot use ioredis with Redis Cluster (ioredis#1759), and production will be Cluster |
+| D-031 | 2026-10-31 | **Superseded by D-101.** Sharded Socket.io adapter uses **node-redis** (`redis` 6.x) clients; ioredis stays the app client | The adapter documents node-redis ≥ 4.6 for `createShardedAdapter`; it cannot use ioredis with Redis Cluster (ioredis#1759), and production will be Cluster |
 | D-032 | 2026-10-31 | "Last connection wins" is decided by a Redis key `visitor:<id>:socket`, not by `kick_visitor` message order; new key builder `visitorSocketKey` | Two connections racing on different nodes would otherwise kick each other; the key gives one winner |
 | D-033 | 2026-10-31 | Socket handlers wait for the socket's registration (room join) via `markSocketReady` | With the sharded adapter the room join is async (per-room channel subscription); without waiting, replies to the visitor room could be lost right after connect |
 | D-034 | 2026-10-31 | Invalid socket payloads use `VALIDATION_FAILED` (same code as REST), not the spec's `VALIDATION_ERROR`; new code `NOT_IMPLEMENTED` for Part 4 stubs | One error vocabulary across REST and sockets |
@@ -689,14 +838,29 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | D-097 | 2026-10-31 | Dashboard stats use SCANs over visitor refs and the sharded match counters | No new hot-path counters needed for a dev dashboard; replaced by Prometheus metrics in Part 10 |
 | D-098 | 2026-10-31 | `pnpm admin:create` (env-only password, upsert that re-enables and clears TOTP) is the bootstrap path for the first admin anywhere | The seed refuses production; passwords must not appear in shell history or process lists |
 | D-099 | 2026-10-31 | Dashboard components (table, stat card, SVG line chart, OTP input, filter chips, confirm dialog, command palette, app shell) live in `@app/ui`, in-house | Reusable by any app; no chart library or third-party assets under the strict admin CSP; 21st daily code quota exhausted on 2026-10-31 |
+| D-100 | 2026-10-31 | Web CSP = per-request nonce + `'strict-dynamic'` in `proxy.ts` (all pages dynamic); `'wasm-unsafe-eval'` allowed (WebAssembly only, not JS eval) because tfjs's `long.js` instantiates a wasm helper; Zod `jitless` in `instrumentation-client.ts` of web and admin; HSTS only in production builds | Removes `'unsafe-inline'` scripts; production builds verified with zero CSP violations (Turnstile, NSFWJS, WebRTC). The spec allows `wasm-unsafe-eval` "only if TF.js needs it" — it does |
+| D-101 | 2026-10-31 | **Sharded Socket.io adapter on ioredis** (supersedes D-031) + `watchShardedSubscriber`: in-flight room (un)subscriptions tracked; one older than 15 s → error log, metric, `/ready` + `/health` 503 | Load tests: node-redis 6.3.1's subscriber wedged after a few 5k-client runs (a SUNSUBSCRIBE reply unmatched → every later SSUBSCRIBE queued forever → cross-node delivery silently lost). With ioredis 4 consecutive runs were clean. ioredis's Cluster support for sharded pub/sub must be validated before Redis Cluster (checklist) |
+| D-102 | 2026-10-31 | Prometheus metrics through `@app/metrics` (per-instance registry, `service` label, process metrics, optional `METRICS_TOKEN` bearer, off in production without one); worker gets a tiny HTTP server (`WORKER_METRICS_PORT`) | One mechanism for all services; tests build several apps per process; metrics must not be public by accident |
+| D-103 | 2026-10-31 | CORS split: only `ADMIN_ORIGINS` may call `/v1/admin/*` with credentials and the CSRF header; public routes allow `CORS_ORIGINS` without credentials | Audit: script on the public site (XSS, bad dependency) could read `/auth/me`'s CSRF token and act as a visiting moderator |
+| D-104 | 2026-10-31 | Admin TOTP mandatory when `DEPLOY_ENV=production` (`TOTP_ENROLLMENT_REQUIRED` until enrolled; `AdminMe.totpRequired`, dashboard redirects to Settings) | Admin accounts can ban anyone and see evidence; development stays frictionless |
+| D-105 | 2026-10-31 | Reports: idempotent per (reporter, session, participant); trust penalty + risk flag once per reporter → reported per 24 h (`report:penalty:*`); HARD-banned visitors can't report or get TURN credentials; worker replicas: budget multiplier once per window (`lock:mod:budget:*`), threshold check under `lock:report-threshold:*` | Audit: one person could push anyone into the shadow pool with 5 reports; replicas compounded the multiplier and could double-ban |
+| D-106 | 2026-10-31 | `DEPLOY_ENV` (development \| staging \| production) gates deployment guards: Turnstile test keys refused (api + web build), `TURNSTILE_HOSTNAMES` required and checked, the `session` action required and testing-key results refused, `NODE_ENV=production` required, `.env.example` placeholder secrets refused | Implements the D-063 deferral; `NODE_ENV` can't tell a local `next build` from a deployment |
+| D-107 | 2026-10-31 | Gateway handshake limits per visitor (30/min) and per IP hash (600/min) in Redis fixed windows, failing open; IPs hashed as IPv4 or IPv6 /64 (`hashIp`) | Connect loops cost a ban lookup and a cluster-wide `kick_visitor` each and refill the event bucket; IPv6 hosts own a /64 |
+| D-108 | 2026-10-31 | Gateway robustness: listeners never throw (non-string event names handled), `uncaughtException`/`unhandledRejection` → graceful drain + exit 1; readiness needs Redis only (Postgres reported) | A single packet could kill a node; a Postgres blip shouldn't pull every gateway from the load balancer (bans are cached) |
+| D-109 | 2026-10-31 | coturn: no TCP relays and private/reserved peer ranges denied even in dev (`--allowed-peer-ip` = coturn's own container IP for relay↔relay), ports bound to 127.0.0.1 unless `TURN_BIND_IP`; production template `infra/coturn/turnserver.production.conf`, guarded in CI | Audit: anyone with TURN credentials could reach Redis/Postgres on the Docker network |
+| D-110 | 2026-10-31 | Log redaction covers sensitive headers under any parent object; log-privacy integration tests scan api and gateway logs of a full flow at trace level | The API test found @fastify/multipart trace-logging the `Authorization` header (`busboyOptions.headers`) |
+| D-111 | 2026-10-31 | Retention job: BullMQ job scheduler `retention-purge` (hourly) deletes evidence whose `expiresAt` passed (object, then row) and clears transcripts of reports closed > 90 days ago; `expiresAt = null` (hash matches) never touched | Privacy promise of 90-day evidence retention needs enforcement; idempotent and safe with several workers |
+| D-112 | 2026-10-31 | Playwright e2e harness starts api/gateway/worker/web/admin from their builds on the usual ports (refuses if busy, or `E2E_REUSE_STACK=1`), records PIDs to restart the gateway, creates an e2e admin; one worker; `visitor` fixture closes contexts | Gateway-restart test needs a process the tests own; shared queues make parallel tests match each other |
+| D-113 | 2026-10-31 | Coverage (v8): `matchmaking`/`moderation` ≥ 90 % lines, apps ≥ 70 % of business logic; web excludes browser glue (React singletons/hooks, Socket.io factory, canvas grabber, audio meter) covered by e2e | Spec targets, measured honestly (all files in scope, not only loaded ones) |
+| D-114 | 2026-10-31 | Containers: one multi-stage Dockerfile per app (turbo prune → frozen install → build → `pnpm deploy --prod`, Prisma CLI tree dropped, non-root, HEALTHCHECK), Next.js standalone via `NEXT_OUTPUT=standalone`; Compose profiles `full` (with a `migrate` one-shot) and `observability` | Spec; images 300–580 MB; dev and `next start` unchanged |
+| D-115 | 2026-10-31 | Load mode mints visitor JWTs locally (`JWT_SECRET`), forks worker processes, scrapes gateway `/metrics`; `inspect` reads MONITOR over a raw socket | No Turnstile/API bottleneck for thousands of bots; ioredis' `monitor()` broke on our connection setup |
+| D-116 | 2026-10-31 | Bundled Node apps list `@app/*` as devDependencies | tsup bundles them; as runtime deps `pnpm deploy` would ship their whole dependency trees |
 
 ## 15. Known issues / TODOs / production gaps
 
 - `pnpm build` builds `apps/api` (tsup); internal packages intentionally have no build step. Because `@app/*` code is bundled into the app while npm deps stay external, every npm package used by a bundled workspace package (pino, pino-pretty, ioredis, zod, jose, @prisma/client, @prisma/adapter-pg) must also be listed in the app's own `dependencies`.
 - A ban created directly in Postgres (seed, SQL, Prisma Studio) takes up to 60 s to apply to visitors whose "not banned" result is cached; Parts 8/9 must write bans through code that updates `ban:*` keys.
-- `/v1/turn-credentials` does not re-check bans (a token issued before a ban keeps working for TURN until it expires); the gateway (Part 4) is where active sessions are cut off.
 - `Visitor.country` stays null (no GeoIP yet; in production use the CDN's country header).
-- Turnstile `hostname`/`action` from siteverify are not checked yet (add with the production hostname config in Part 10).
 - `/v1/session` needs internet access in dev (real siteverify call with the test secret).
 - `@app/db` and `@app/redis` tests are integration tests: they need `pnpm infra:up` first. turbo caches test results by file hashes, so a cached pass does not prove the DB/Redis are up (`pnpm test --force` to rerun).
 - Importing `@app/db` validates `DATABASE_URL` at import time (singleton). Tests and scripts that target another DB use `createPrismaClient` from the package internals instead.
@@ -704,38 +868,42 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 - `docker compose up -d --wait` without the service list fails on the exited `minio-init` one-shot container — always use `pnpm infra:up`.
 - Turborepo collects anonymous telemetry by default; opt out with `pnpm exec turbo telemetry disable` if desired.
 - **Crashed gateway node:** its visitors' waiting tickets stay matchable until presence expires (15 s) and the sweeper runs (≤ 30 s); a visitor matched with such a ghost now gets out automatically after `MATCH_ACK_TIMEOUT_MS` (ghost never acks) and, with auto-requeue, is requeued with priority.
-- `rtc:summary` is only logged; `moderation:signal` is still a stub (Parts 7/8).
 - The participant who stays until a session ends is stored with `leaveReason = null` (the DB enum has no "peer left" value).
 - Queue refs to tickets deleted by the sweeper are removed lazily by later scans of that queue; very rarely used interest queues can keep a few dead ids.
 - A natural disconnect racing a reconnect of the same visitor on another node could, in a tiny window, clean up the new connection's fresh ticket; the client would simply requeue.
 - The bot run needs `RATE_LIMIT_DISABLED=true` on the API for > 10 clients (session rate limit 10/min per IP).
-- Gateway: a device ban created while a visitor is connected does not disconnect them yet (the gateway doesn't know device hashes); Part 8's ban writer must resolve affected visitor ids and publish `ban_applied`/`kick_visitor`. The `ban_applied` message is defined but not handled by the gateway yet.
 - Gateway drain always waits up to 10 s if clients don't reconnect elsewhere (e.g. single-URL bots). The web client reconnects 500–1000 ms after an `io server disconnect`; with a single dev gateway it simply waits for the restarted node (sessions resume within `RECONNECT_GRACE_MS`).
-- `rtc_failed` early failures (D-048) are not triggered yet: nothing reports a WebRTC failure as a leave reason until Part 7 (`RTC_FAILED` path in `leaveParticipant` is ready, `earlyFailure: true`).
 - A gateway **crash** (no graceful shutdown) leaves its in-session participants `active` with no grace deadline; they become `reconnecting` only when the visitor reconnects. If they never return, the peer must skip; session keys expire after 24 h.
 - A hop is two scripts (cancel in the old bucket, enqueue in the new one); a process crash exactly between them leaves the visitor's ref pointing at a cancelled ticket until their client requeues.
 - Lowering `MM_BUCKETS` at runtime orphans tickets in buckets above the new count (the sweeper no longer visits them; they are never matched).
 - `turbo dev` (root `pnpm dev`) runs a single gateway node; use `pnpm --filter @app/gateway dev:multi` for two.
 - Killing only the child of `tsx watch` (e.g. by port) leaves the `tsx watch` parent alive; stop dev servers with Ctrl-C in their terminal.
 - **Web (Part 6):** a page reload ends the current chat (the new page starts a fresh search; the gateway marks the old participant `reconnecting` and `queue:join` then leaves that session, so the stranger sees "Stranger has disconnected"). Resuming across reloads would need the sessionId in `sessionStorage` and our own sent messages (not returned by `session:resume`) — deferred.
-- **Web:** CSP still allows `'unsafe-inline'` scripts (Next's inline bootstrap) and, in dev only, `'unsafe-eval'`; nonce-based CSP is Part 10. In dev, Next's dev-tools button ("N", bottom left) overlaps the page; it is not in production builds.
+- **Web:** in dev, the CSP adds `'unsafe-eval'` and `ws:` (React refresh, HMR) and Next's dev-tools button ("N", bottom left) overlaps the page; production builds have neither.
 - **Web:** the Turnstile widget needs internet (Cloudflare script + siteverify) even in dev; the dev CSP also allows `ws:`/`wss:` for Next's HMR socket.
-- **Web:** there is no report button until Part 8 (the video controls show a disabled "Report").
 - **Video:** the stranger turning their camera off shows as black video (no "camera off" signal yet; a `media:state` event could add one). Chosen camera/mic are not remembered between visits (defaults each time).
 - **Video:** headless Chrome on macOS hangs when capturing (even fake) audio; the browser checks synthesize the microphone with Web Audio (real browsers are unaffected).
 - **Video:** skipping faster than about once every 2 s is throttled by the gateway's token bucket (by design); the client retries the skip (D-075). The online count can lag ~15 s (10 s poll + 5 s presence + 2 s cache).
-- **Video:** `rtc:summary` counters are in-memory per gateway node (Part 10 exports them; they reset on restart).
+- **Video:** `rtc:summary` aggregates are per-node Prometheus counters (reset on restart; sum and `rate()` them in queries).
 - **Trust & safety (Part 8):** the worker uses the mock classifier and the no-op hash matcher in every environment (a warning is logged in production); real providers plug into `ImageClassifier` / `HashMatcher` (see `hash-matcher.ts` doc comment; checklist in Part 10).
-- **Trust & safety:** evidence has `expiresAt` (90 days) but no purge job deletes expired objects/rows yet, and `Report.transcript` has no automatic expiry (Part 9/10).
+- **Trust & safety:** the hourly retention job (D-111) enforces 90 days for evidence and closed reports' transcripts; open reports keep their transcript until resolved, and there is no legal-hold flag besides `expiresAt = null` (checklist).
 - **Trust & safety:** "report received" lowers trust immediately even for false reports (mitigated by the distinct-reporter threshold and human review in Part 9). The `new` tier uses first-seen < 24 h only (the "first 10 sessions" rule needs a session counter — not implemented).
 - **Trust & safety:** a report does not raise the sampling of a still-running session (1:1 chats end on report; matters for group calls, Part 12). Blocked chat messages count as violations even when the user was only sharing a harmless link.
 - **Client NSFW:** the model (2.6 MB) and tfjs (~1 MB) download on the first video call; inference uses WebGL (CPU fallback on devices without it); thresholds are untuned defaults. Headless Chrome: works with SwiftShader.
-- **Admin (Part 9):** no appeals workflow and no SSO (out of scope, TODO); bans by IP hash have no UI (visitor id only); evidence purge is still missing (see trust & safety). Dashboard stats use Redis SCAN (fine for development, replace with metrics at scale). Session cookies are not rotated on privilege change (sessions are short: `ADMIN_SESSION_TTL_SECONDS`).
+- **Admin (Part 9):** no appeals workflow and no SSO (out of scope, TODO); bans by IP hash have no UI (visitor id only). Dashboard stats use Redis SCAN (fine for development, replace with metrics at scale). Session cookies are not rotated on privilege change (sessions are short: `ADMIN_SESSION_TTL_SECONDS`).
 - **Admin:** a moderator's own reports queue can be large; the queue sorts the loaded page client-side (server order is priority ↓, oldest first). Disabling an admin ends their access on the next request but does not delete their Redis session keys (they expire).
 - **21st.dev licenses** of the adapted components (theme, Chat Messages, consent gate) were not returned by the MCP — verify on each component page before production (listed in §6 "UI components list").
 - Redis test DBs: worker moderation tests use DB 9 (the session-log tests use DB 10 for BullMQ in parallel).
-- The Part 6 browser smoke test (two Chrome contexts via playwright-core, network drop simulated by proxying the gateway WebSocket with `routeWebSocket`, because Chrome's offline emulation does not close open WebSockets) lived outside the repo; Part 10 adds Playwright e2e tests to the repo.
-- Production-only items (tracked fully in `docs/PRODUCTION_CHECKLIST.md` from Part 10): legal review, age-assurance vendor, CSAM hash matching + NCMEC reporting process, human moderation staffing, bare-metal TURN with `denied-peer-ip`, Kubernetes, Redis Cluster, PgBouncer, multi-region, CDN/WAF/DDoS.
+- Browser tests live in `e2e/` (Playwright, Part 10); headless Chrome on macOS needs the synthesized microphone (`e2e/support/visitors.ts`).
+- **Redis Cluster is not supported by the code yet** (dev and tests use one Redis): the MULTI on `presence:node:<id>` + `presence:nodes`, the pipelines over buckets (`chooseBucket`) and deadline shards (`claimDueDeadlines`) and the admin `/stats` SCAN + MGET cross hash slots; ioredis sharded pub/sub on a Cluster (D-101) is unvalidated. Listed in the checklist.
+- **BullMQ hot spot:** all queues share the `{bull}` tag; `session-log` was 24 % of Redis commands at 5,000 load-test clients (D-055 / checklist).
+- `pnpm audit`: 0 high/critical; 1 moderate (minimatch < 11.0.1 via ESLint, dev tooling only — not forced to a new major).
+- CI has not run on GitHub yet (no remote configured); the workflows were checked structurally (YAML, jobs, steps, pinned actions) but `actionlint` was not run locally (downloading its binary was not permitted).
+- **Containers (`pnpm stack:up`):** `NODE_ENV=production`, so the API's 10 sessions/min per IP applies to every browser on the machine (they share Docker's NAT address); images default to localhost URLs (`NEXT_PUBLIC_*` build args). The `migrate` image is the full build toolchain (2 GB; one-shot).
+- **E2E:** needs ports 3000/3001/4000–4002 free (or `E2E_REUSE_STACK=1`, which skips the gateway-restart test) and internet (Turnstile); `pnpm --filter @app/e2e test:e2e -- <file>` does not filter — use `pnpm --filter @app/e2e exec playwright test <file>`. Each run upserts the `e2e-admin@randomchat.local` admin and creates visitors/reports/bans in the dev database.
+- **Load-test numbers** come from one laptop running bots, both gateways and Redis together (§13c); treat them as a lower bound and re-measure on production-like hardware.
+- `ban:ip:<hash>` of an address shared by many users (CGNAT, offices) is read on every handshake and join; cache negative IP-ban lookups in the gateway before launch (checklist).
+- **Production gaps** are tracked in [`docs/PRODUCTION_CHECKLIST.md`](./docs/PRODUCTION_CHECKLIST.md) (100 items: legal review, age assurance, CSAM hash matching + NCMEC, real classifier, moderation staffing, Kubernetes + HPA, Redis Cluster, PgBouncer, session analytics off Postgres, multi-region, 1M validation, TURN/Janus fleets, CDN/WAF, secrets, backups/DR, retention, incident response, pen test).
 
 ## 16. Changelog
 
@@ -757,3 +925,4 @@ Payload limits (schemas): sessionId UUID; participantId `[A-Za-z0-9_-]{8,32}`; c
 | 2026-10-31 | 7 | Video chat (WebRTC): `lib/rtc` (LocalMedia, PeerSession with perfect negotiation, candidate queuing, restart policy, 800 kbps cap, stats/quality, summaries; MeshTransport behind a `CallTransport` interface; CallManager; TURN credential cache with refresh), controller integration (call follows the store, ack after the call exists, rtc signal routing, `rtc_failed`, throttled-skip retry, `pagehide`/`online`, `SERVER_RESTARTING` reconnect, Zod-validated server payloads), `/chat?mode=video` (pre-join check, call screen, device settings, mobile chat drawer, autoplay fallback), Video enabled on the landing page; `@app/ui` video components + sheet + stage tokens; gateway: `chat:next` reason `rtc_failed`, `rtc:summary` membership check + counters; `NEXT_PUBLIC_FORCE_TURN_RELAY` in `webEnv`; `docs/LAN_TESTING.md`; `agentRules: false`. Tests: PeerSession (16), CallManager (7), stats (3), ICE cache (2), LocalMedia (5), controller video (7) + throttle/restart/validation (4), gateway (3). |
 | 2026-10-31 | 8 | Trust & safety: `@app/moderation` (text filter with obfuscation handling, MockImageClassifier/NoopHashMatcher interfaces, TrustRules, risk tiers + frame schedules + budget multiplier, BanService, trust store, risk profiles, report priority), `@app/storage` (S3/MinIO + memory store), API `POST /v1/reports` (multipart, sharp re-encode, participant check, transcript snapshot, priority, MinIO evidence) and `POST /v1/moderation/frames` (schedule-enforcing Lua), trust/risk caching at session start, `features.reports`; worker jobs classify-frame / moderation-event / report-filed, session trust + missing-frame penalty, budget publisher; gateway text filter, `moderation:signal`, `ban_applied` (HARD/SHADOW across nodes), pool from ban + trust on handshake and every join, per-participant frame schedules in `match:found`, FRAME_SCHEDULE notices; web report dialog + buttons, evidence ring buffer, own-frame sampler, lazy NSFWJS watcher with blur overlay, blocked/masked message UX; migration `report_reporter_optional`; env `s3Env`, `trustEnv`, MOD_* + DEV_FORCE_FLAG_VISITOR_IDS. Tests: moderation 23, storage 2, API +6, worker +8, gateway +7, web +10, env +2. |
 | 2026-10-31 | 9 | Admin & moderation dashboard: API `/v1/admin/*` (cookie sessions in Redis, CSRF header, argon2 login with per-IP/per-email limits + lockout, AES-GCM-encrypted single-use TOTP with server-side QR, RBAC matrix, audited transactions, reports queue/detail with presigned evidence, actions with bans + trust, bans, events, visitors, live stats, audit log, admin users); `BanService.create/activate` + audited `apply`/`revoke`; trust adjust in transactions; storage `presignGet`; `apps/admin` (Next 16, nonce CSP via proxy.ts, noindex; login + TOTP step, dashboard with stat cards + SVG chart (5 s refresh), reports queue with filter chips/sorting/j-k-d-s triage, report detail with blurred evidence + transcript + decision panel, bans, visitor, events, audit, admins, settings/TOTP, ⌘K palette); `@app/ui` dashboard components; shared `admin.ts` contract + error codes; env `ADMIN_TOTP_ENC_KEY`, `ADMIN_SESSION_TTL_SECONDS`, `S3_PUBLIC_ENDPOINT`, `adminWebEnv`; `pnpm admin:create`. Tests: API admin 9 (auth/lockout/TOTP, CSRF, RBAC matrix, audit, presign scope, ban → ban_applied), admin triage 2, storage presign, env +1. |
+| 2026-10-31 | 10 | Hardening, observability, testing & DX. **Security:** per-request nonce CSPs (web + admin; `'wasm-unsafe-eval'` for tfjs, Zod jitless; zero violations in production builds), HSTS in production; independent route/event audit (§13a) and fixes — gateway crash on non-string event names (+ listeners never throw, drain on uncaught errors), report spam → shadow pool (per-chat dedupe, one penalty per reporter/24 h, banned reporters refused), admin CORS split (`ADMIN_ORIGINS`), TURN SSRF (dev deny list, no TCP relay, 127.0.0.1 binding, production template + CI check), handshake rate limits, fresh pool on Next, `DEPLOY_ENV` production guards (Turnstile test keys/hostname/action, placeholder secrets, NODE_ENV), IPv6 /64 hashing, mandatory admin TOTP in production, TURN credentials refused for HARD bans, `turns:` URLs; log redaction of headers under any parent (found by the new log-privacy tests); `pnpm audit` clean of high/critical. **Observability:** `@app/metrics` + `/metrics` on api, gateway, worker (§13b), worker HTTP server, Compose profile `observability` (Prometheus + Grafana 3002 with a provisioned 40-panel dashboard), correlation fields in gateway error logs. **Testing:** Playwright suite in `e2e/` (8 tests: text, video with `data-rtc-state` + frames, gateway restart, ghost tab, Next with 3 strangers, report, banned visitor, admin live ban; stable over repeated runs), coverage thresholds (`pnpm test:coverage`), +48 unit/integration tests (316 total). **Load & resilience:** `tools/bots` `load` + `inspect`; 2 nodes × 2k/5k clients × 1/8 buckets, Redis per-family ops and LFU hot keys, gateway-kill / Redis-restart / worker-kill drills (§13c); found and fixed a node-redis sharded-subscriber wedge (adapter now on ioredis + watchdog). **Workers:** retention job, replica-safe budget and report threshold. **Containers & CI:** Dockerfiles for all apps (standalone Next), Compose profile `full` (+ migrate), verified healthy with e2e flows passing against it; GitHub Actions CI (Postgres/Redis services, MinIO, coverage, build, audit, gitleaks, TURN-config check) + manual e2e workflow + Dependabot. **Docs:** README (run modes, testing, load testing, troubleshooting), `docs/PRODUCTION_CHECKLIST.md`. Decisions D-100…D-116. |

@@ -1,0 +1,35 @@
+# Prometheus for local development (compose profile `observability`).
+# Scrapes the services running on the host (`pnpm dev`, `dev:multi`, bots) and, when the
+# `full` profile runs the stack in containers, the containers on the compose network.
+# Targets that are not running simply show as down. With METRICS_TOKEN set on the services,
+# add `authorization: { credentials: <token> }` to each job (production: credentials_file).
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets: ['host.docker.internal:4000']
+        labels: { mode: host }
+      - targets: ['api:4000']
+        labels: { mode: container }
+
+  - job_name: gateway
+    static_configs:
+      # Second node: `pnpm --filter @app/gateway dev:multi` (4011) or the load-test nodes.
+      - targets: ['host.docker.internal:4001', 'host.docker.internal:4011']
+        labels: { mode: host }
+      - targets: ['gateway:4001']
+        labels: { mode: container }
+
+  - job_name: worker
+    static_configs:
+      - targets: ['host.docker.internal:4002']
+        labels: { mode: host }
+      - targets: ['worker:4002']
+        labels: { mode: container }
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

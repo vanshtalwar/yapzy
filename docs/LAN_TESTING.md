@@ -21,9 +21,13 @@ CORS_ORIGINS=http://localhost:3000,http://192.168.1.20:3000
 TURN_EXTERNAL_IP=192.168.1.20
 TURN_HOST=192.168.1.20
 STUN_URLS=stun:192.168.1.20:3478
+# coturn listens on 127.0.0.1 only unless you opt in (it relays for anyone with credentials)
+TURN_BIND_IP=0.0.0.0
 ```
 
-Then `pnpm infra:up` (coturn picks up `TURN_EXTERNAL_IP`) and restart `pnpm dev`. The web dev
+Then `pnpm infra:up` (coturn picks up `TURN_EXTERNAL_IP` and `TURN_BIND_IP`) and restart
+`pnpm dev`. Set `TURN_BIND_IP` back to empty (or remove it) when you are done: even with the
+relay restrictions in `turnserver.conf`, an open TURN server on a shared network is best avoided. The web dev
 server accepts requests for the host in `NEXT_PUBLIC_GATEWAY_URL` (`allowedDevOrigins` in
 `apps/web/next.config.mjs`), so its HMR and assets work from the LAN address.
 

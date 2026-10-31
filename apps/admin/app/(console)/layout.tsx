@@ -29,6 +29,12 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
     if (!loading && me === null) router.replace('/login');
   }, [loading, me, router]);
 
+  // Production: the API refuses everything but enrolment until two-factor auth is on.
+  const mustEnrol = me !== null && me.totpRequired && !me.totpEnabled;
+  useEffect(() => {
+    if (mustEnrol && pathname !== '/settings') router.replace('/settings');
+  }, [mustEnrol, pathname, router]);
+
   if (me === null) {
     return (
       <div className="flex min-h-dvh items-center justify-center">

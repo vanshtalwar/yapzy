@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 
-import { banDeviceKey, banIpKey, type Redis } from '@app/redis';
+import { banDeviceKey, banIpKey, banVisitorKey, type Redis } from '@app/redis';
 import { hmacHash } from '@app/shared/crypto';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -257,6 +257,22 @@ describe('POST /v1/session', () => {
 });
 
 describe('GET /v1/turn-credentials', () => {
+  it('refuses visitors who were HARD-banned after their token was issued', async () => {
+    const { token, visitorId } = await startSession();
+    await redis.set(
+      banVisitorKey(visitorId),
+      JSON.stringify({
+        banned: true,
+        banId: '0199a3b2-7c4d-7e5f-8a9b-0c1d2e3f4a5b',
+        type: 'HARD',
+        expiresAt: null,
+      }),
+    );
+    const response = await getTurn(token);
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: 'BANNED' } });
+  });
+
   it('returns coturn REST credentials (HMAC-SHA1 over "<expiry>:<visitorId>")', async () => {
     const { token, visitorId } = await startSession();
     const response = await getTurn(token);
@@ -282,6 +298,25 @@ describe('GET /v1/turn-credentials', () => {
         },
       ],
     });
+  });
+
+  it('adds a turns: URL when TURN_TLS_PORT is set', async () => {
+    const tls = await buildTestApp({ clock, config: { ...testConfig, TURN_TLS_PORT: 443 } });
+    try {
+      const { token } = await startSession();
+      const response = await tls.inject({
+        method: 'GET',
+        url: '/v1/turn-credentials',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(response.json<{ iceServers: { urls: string[] }[] }>().iceServers[1]?.urls).toEqual([
+        'turn:turn.test:3478?transport=udp',
+        'turn:turn.test:3478?transport=tcp',
+        'turns:turn.test:443?transport=tcp',
+      ]);
+    } finally {
+      await tls.close();
+    }
   });
 
   it('distinguishes missing, tampered and expired tokens', async () => {
@@ -341,6 +376,36 @@ describe('cross-cutting behaviour', () => {
     expect(simple.headers['access-control-allow-origin']).toBeUndefined();
   });
 
+  it('allows credentials and the CSRF header only for admin origins on /v1/admin/*', async () => {
+    const preflight = (url: string, origin: string, headers: string) =>
+      app.inject({
+        method: 'OPTIONS',
+        url,
+        headers: {
+          origin,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': headers,
+        },
+      });
+    const admin = await preflight('/v1/admin/bans', 'http://localhost:3001', 'x-admin-csrf');
+    expect(admin.headers['access-control-allow-origin']).toBe('http://localhost:3001');
+    expect(admin.headers['access-control-allow-credentials']).toBe('true');
+    expect(admin.headers['access-control-allow-headers']).toContain('x-admin-csrf');
+
+    // The public site may not call admin routes with credentials…
+    const fromPublic = await preflight('/v1/admin/bans', 'http://localhost:3000', 'x-admin-csrf');
+    expect(fromPublic.headers['access-control-allow-origin']).toBeUndefined();
+    const me = await app.inject({
+      url: '/v1/admin/auth/me',
+      headers: { origin: 'http://localhost:3000' },
+    });
+    expect(me.headers['access-control-allow-origin']).toBeUndefined();
+    // …and public routes never allow credentials or the admin header.
+    const session = await preflight('/v1/session', 'http://localhost:3000', 'content-type');
+    expect(session.headers['access-control-allow-credentials']).toBeUndefined();
+    expect(session.headers['access-control-allow-headers']).not.toContain('x-admin-csrf');
+  });
+
   it('returns the envelope for unknown routes and oversized bodies', async () => {
     const notFound = await app.inject({ url: '/nope' });
     expect(notFound.statusCode).toBe(404);
@@ -379,6 +444,65 @@ describe('cross-cutting behaviour', () => {
       expect(await read()).toBe(14);
     } finally {
       await statsApp.close();
+    }
+  });
+});
+
+/** The value of the first sample of `metric` that has all `labels` (label order varies). */
+function sampleValue(body: string, metric: string, labels: Record<string, string>): number {
+  const line = body
+    .split('\n')
+    .find(
+      (candidate) =>
+        candidate.startsWith(`${metric}{`) &&
+        Object.entries(labels).every(([key, value]) => candidate.includes(`${key}="${value}"`)),
+    );
+  return line === undefined ? 0 : Number(line.slice(line.lastIndexOf(' ') + 1));
+}
+
+describe('GET /metrics', () => {
+  it('exposes request latency by route pattern and counts 429s', async () => {
+    const ip = randomTestIp();
+    for (let i = 0; i <= SESSION_RATE_LIMIT.max; i += 1) await postSession({}, { ip });
+    await app.inject({ method: 'GET', url: '/v1/does-not-exist' });
+    const response = await app.inject({ method: 'GET', url: '/metrics' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    const body = response.body;
+    const session = { service: 'api', method: 'POST', route: '/v1/session' };
+    expect(
+      sampleValue(body, 'http_request_duration_seconds_count', { ...session, status: '200' }),
+    ).toBeGreaterThanOrEqual(SESSION_RATE_LIMIT.max);
+    expect(
+      sampleValue(body, 'http_request_duration_seconds_count', { ...session, status: '429' }),
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      sampleValue(body, 'http_request_duration_seconds_count', {
+        route: 'unmatched',
+        status: '404',
+      }),
+    ).toBeGreaterThanOrEqual(1);
+    expect(body).not.toContain('does-not-exist'); // raw URLs never become labels
+    expect(
+      sampleValue(body, 'rate_limit_hits_total', { route: '/v1/session' }),
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('requires the bearer token when METRICS_TOKEN is set, and is off in production without one', async () => {
+    const token = 'metrics-token-0123456789';
+    const guarded = await buildTestApp({ config: { ...testConfig, METRICS_TOKEN: token } });
+    const production = await buildTestApp({ config: { ...testConfig, DEPLOY_ENV: 'production' } });
+    try {
+      expect((await guarded.inject({ method: 'GET', url: '/metrics' })).statusCode).toBe(401);
+      const ok = await guarded.inject({
+        method: 'GET',
+        url: '/metrics',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(ok.statusCode).toBe(200);
+      expect((await production.inject({ method: 'GET', url: '/metrics' })).statusCode).toBe(404);
+    } finally {
+      await Promise.all([guarded.close(), production.close()]);
     }
   });
 });

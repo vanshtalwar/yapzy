@@ -129,6 +129,8 @@ export async function classifyFrame(
       expiresAt: hash.matched ? null : new Date(now.getTime() + config.autoBanHours * 3_600_000),
     });
   }
+  deps.observer?.action(hash.matched ? 'hash_match' : 'server_classifier', action.toLowerCase());
+  deps.observer?.autoReport(reason);
   logger.info(
     { reportId: report.id, eventId: event.id, label: label.name, action },
     'frame flagged',

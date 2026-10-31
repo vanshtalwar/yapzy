@@ -27,6 +27,7 @@ describe('createEnv', () => {
     expect(createEnv(baseEnv, { source: {} })).toEqual({
       NODE_ENV: 'development',
       LOG_LEVEL: 'info',
+      DEPLOY_ENV: 'development',
     });
   });
 
@@ -123,6 +124,63 @@ describe('apiEnv', () => {
     S3_SECRET_KEY: 'minio-secret',
     ADMIN_TOTP_ENC_KEY: 'ab'.repeat(32),
   };
+
+  it('refuses Turnstile test secrets and requires hostnames when DEPLOY_ENV=production', () => {
+    const production = { ...valid, DEPLOY_ENV: 'production', NODE_ENV: 'production' };
+    expect(() => createEnv(apiEnv, { source: production })).toThrow(/TURNSTILE_SECRET_KEY/);
+    expect(() =>
+      createEnv(apiEnv, {
+        source: { ...production, TURNSTILE_SECRET_KEY: '0x4AAAAAAAreal-secret' },
+      }),
+    ).toThrow(/TURNSTILE_HOSTNAMES/);
+    const env = createEnv(apiEnv, {
+      source: {
+        ...production,
+        TURNSTILE_SECRET_KEY: '0x4AAAAAAAreal-secret',
+        TURNSTILE_HOSTNAMES: 'randomchat.example, www.randomchat.example',
+        METRICS_TOKEN: 'm'.repeat(32),
+      },
+    });
+    expect(env.TURNSTILE_HOSTNAMES).toEqual(['randomchat.example', 'www.randomchat.example']);
+    expect(env.METRICS_TOKEN).toBe('m'.repeat(32));
+    // Staging and development may use the test keys.
+    expect(createEnv(apiEnv, { source: { ...valid, DEPLOY_ENV: 'staging' } }).DEPLOY_ENV).toBe(
+      'staging',
+    );
+    expect(() => createEnv(apiEnv, { source: { ...valid, METRICS_TOKEN: 'short' } })).toThrow(
+      /METRICS_TOKEN/,
+    );
+  });
+
+  it('refuses .env.example placeholders and a non-production NODE_ENV in production', () => {
+    const real = {
+      ...valid,
+      DEPLOY_ENV: 'production',
+      NODE_ENV: 'production',
+      TURNSTILE_SECRET_KEY: '0x4AAAAAAAreal-secret',
+      TURNSTILE_HOSTNAMES: 'randomchat.example',
+    };
+    expect(createEnv(apiEnv, { source: real }).DEPLOY_ENV).toBe('production');
+    expect(() => createEnv(apiEnv, { source: { ...real, NODE_ENV: 'development' } })).toThrow(
+      /NODE_ENV/,
+    );
+    for (const [key, value] of [
+      ['JWT_SECRET', 'dev-only-jwt-secret-change-me-0123456789abcdef'],
+      ['IP_HASH_PEPPER', 'dev-only-ip-pepper-change-me'],
+      ['ADMIN_TOTP_ENC_KEY', '0'.repeat(64)],
+      ['S3_SECRET_KEY', 'dev-only-minio-secret-change-me'],
+    ] as const) {
+      expect(() => createEnv(apiEnv, { source: { ...real, [key]: value } })).toThrow(
+        new RegExp(key),
+      );
+    }
+    // Development keeps working with the placeholders.
+    expect(
+      createEnv(apiEnv, {
+        source: { ...valid, JWT_SECRET: 'dev-only-jwt-secret-change-me-0123456789abcdef' },
+      }).JWT_SECRET,
+    ).toContain('dev-only');
+  });
 
   it('requires a 32-byte hex key for admin TOTP secrets', () => {
     expect(() => createEnv(apiEnv, { source: { ...valid, ADMIN_TOTP_ENC_KEY: 'short' } })).toThrow(
@@ -244,5 +302,26 @@ describe('webEnv', () => {
       NEXT_PUBLIC_GATEWAY_URL: 'http://localhost:4001',
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
     });
+  });
+
+  it('refuses Turnstile test site keys when DEPLOY_ENV=production', () => {
+    for (const key of [
+      '1x00000000000000000000AA',
+      '2x00000000000000000000AB',
+      '3x00000000000000000000FF',
+    ]) {
+      expect(() =>
+        createEnv(webEnv, {
+          source: { DEPLOY_ENV: 'production', NEXT_PUBLIC_TURNSTILE_SITE_KEY: key },
+        }),
+      ).toThrow(/NEXT_PUBLIC_TURNSTILE_SITE_KEY/);
+    }
+    const env = createEnv(webEnv, {
+      source: {
+        DEPLOY_ENV: 'production',
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: '0x4AAAAAAAreal-site-key',
+      },
+    });
+    expect(env.NEXT_PUBLIC_TURNSTILE_SITE_KEY).toBe('0x4AAAAAAAreal-site-key');
   });
 });

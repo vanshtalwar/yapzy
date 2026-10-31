@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react';
 
 interface TurnstileOptions {
   sitekey: string;
+  /** Echoed by siteverify; the API refuses tokens solved for another action. */
+  action: string;
   theme: 'auto' | 'light' | 'dark';
   callback: (token: string) => void;
   'expired-callback': () => void;
@@ -71,6 +73,7 @@ export function Turnstile({ siteKey, onToken, onExpire, onError }: TurnstileProp
         if (cancelled || container.current === null) return;
         widgetId = turnstile.render(container.current, {
           sitekey: siteKey,
+          action: 'session',
           theme: 'auto',
           callback: (token) => {
             handlers.current.onToken(token);

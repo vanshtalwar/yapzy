@@ -1,0 +1,18 @@
+# Build context = repo root. Secrets and local state never enter an image.
+.env
+.env.*
+!.env.example
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.turbo
+**/*.tsbuildinfo
+**/src/generated
+apps/web/public/models
+e2e/test-results
+e2e/playwright-report
+e2e/.stack.json
+.git
+.claude
+*.log

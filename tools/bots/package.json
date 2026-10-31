@@ -7,11 +7,14 @@
     "connect": "tsx src/connect.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
-    "bots": "tsx src/bots.ts"
+    "bots": "tsx src/bots.ts",
+    "load": "tsx src/load.ts",
+    "inspect": "tsx src/inspect.ts"
   },
   "dependencies": {
     "@app/env": "workspace:*",
     "@app/logger": "workspace:*",
+    "@app/redis": "workspace:*",
     "@app/shared": "workspace:*",
     "socket.io-client": "catalog:",
     "zod": "catalog:"

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { createPrismaClient } from '@app/db';
-import { createEnv, databaseTestEnv, gatewayEnv, redisTestEnv } from '@app/env';
-import { createLogger } from '@app/logger';
+import { createEnv, databaseTestEnv, type GatewayEnv, gatewayEnv, redisTestEnv } from '@app/env';
+import { createLogger, type Logger } from '@app/logger';
 import { createRedis } from '@app/redis';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import { io as connectClient, type Socket as ClientSocket } from 'socket.io-client';
@@ -22,24 +22,34 @@ const appRedisUrl = (() => {
 export const ALLOWED_ORIGIN = 'http://localhost:3000';
 const JWT_SECRET = 'gateway-test-jwt-secret-0123456789abcdef';
 
-export const testConfig = createEnv(gatewayEnv, {
-  service: 'gateway-tests',
-  source: {
-    NODE_ENV: 'test',
-    LOG_LEVEL: 'silent',
-    DATABASE_URL: DATABASE_URL_TEST,
-    REDIS_URL: REDIS_URL_TEST,
-    IP_HASH_PEPPER: 'gateway-test-ip-pepper',
-    JWT_SECRET,
-    CORS_ORIGINS: ALLOWED_ORIGIN,
-    // One bucket by default keeps session tests deterministic; text:zh exercises buckets.
-    MM_BUCKETS: '1',
-    MM_BUCKETS_BY_QUEUE: '{"text:zh": 4}',
-    MATCH_ACK_TIMEOUT_MS: '1000',
-    RECONNECT_GRACE_MS: '1500',
-    EARLY_FAILURE_WINDOW_MS: '10000',
-  },
-});
+const testSource = {
+  NODE_ENV: 'test',
+  LOG_LEVEL: 'silent',
+  DATABASE_URL: DATABASE_URL_TEST,
+  REDIS_URL: REDIS_URL_TEST,
+  IP_HASH_PEPPER: 'gateway-test-ip-pepper',
+  JWT_SECRET,
+  CORS_ORIGINS: ALLOWED_ORIGIN,
+  // One bucket by default keeps session tests deterministic; text:zh exercises buckets.
+  MM_BUCKETS: '1',
+  MM_BUCKETS_BY_QUEUE: '{"text:zh": 4}',
+  MATCH_ACK_TIMEOUT_MS: '1000',
+  RECONNECT_GRACE_MS: '1500',
+  EARLY_FAILURE_WINDOW_MS: '10000',
+  // All test sockets share 127.0.0.1; the limits themselves are tested with low values.
+  HANDSHAKE_LIMIT_PER_VISITOR: '1000',
+  HANDSHAKE_LIMIT_PER_IP: '1000000',
+};
+
+export const testConfig = createEnv(gatewayEnv, { service: 'gateway-tests', source: testSource });
+
+/** The test configuration with some variables changed (raw env strings, validated again). */
+export function testConfigWith(overrides: Record<string, string>): GatewayEnv {
+  return createEnv(gatewayEnv, {
+    service: 'gateway-tests',
+    source: { ...testSource, ...overrides },
+  });
+}
 
 export const prisma = createPrismaClient({ databaseUrl: DATABASE_URL_TEST, maxConnections: 4 });
 export const appRedis = createRedis(appRedisUrl, { connectionName: 'gateway-tests' });
@@ -51,14 +61,19 @@ export const CONTROL_CHANNEL = `test:gw:control:${runId}`;
 
 export function startGateway(
   name: string,
-  options: { drainTimeoutMs?: number; interestFallbackMs?: number } = {},
+  options: {
+    drainTimeoutMs?: number;
+    interestFallbackMs?: number;
+    config?: GatewayEnv;
+    logger?: Logger;
+  } = {},
 ) {
   return (async (): Promise<{ gateway: Gateway; port: number; url: string }> => {
     const gateway = await createGateway({
-      config: testConfig,
+      config: options.config ?? testConfig,
       nodeId: `test-${name}-${runId}`,
       prisma,
-      logger: createLogger({ service: 'gateway-test', level: 'silent' }),
+      logger: options.logger ?? createLogger({ service: 'gateway-test', level: 'silent' }),
       redisUrl: appRedisUrl,
       options: {
         controlChannel: CONTROL_CHANNEL,
@@ -85,14 +100,14 @@ export function tokenFor(visitorId: string, issuedAt = new Date()): Promise<stri
 
 export function connect(
   url: string,
-  options: { token?: string; origin?: string } = {},
+  options: { token?: string; origin?: string; headers?: Record<string, string> } = {},
 ): ClientSocket {
   return connectClient(url, {
     transports: ['websocket'],
     reconnection: false,
     forceNew: true,
     auth: options.token === undefined ? {} : { token: options.token },
-    extraHeaders: { origin: options.origin ?? ALLOWED_ORIGIN },
+    extraHeaders: { origin: options.origin ?? ALLOWED_ORIGIN, ...options.headers },
   });
 }
 

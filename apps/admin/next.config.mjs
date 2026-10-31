@@ -17,6 +17,12 @@ const nextConfig = {
   // `next dev` would otherwise write an AGENTS.md here; agent docs live in CLAUDE.md/CONTEXT.md.
   agentRules: false,
   transpilePackages: ['@app/shared', '@app/ui'],
+  // Container images (Dockerfile sets NEXT_OUTPUT=standalone): a self-contained server with only
+  // the traced dependencies; local `next start` keeps the regular output.
+  ...(process.env.NEXT_OUTPUT === 'standalone'
+    ? { output: /** @type {const} */ ('standalone') }
+    : {}),
+  outputFileTracingRoot: path.join(import.meta.dirname, '../..'),
   turbopack: { root: path.join(import.meta.dirname, '../..') },
   allowedDevOrigins: [new URL(env.NEXT_PUBLIC_API_URL).hostname],
   headers() {
@@ -33,6 +39,9 @@ const nextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
           },
+          ...(process.env.NODE_ENV === 'production'
+            ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' }]
+            : []),
         ],
       },
     ]);

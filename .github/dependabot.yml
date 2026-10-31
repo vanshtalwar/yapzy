@@ -1,0 +1,32 @@
+# Weekly dependency updates. pnpm's minimum-release-age guard (pnpm-workspace.yaml) still
+# applies when a PR's lockfile is installed.
+version: 2
+updates:
+  - package-ecosystem: npm # pnpm workspace: package.json files + pnpm-lock.yaml
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      types:
+        patterns: ['@types/*']
+      lint-and-format:
+        patterns: ['eslint*', '@eslint/*', 'typescript-eslint', 'prettier', 'eslint-*']
+      testing:
+        patterns: ['vitest', '@vitest/*', '@playwright/test', '@testing-library/*', 'jsdom']
+      prisma:
+        patterns: ['prisma', '@prisma/*'] # CLI and client must move together (D-020)
+      next-react:
+        patterns: ['next', '@next/*', 'react', 'react-dom']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directories: ['/apps/api', '/apps/gateway', '/apps/worker', '/apps/web', '/apps/admin']
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directory: /infra/docker
+    schedule:
+      interval: weekly

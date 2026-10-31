@@ -1,6 +1,22 @@
 # Local development infrastructure. Run from the repo root via `pnpm infra:up`
 # (which passes `--env-file .env` so ${VARS} below come from the root .env).
+# Profiles: `observability` (Prometheus + Grafana, `pnpm obs:up`) and `full` (every app in a
+# container as well, `pnpm stack:up`; stop the dev servers first, the ports are the same).
 name: randomchat
+
+# Containers of the `full` profile: the root .env plus in-network addresses. Browser-facing
+# URLs (NEXT_PUBLIC_*, TURN_HOST, S3_PUBLIC_ENDPOINT) stay on localhost.
+x-app: &app
+  profiles: [full]
+  env_file: ../../.env
+  restart: unless-stopped
+x-app-env: &app-env
+  NODE_ENV: production
+  LOG_LEVEL: info
+  DATABASE_URL: postgresql://app:app@postgres:5432/app
+  REDIS_URL: redis://redis:6379
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: http://localhost:9000
 
 services:
   postgres:
@@ -47,11 +63,16 @@ services:
       - /etc/coturn/turnserver.conf
       - --static-auth-secret=${TURN_SECRET:?TURN_SECRET must be set in .env}
       - --external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}
+      # Relayed↔relayed calls make coturn its own peer: it maps the external IP back to its
+      # container address, which the 172.16.0.0/12 rule in turnserver.conf would deny. Exempt
+      # exactly that address (the image entrypoint evaluates $(...) in arguments).
+      - --allowed-peer-ip=$$(hostname -i)
     ports:
-      # Not bound to 127.0.0.1 so phones/laptops on the LAN can be tested (see CONTEXT.md).
-      - '3478:3478/udp'
-      - '3478:3478/tcp'
-      - '49160-49200:49160-49200/udp'
+      # This machine only by default; TURN_BIND_IP=0.0.0.0 exposes it to phones/laptops on the
+      # LAN (docs/LAN_TESTING.md).
+      - '${TURN_BIND_IP:-127.0.0.1}:3478:3478/udp'
+      - '${TURN_BIND_IP:-127.0.0.1}:3478:3478/tcp'
+      - '${TURN_BIND_IP:-127.0.0.1}:49160-49200:49160-49200/udp'
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     healthcheck:
@@ -97,7 +118,136 @@ services:
       - ./minio/frames-lifecycle.json:/frames-lifecycle.json:ro
     restart: 'no'
 
+  # --- Profile `observability` (`pnpm obs:up`): Prometheus scrapes the services on the host
+  # (and the `full` profile's containers); Grafana on http://localhost:3002 with the provisioned
+  # "RandomChat — overview" dashboard (anonymous read-only access; admin login for edits).
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    extra_hosts:
+      # Linux engines need this mapping; Docker Desktop provides it already.
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '127.0.0.1:9090:9090'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:9090/-/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    profiles: [observability]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/randomchat.json
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
+    ports:
+      - '127.0.0.1:3002:3000'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/health']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # --- Profile `full`: the apps, built from their Dockerfiles (context = repo root).
+  migrate:
+    profiles: [full]
+    build: { context: ../.., dockerfile: apps/api/Dockerfile, target: migrate }
+    environment:
+      DATABASE_URL: postgresql://app:app@postgres:5432/app
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: 'no'
+
+  api:
+    <<: *app
+    build: { context: ../.., dockerfile: apps/api/Dockerfile }
+    environment:
+      <<: *app-env
+      API_HOST: 0.0.0.0
+    ports:
+      - '127.0.0.1:4000:4000'
+    depends_on: &app-deps
+      migrate: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  gateway:
+    <<: *app
+    build: { context: ../.., dockerfile: apps/gateway/Dockerfile }
+    environment:
+      <<: *app-env
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_NODE_ID: gw-container
+    ports:
+      - '127.0.0.1:4001:4001'
+    depends_on: *app-deps
+
+  worker:
+    <<: *app
+    build: { context: ../.., dockerfile: apps/worker/Dockerfile }
+    environment:
+      <<: *app-env
+      WORKER_METRICS_HOST: 0.0.0.0
+    ports:
+      - '127.0.0.1:4002:4002'
+    depends_on: *app-deps
+
+  web:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        NEXT_PUBLIC_GATEWAY_URL: ${NEXT_PUBLIC_GATEWAY_URL:-http://localhost:4001}
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
+        NEXT_PUBLIC_FORCE_TURN_RELAY: ${NEXT_PUBLIC_FORCE_TURN_RELAY:-false}
+        DEPLOY_ENV: ${DEPLOY_ENV:-development}
+    environment:
+      NODE_ENV: production
+    ports:
+      - '127.0.0.1:3000:3000'
+
+  admin:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: apps/admin/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+    environment:
+      NODE_ENV: production
+      ADMIN_EVIDENCE_ORIGIN: http://localhost:9000
+    ports:
+      - '127.0.0.1:3001:3001'
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
+  prometheus-data:
+  grafana-data:

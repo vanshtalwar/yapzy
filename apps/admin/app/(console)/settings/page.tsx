@@ -27,6 +27,11 @@ export default function SettingsPage() {
   return (
     <div className="grid max-w-xl gap-6">
       <h1 className="text-xl font-semibold">Settings</h1>
+      {me.totpRequired && !me.totpEnabled && (
+        <p role="alert" className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
+          Set up two-factor authentication to continue. The dashboard is locked until it is on.
+        </p>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">

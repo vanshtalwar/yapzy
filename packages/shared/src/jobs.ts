@@ -13,6 +13,8 @@ export const QUEUE_NAMES = {
   MODERATION_EVENT: 'moderation-event',
   /** A report was filed: trust change, risk flag, automatic shadow ban past the threshold. */
   REPORT_FILED: 'report-filed',
+  /** Hourly: delete expired evidence objects/rows and old transcripts of closed reports. */
+  RETENTION: 'retention',
 } as const;
 
 /**
@@ -111,6 +113,8 @@ export type ModerationEventJob = z.output<typeof moderationEventJobSchema>;
 export const reportFiledJobSchema = z.object({
   reportId: z.uuid(),
   reportedId: z.string().min(1),
+  /** The visitor who reported (one trust penalty per reporter → reported per 24 h). */
+  reporterId: z.string().min(1).optional(),
   sessionId: sessionIdSchema,
   at: z.iso.datetime(),
 });

@@ -11,6 +11,8 @@ import {
 import { createRedis } from '@app/redis';
 import { createObjectStore } from '@app/storage';
 
+import { startWorkerHttp } from './http.ts';
+import { createDefaultWorkerMetrics } from './metrics.ts';
 import { createWorkers } from './worker.ts';
 
 const FORCE_EXIT_AFTER_MS = 30_000;
@@ -39,7 +41,9 @@ if (config.NODE_ENV === 'production') {
   logger.warn('using the mock image classifier and no-op hash matcher (see PRODUCTION_CHECKLIST)');
 }
 
+const metrics = createDefaultWorkerMetrics(true);
 const workers = createWorkers({
+  metrics,
   redisUrl: config.REDIS_URL,
   prisma,
   logger,
@@ -64,7 +68,23 @@ const workers = createWorkers({
     logger,
   },
 });
-logger.info({ concurrency: config.WORKER_CONCURRENCY }, 'worker started');
+const metricsAccess = {
+  token: config.METRICS_TOKEN,
+  requireToken: config.DEPLOY_ENV === 'production',
+};
+if (metricsAccess.requireToken && config.METRICS_TOKEN === undefined) {
+  logger.warn('METRICS_TOKEN not set: /metrics is disabled (DEPLOY_ENV=production)');
+}
+const http = await startWorkerHttp({
+  host: config.WORKER_METRICS_HOST,
+  port: config.WORKER_METRICS_PORT,
+  registry: metrics.registry,
+  access: metricsAccess,
+});
+logger.info(
+  { concurrency: config.WORKER_CONCURRENCY, port: http.port },
+  'worker started (/health, /metrics)',
+);
 
 let stopping = false;
 async function stop(signal: NodeJS.Signals): Promise<void> {
@@ -76,6 +96,7 @@ async function stop(signal: NodeJS.Signals): Promise<void> {
     process.exit(1);
   }, FORCE_EXIT_AFTER_MS).unref();
   try {
+    await http.close();
     await workers.close();
     await Promise.allSettled([prisma.$disconnect(), redis.quit()]);
     objects.destroy();

@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { reportPriority } from '@app/moderation';
 import {
+  banVisitorKey,
   moderationFramesKey,
   riskProfileKey,
   sessionKeys,
@@ -180,6 +181,19 @@ describe('session creation caches trust and risk for the gateway', () => {
 });
 
 describe('POST /v1/reports', () => {
+  it('refuses HARD-banned reporters (their token outlives the ban)', async () => {
+    const [a, b] = [await visitor(), await visitor()];
+    const sessionId = await session(a, b);
+    await redis.set(
+      banVisitorKey(a.id),
+      JSON.stringify({ banned: true, banId: randomUUID(), type: 'HARD', expiresAt: null }),
+    );
+    const response = await report(a, { sessionId, reportedParticipantId: PB, reason: 'OTHER' });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: { code: 'BANNED' } });
+    expect(jobs.recorded.reportFiled).toEqual([]);
+  });
+
   it('rejects people who were not in the chat, and reporting yourself', async () => {
     const [a, b, stranger] = [await visitor(), await visitor(), await visitor()];
     const sessionId = await session(a, b);
@@ -263,8 +277,14 @@ describe('POST /v1/reports', () => {
       expect(evidence.expiresAt?.getTime()).toBeGreaterThan(clock.now().getTime());
     }
     expect(jobs.recorded.reportFiled).toEqual([
-      { reportId, reportedId: b.id, sessionId, at: clock.now().toISOString() },
+      { reportId, reportedId: b.id, reporterId: a.id, sessionId, at: clock.now().toISOString() },
     ]);
+
+    // Reporting the same chat again is idempotent: same report, no new job.
+    const repeat = await report(a, { sessionId, reportedParticipantId: PB, reason: 'HARASSMENT' });
+    expect(repeat.statusCode).toBe(200);
+    expect(repeat.json()).toEqual({ reportId });
+    expect(jobs.recorded.reportFiled).toHaveLength(1);
 
     // A second report against the same visitor within 24 h is reviewed sooner.
     const c = await visitor();

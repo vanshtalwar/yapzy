@@ -20,6 +20,12 @@ export interface ModerationConfig {
   autoBanHours: number;
 }
 
+/** Hooks for metrics (`moderation_actions_total`, `reports_total{source="auto"}`). */
+export interface ModerationObserver {
+  action(source: string, action: string): void;
+  autoReport(reason: string): void;
+}
+
 export interface ModerationDeps {
   prisma: PrismaClient;
   redis: Redis;
@@ -32,6 +38,7 @@ export interface ModerationDeps {
   risk: RiskProfiles;
   config: ModerationConfig;
   logger: Pick<Logger, 'info' | 'warn' | 'error' | 'debug'>;
+  observer?: ModerationObserver;
   now?: () => Date;
 }
 

@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# @app/api — multi-stage build (Part 10). Context: the repo root (see infra/docker/docker-compose.yml).
+#   docker build -f apps/api/Dockerfile -t randomchat-api .
+# Configuration comes from the environment at run time (no .env in the image).
+
+FROM node:24.22.2-alpine3.24 AS base
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+WORKDIR /repo
+
+# Only the workspace packages api depends on (turbo prune keeps the pnpm catalog).
+FROM base AS prune
+RUN npm install --global turbo@2.11.10
+COPY . .
+RUN turbo prune @app/api --docker
+
+FROM base AS build
+COPY --from=prune /repo/out/json/ .
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile --store-dir /pnpm/store
+COPY --from=prune /repo/out/full/ .
+# tsup bundles the workspace packages into dist/; npm dependencies stay external.
+RUN pnpm turbo run build --filter=@app/api
+# Production dependencies only. @prisma/client's optional `prisma` peer (CLI, Studio, schema
+# engines) comes along from the workspace lockfile; the runtime uses the query compiler and
+# the pg driver adapter, so that tree is dropped.
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm --filter @app/api deploy --prod --store-dir /pnpm/store /prod/api \
+ && cd /prod/api/node_modules/.pnpm \
+ && rm -rf prisma@* @prisma+studio-core@* @prisma+engines@* @prisma+dev@* @electric-sql+pglite@* effect@*
+
+# One-shot schema migrations (\`docker compose --profile full\` runs it before the services).
+FROM build AS migrate
+CMD ["pnpm", "--filter", "@app/db", "migrate:deploy"]
+
+FROM node:24.22.2-alpine3.24 AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=node:node /prod/api/package.json ./
+COPY --from=build --chown=node:node /prod/api/node_modules ./node_modules
+COPY --from=build --chown=node:node /prod/api/dist ./dist
+USER node
+EXPOSE 4000
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:4000/health > /dev/null || exit 1
+CMD ["node", "--enable-source-maps", "dist/server.js"]

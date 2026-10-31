@@ -1,5 +1,7 @@
 import { CANDIDATE_TYPES, type RtcSummaryPayload } from '@app/shared';
 
+import { type GatewayMetrics } from './metrics.ts';
+
 type CandidateType = (typeof CANDIDATE_TYPES)[number];
 
 /** Running sum + count, so averages can be derived (and exported as Prometheus summaries). */
@@ -19,11 +21,17 @@ export interface RtcStatsSnapshot {
   bitrateKbps: Total;
 }
 
+type RtcMetrics = Pick<
+  GatewayMetrics,
+  'rtcSummaries' | 'rtcLocalCandidates' | 'rtcTimeToConnected' | 'rtcRtt'
+>;
+
 /**
- * Node-local counters from `rtc:summary` (one per peer connection, sent by each side). Part 10
- * exposes them as Prometheus metrics; nothing here identifies a visitor.
+ * Node-local counters from `rtc:summary` (one per peer connection, sent by each side), also
+ * exported as Prometheus metrics (connected %, relay %, time to connected, RTT); nothing here
+ * identifies a visitor.
  */
-export function createRtcStats() {
+export function createRtcStats(metrics?: RtcMetrics) {
   const zeroByType = () =>
     Object.fromEntries(CANDIDATE_TYPES.map((type) => [type, 0])) as Record<CandidateType, number>;
   const state: RtcStatsSnapshot = {
@@ -51,6 +59,13 @@ export function createRtcStats() {
       add(state.timeToConnectedMs, summary.timeToConnectedMs);
       add(state.rttMs, summary.avgRttMs);
       add(state.bitrateKbps, summary.avgBitrateKbps);
+      if (metrics === undefined) return;
+      metrics.rtcSummaries.inc({ outcome: summary.failed ? 'failed' : 'connected' });
+      metrics.rtcLocalCandidates.inc({ type: summary.localCandidateType });
+      if (summary.timeToConnectedMs != null) {
+        metrics.rtcTimeToConnected.observe(summary.timeToConnectedMs / 1_000);
+      }
+      if (summary.avgRttMs != null) metrics.rtcRtt.observe(summary.avgRttMs / 1_000);
     },
 
     snapshot(): RtcStatsSnapshot {

@@ -42,6 +42,8 @@ export const adminMeSchema = z.object({
   email: z.string(),
   role: z.enum(ADMIN_ROLES),
   totpEnabled: z.boolean(),
+  /** Production: everything except enrolment is refused until `totpEnabled`. */
+  totpRequired: z.boolean(),
   /** Send back in `x-admin-csrf` on every POST. */
   csrfToken: z.string(),
 });

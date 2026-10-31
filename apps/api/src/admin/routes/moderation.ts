@@ -28,7 +28,8 @@ export const adminModerationRoutes: FastifyPluginAsyncZod<{
   bans: BanService;
   guard: AdminGuard;
   clock: Clock;
-}> = (app, { prisma, bans, guard, clock }) => {
+  recordAction: (action: string) => void;
+}> = (app, { prisma, bans, guard, clock, recordAction }) => {
   app.get(
     '/bans',
     {
@@ -94,6 +95,7 @@ export const adminModerationRoutes: FastifyPluginAsyncZod<{
             }),
         },
       );
+      recordAction(type === 'HARD' ? 'ban_hard' : 'ban_shadow');
       return { ok: true as const };
     },
   );
@@ -113,6 +115,7 @@ export const adminModerationRoutes: FastifyPluginAsyncZod<{
           }),
       });
       if (!revoked) throw new AppError(404, ErrorCode.NOT_FOUND, 'No active ban with this id');
+      recordAction('ban_revoke');
       return { ok: true as const };
     },
   );

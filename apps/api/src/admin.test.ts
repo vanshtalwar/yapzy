@@ -213,6 +213,37 @@ describe('admin auth', () => {
     });
     expect(await auditActions(admin.id)).toEqual(['auth.login', 'totp.setup', 'totp.enable']);
   });
+
+  it('requires TOTP enrolment before anything else when DEPLOY_ENV=production', async () => {
+    const standard = app;
+    app = await buildTestApp({
+      clock,
+      objects,
+      jobs: createRecordingJobs(),
+      controlChannel,
+      config: { ...testConfig, DEPLOY_ENV: 'production' },
+    });
+    try {
+      const admin = await createAdmin('ADMIN');
+      const session = await signIn(admin.email);
+      expect((await call(session, 'GET', '/auth/me')).json()).toMatchObject({
+        totpEnabled: false,
+        totpRequired: true,
+      });
+      expect((await call(session, 'GET', '/reports')).json()).toMatchObject({
+        error: { code: 'TOTP_ENROLLMENT_REQUIRED' },
+      });
+      expect((await call(session, 'POST', '/auth/totp/setup')).statusCode).toBe(200);
+      const sealed =
+        (await prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id } })).totpSecret ?? '';
+      const code = await totpCodeFor(sealed, testConfig.ADMIN_TOTP_ENC_KEY, clock.now());
+      expect((await call(session, 'POST', '/auth/totp/verify', { code })).statusCode).toBe(200);
+      expect((await call(session, 'GET', '/reports')).statusCode).toBe(200);
+    } finally {
+      await app.close();
+      app = standard;
+    }
+  });
 });
 
 describe('CSRF and RBAC', () => {

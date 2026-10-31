@@ -13,13 +13,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@app/db": "workspace:*",
-    "@app/env": "workspace:*",
-    "@app/logger": "workspace:*",
-    "@app/moderation": "workspace:*",
-    "@app/redis": "workspace:*",
-    "@app/shared": "workspace:*",
-    "@app/storage": "workspace:*",
     "@aws-sdk/client-s3": "catalog:",
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
@@ -28,10 +21,19 @@
     "obscenity": "catalog:",
     "pino": "catalog:",
     "pino-pretty": "catalog:",
+    "prom-client": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@app/config": "workspace:*",
+    "@app/db": "workspace:*",
+    "@app/env": "workspace:*",
+    "@app/logger": "workspace:*",
+    "@app/metrics": "workspace:*",
+    "@app/moderation": "workspace:*",
+    "@app/redis": "workspace:*",
+    "@app/shared": "workspace:*",
+    "@app/storage": "workspace:*",
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "tsup": "catalog:",

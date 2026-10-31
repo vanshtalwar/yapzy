@@ -2,6 +2,7 @@ import { nextBudgetMultiplier } from '@app/moderation';
 import {
   MOD_BUDGET_MULTIPLIER_KEY,
   MOD_FRAMES_WINDOW_SECONDS,
+  moderationBudgetClaimKey,
   moderationFramesKey,
   type Redis,
 } from '@app/redis';
@@ -23,6 +24,18 @@ export async function updateBudgetMultiplier(deps: {
   const nowSeconds = Math.floor((deps.now?.() ?? new Date()).getTime() / 1000);
   const current = Math.floor(nowSeconds / MOD_FRAMES_WINDOW_SECONDS) * MOD_FRAMES_WINDOW_SECONDS;
   const previousWindow = current - MOD_FRAMES_WINDOW_SECONDS;
+  // Once per window across all worker replicas: the multiplier compounds, so a second update
+  // for the same window would stretch (or relax) sampling twice.
+  const claimed = await deps.redis.set(
+    moderationBudgetClaimKey(previousWindow),
+    '1',
+    'EX',
+    MULTIPLIER_TTL_SECONDS,
+    'NX',
+  );
+  if (claimed !== 'OK') {
+    return Number((await deps.redis.get(MOD_BUDGET_MULTIPLIER_KEY)) ?? '1') || 1;
+  }
   const [counted, stored] = await Promise.all([
     deps.redis.get(moderationFramesKey(previousWindow)),
     deps.redis.get(MOD_BUDGET_MULTIPLIER_KEY),

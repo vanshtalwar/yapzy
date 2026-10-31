@@ -1,0 +1,89 @@
+# Lint, typecheck, unit + integration tests (coverage thresholds), build and dependency audit.
+# Integration tests need Postgres, Redis and MinIO; the e2e suite runs separately (e2e.yml).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint · typecheck · test · build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app" --health-interval 5s --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8.10.3-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Environment and test database
+        run: |
+          cp .env.example .env
+          PGPASSWORD=app psql -h localhost -U app -d app -c 'CREATE DATABASE app_test'
+
+      # Only @app/storage's integration test talks to S3; the services above have no MinIO.
+      - name: MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=randomchat -e MINIO_ROOT_PASSWORD=dev-only-minio-secret-change-me \
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data
+          for i in $(seq 1 30); do curl -fsS http://localhost:9000/minio/health/live && break; sleep 2; done
+
+      - name: Migrate the test database
+        run: pnpm db:migrate:test
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - name: Tests with coverage thresholds
+        run: pnpm test:coverage
+      - run: pnpm build
+      - name: Dependency audit (high and critical)
+        run: pnpm audit --audit-level high
+
+      - name: Production TURN config keeps its SSRF protections
+        run: |
+          for rule in 'no-tcp-relay' 'no-loopback-peers' 'denied-peer-ip=10.0.0.0-10.255.255.255' \
+                      'denied-peer-ip=172.16.0.0-172.31.255.255' 'denied-peer-ip=169.254.0.0-169.254.255.255'; do
+            grep -qx -- "$rule" infra/coturn/turnserver.production.conf || { echo "missing: $rule"; exit 1; }
+          done
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git /repo --redact --no-banner --exit-code 1

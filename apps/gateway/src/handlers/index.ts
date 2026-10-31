@@ -22,6 +22,7 @@ import {
 import { ulid } from 'ulid';
 
 import { SocketError } from '../errors.ts';
+import { type GatewayMetrics } from '../metrics.ts';
 import { type GatewayModeration } from '../moderation.ts';
 import { registerHandler } from '../register-handler.ts';
 import { type RtcStats } from '../rtc-stats.ts';
@@ -60,6 +61,7 @@ export interface HandlerDeps {
   logger: { debug(obj: object, msg: string): void };
   rtcStats: RtcStats;
   moderation: GatewayModeration;
+  metrics: Pick<GatewayMetrics, 'moderationActions'>;
 }
 
 /** `moderation:signal` is accepted at most this often per socket (low weight, Part 8). */
@@ -100,7 +102,7 @@ function recipient(session: InSession, to: string): string {
 }
 
 export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void {
-  const { lifecycle, store, now, moderation } = deps;
+  const { lifecycle, store, now, moderation, metrics } = deps;
   const lastTyping = { isTyping: false, sentAt: 0 };
   const summarized = new Set<string>();
   let lastSignalAt = Number.NEGATIVE_INFINITY;
@@ -161,6 +163,9 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     async ({ sessionId, text }): Promise<ChatMessageAck> => {
       const session = await lifecycle.inSession(socket, sessionId);
       const verdict = moderation.filterText(text);
+      if (verdict.action !== 'allow') {
+        metrics.moderationActions.inc({ source: 'text_filter', action: verdict.action });
+      }
       if (verdict.action === 'block') {
         const reason = verdict.reasons[0] ?? 'blocked_term';
         const notice = BLOCKED_MESSAGES[reason] ?? 'That message isn’t allowed.';
@@ -257,7 +262,7 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
       if (summarized.has(key)) return;
       if (summarized.size >= MAX_SUMMARIES_PER_SOCKET) summarized.clear();
       summarized.add(key);
-      // Connection-quality metrics only (no addresses); exported as metrics in Part 10.
+      // Connection-quality metrics only (no addresses), exported via /metrics.
       deps.rtcStats.record(summary);
       deps.logger.debug({ rtcSummary: summary }, 'rtc summary');
     },
@@ -297,7 +302,12 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
         trustEvent: null,
         at: new Date(at).toISOString(),
       });
-      if (about !== 'self' && score >= SIGNAL_HIGH_RISK_SCORE) await lifecycle.raiseRisk(sessionId);
+      const raise = about !== 'self' && score >= SIGNAL_HIGH_RISK_SCORE;
+      metrics.moderationActions.inc({
+        source: 'client_nsfw',
+        action: raise ? 'raise_tier' : 'recorded',
+      });
+      if (raise) await lifecycle.raiseRisk(sessionId);
     },
     { cost: EVENT_COSTS['moderation:signal'] },
   );

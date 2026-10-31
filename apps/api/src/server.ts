@@ -26,7 +26,11 @@ const app = await buildApp({
   config,
   prisma,
   redis,
-  turnstile: createCloudflareTurnstileVerifier({ secretKey: config.TURNSTILE_SECRET_KEY }),
+  turnstile: createCloudflareTurnstileVerifier({
+    secretKey: config.TURNSTILE_SECRET_KEY,
+    expectedHostnames: config.TURNSTILE_HOSTNAMES,
+    strict: config.DEPLOY_ENV === 'production',
+  }),
   objects,
   jobs,
   logger,

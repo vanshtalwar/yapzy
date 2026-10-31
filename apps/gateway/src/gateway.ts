@@ -5,6 +5,7 @@ import { type PrismaClient } from '@app/db';
 import { type GatewayEnv } from '@app/env';
 import { type Logger } from '@app/logger';
 import { createMatchmaker } from '@app/matchmaking';
+import { serveMetrics } from '@app/metrics';
 import { createBanChecker } from '@app/moderation';
 import {
   createRedis,
@@ -22,12 +23,13 @@ import {
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import { createShardedAdapter } from '@socket.io/redis-adapter';
 import { Queue } from 'bullmq';
-import { createClient } from 'redis';
 import { Server } from 'socket.io';
 
+import { watchShardedSubscriber } from './adapter-subscriber.ts';
 import { createHandshakeMiddleware } from './auth.ts';
 import { createClientIpResolver } from './client-ip.ts';
 import { registerHandlers } from './handlers/index.ts';
+import { createDefaultGatewayMetrics, type GatewayMetrics } from './metrics.ts';
 import { createGatewayModeration } from './moderation.ts';
 import { startPresence } from './presence.ts';
 import { attachGuards, type GuardOptions, markSocketReady } from './register-handler.ts';
@@ -50,6 +52,8 @@ export const GATEWAY_DEFAULTS = {
   abuse: { capacity: 30, refillPerSecond: 0.5 },
   sweepIntervalMs: 30_000,
   deadlineIntervalMs: 1_000,
+  /** A room (un)subscription waiting this long means the adapter subscriber is stuck. */
+  subscriberStuckMs: 15_000,
 } as const;
 
 export interface GatewayOptions {
@@ -74,6 +78,8 @@ export interface GatewayDeps {
   redisUrl?: string;
   now?: () => Date;
   options?: GatewayOptions;
+  /** Prometheus metrics; a fresh registry per gateway when omitted. */
+  metrics?: GatewayMetrics;
 }
 
 export type ShutdownHook = () => Promise<void>;
@@ -89,6 +95,14 @@ export async function createGateway(deps: GatewayDeps) {
   const controlChannel = options.controlChannel ?? GW_CONTROL_CHANNEL;
   let draining = false;
   const shutdownHooks: ShutdownHook[] = [];
+  const metrics = deps.metrics ?? createDefaultGatewayMetrics(config.NODE_ENV !== 'test');
+  const metricsAccess = {
+    token: config.METRICS_TOKEN,
+    requireToken: config.DEPLOY_ENV === 'production',
+  };
+  if (metricsAccess.requireToken && config.METRICS_TOKEN === undefined) {
+    logger.warn('METRICS_TOKEN not set: /metrics is disabled (DEPLOY_ENV=production)');
+  }
 
   // ioredis: app data + a dedicated subscriber for gw:control.
   const redis = createRedis(deps.redisUrl ?? config.REDIS_URL, {
@@ -100,24 +114,39 @@ export async function createGateway(deps: GatewayDeps) {
     logger,
   });
 
-  // node-redis: only for the sharded adapter, which requires it (CONTEXT.md D-031).
-  const adapterPub = createClient({ url: config.REDIS_URL });
-  const adapterSub = adapterPub.duplicate();
-  for (const client of [adapterPub, adapterSub]) {
-    client.on('error', (error: unknown) => {
-      logger.error({ err: error }, 'adapter redis error');
-    });
-  }
-  await Promise.all([adapterPub.connect(), adapterSub.connect()]);
+  // Sharded adapter connections (ioredis, D-100 — node-redis 6.3 wedged under load, see
+  // adapter-subscriber.ts): one publisher, one subscriber for the per-room shard channels.
+  const adapterPub = createRedis(config.REDIS_URL, {
+    connectionName: `gateway:${nodeId}:adapter-pub`,
+    logger,
+  });
+  const adapterSub = createRedis(config.REDIS_URL, {
+    connectionName: `gateway:${nodeId}:adapter-sub`,
+    logger,
+  });
+  const subscriber = watchShardedSubscriber(adapterSub);
+  let subscriberStuck = false;
 
-  async function readiness(): Promise<boolean> {
-    if (draining) return false;
-    try {
-      await Promise.all([redis.ping(), adapterPub.ping(), prisma.$queryRaw`SELECT 1`]);
-      return true;
-    } catch {
-      return false;
-    }
+  /**
+   * Ready = can serve sockets: draining off and both Redis connections up. Postgres is only the
+   * ban-cache fallback, so it is reported but not required — a database blip must not pull
+   * every gateway out of the load balancer (handshakes with a warm ban cache still work).
+   */
+  async function readiness(): Promise<{ ready: boolean; postgres: 'ok' | 'fail' }> {
+    const ok = (promise: Promise<unknown>) =>
+      promise.then(
+        () => true,
+        () => false,
+      );
+    const [redisUp, adapterUp, postgresUp] = await Promise.all([
+      ok(redis.ping()),
+      ok(adapterPub.ping()),
+      ok(prisma.$queryRaw`SELECT 1`),
+    ]);
+    return {
+      ready: !draining && !subscriberStuck && redisUp && adapterUp,
+      postgres: postgresUp ? 'ok' : 'fail',
+    };
   }
 
   // Socket.io handles /socket.io/*; everything else lands here.
@@ -126,10 +155,16 @@ export async function createGateway(deps: GatewayDeps) {
       response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     };
     if (request.method === 'GET' && request.url === '/health') {
-      send(200, { status: 'ok' });
+      // A stuck adapter subscriber silently loses cross-node delivery: let the orchestrator
+      // replace the node (sessions resume elsewhere, D-046).
+      send(subscriberStuck ? 503 : 200, { status: subscriberStuck ? 'subscriber_stuck' : 'ok' });
     } else if (request.method === 'GET' && request.url === '/ready') {
-      void readiness().then((ready) => {
-        send(ready ? 200 : 503, { status: ready ? 'ready' : 'unavailable' });
+      void readiness().then(({ ready, postgres }) => {
+        send(ready ? 200 : 503, { status: ready ? 'ready' : 'unavailable', postgres });
+      });
+    } else if (request.method === 'GET' && request.url === '/metrics') {
+      serveMetrics(request, response, metrics.registry, metricsAccess).catch(() => {
+        send(500, { error: { code: 'INTERNAL_ERROR', message: 'Metrics unavailable' } });
       });
     } else {
       send(404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
@@ -151,7 +186,7 @@ export async function createGateway(deps: GatewayDeps) {
       const origin = request.headers.origin;
       callback(null, !draining && (origin === undefined || allowedOrigins.has(origin)));
     },
-    adapter: createShardedAdapter(adapterPub, adapterSub, {
+    adapter: createShardedAdapter(adapterPub, subscriber.subscriber, {
       subscriptionMode: 'dynamic',
       ...(options.adapterChannelPrefix === undefined
         ? {}
@@ -198,6 +233,14 @@ export async function createGateway(deps: GatewayDeps) {
       ipPepper: config.IP_HASH_PEPPER,
       clientIp: createClientIpResolver(config.TRUST_PROXY),
       isDraining: () => draining,
+      limits: rateLimitEnabled
+        ? { perVisitor: config.HANDSHAKE_LIMIT_PER_VISITOR, perIp: config.HANDSHAKE_LIMIT_PER_IP }
+        : null,
+      redis,
+      now,
+      onLimited: () => {
+        metrics.rateLimitHits.inc({ route: 'handshake' });
+      },
       logger,
     }),
   );
@@ -271,8 +314,24 @@ export async function createGateway(deps: GatewayDeps) {
       return moderation.poolFor(visitorId, ban?.type ?? null);
     },
     logger,
+    metrics,
     now,
   });
+  metrics.sources.sockets = () => io.of('/').sockets.size;
+  metrics.sources.waiting = () => lifecycle.waitingCount();
+  metrics.sources.subscriberPending = () => subscriber.pendingCount();
+  metrics.sources.subscriberOldestMs = () => subscriber.oldestPendingMs();
+  const subscriberWatchdog = setInterval(() => {
+    const stuck = subscriber.oldestPendingMs() > GATEWAY_DEFAULTS.subscriberStuckMs;
+    if (stuck && !subscriberStuck) {
+      logger.error(
+        { pending: subscriber.pendingCount(), oldest: subscriber.oldestPending() },
+        'adapter subscriber stuck: cross-node delivery is failing; reporting unhealthy',
+      );
+    }
+    subscriberStuck = stuck;
+  }, 5_000);
+  subscriberWatchdog.unref();
   // `ban_applied` (BanService, any process): act on this node's sockets of that visitor or IP.
   banHandler.apply = (message) => {
     for (const socket of io.of('/').sockets.values()) {
@@ -281,6 +340,10 @@ export async function createGateway(deps: GatewayDeps) {
         visitorId === message.visitorId ||
         (message.ipHash !== undefined && ipHash === message.ipHash);
       if (!hit) continue;
+      metrics.moderationActions.inc({
+        source: 'live_ban',
+        action: message.banType === 'HARD' ? 'disconnect' : 'shadow_pool',
+      });
       lifecycle.applyBan(socket, message.banType).catch((error: unknown) => {
         logger.warn({ err: error, visitorId, banId: message.banId }, 'applying ban failed');
       });
@@ -316,10 +379,11 @@ export async function createGateway(deps: GatewayDeps) {
   // and resume on another node; waiting tickets are cancelled; local timers stop.
   shutdownHooks.push(async () => {
     clearInterval(deadlineTimer);
+    clearInterval(subscriberWatchdog);
     await lifecycle.prepareShutdown();
   });
 
-  const rtcStats = createRtcStats();
+  const rtcStats = createRtcStats(metrics);
 
   io.on('connection', (socket) => {
     const { visitorId } = socket.data;
@@ -329,8 +393,9 @@ export async function createGateway(deps: GatewayDeps) {
       bucket: options.bucket ?? GATEWAY_DEFAULTS.bucket,
       abuse: GATEWAY_DEFAULTS.abuse,
       logger,
+      metrics,
     });
-    registerHandlers(socket, { lifecycle, store, now, logger, rtcStats, moderation });
+    registerHandlers(socket, { lifecycle, store, now, logger, rtcStats, moderation, metrics });
 
     socket.on('disconnect', (reason) => {
       logger.debug({ visitorId, socketId: socket.id, reason }, 'socket disconnected');
@@ -398,8 +463,8 @@ export async function createGateway(deps: GatewayDeps) {
       moderationQueue.close(),
       redis.quit(),
       controlSubscriber.quit(),
-      adapterPub.close(),
-      adapterSub.close(),
+      adapterPub.quit(),
+      adapterSub.quit(),
     ]);
     logger.info({ nodeId }, 'gateway stopped');
   }
@@ -413,6 +478,7 @@ export async function createGateway(deps: GatewayDeps) {
     sessionLogQueue,
     moderationQueue,
     rtcStats,
+    metrics,
     listen(port: number, host?: string): Promise<number> {
       return new Promise((resolve, reject) => {
         httpServer.once('error', reject);

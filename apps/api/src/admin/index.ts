@@ -24,6 +24,8 @@ export interface AdminRouteDeps {
   trust: TrustStore;
   online: OnlineCounter;
   clock: Clock;
+  /** Counts a moderation action (`moderation_actions_total{source="admin"}`). */
+  recordAction: (action: string) => void;
 }
 
 /**
@@ -38,11 +40,26 @@ export const adminRoutes: FastifyPluginAsyncZod<AdminRouteDeps> = async (app, de
     void reply.header('cache-control', 'no-store');
   });
 
-  const { config, prisma, redis, objects, bans, trust, online, clock } = deps;
+  const { config, prisma, redis, objects, bans, trust, online, clock, recordAction } = deps;
   const sessions = createAdminSessions(redis, config.ADMIN_SESSION_TTL_SECONDS);
-  const guard = createAdminGuard({ prisma, sessions });
+  const guard = createAdminGuard({
+    prisma,
+    sessions,
+    requireTotp: config.DEPLOY_ENV === 'production',
+  });
   // Explicit options: spreading `deps` would pass the `prefix` option on and apply it twice.
-  const shared = { config, prisma, redis, objects, bans, trust, online, clock, guard };
+  const shared = {
+    config,
+    prisma,
+    redis,
+    objects,
+    bans,
+    trust,
+    online,
+    clock,
+    guard,
+    recordAction,
+  };
   await app.register(adminAuthRoutes, { ...shared, sessions });
   await app.register(adminReportRoutes, shared);
   await app.register(adminModerationRoutes, shared);

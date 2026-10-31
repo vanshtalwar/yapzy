@@ -1,9 +1,19 @@
 import { type DestinationStream, type LevelWithSilent, type Logger, pino } from 'pino';
 import pretty from 'pino-pretty';
 
+const SENSITIVE_HEADERS = [
+  'authorization',
+  'cookie',
+  '["set-cookie"]',
+  '["x-forwarded-for"]',
+  '["x-real-ip"]',
+  '["x-admin-csrf"]',
+];
+
 /**
- * Paths censored in every log line. Wildcards cover one nesting level (e.g. `req.token`);
- * HTTP request headers are listed explicitly because they sit two levels deep.
+ * Paths censored in every log line. Wildcards cover one nesting level (e.g. `req.token`).
+ * Headers are censored under any parent (`req.headers`, `res.headers`, and plugin options such
+ * as @fastify/multipart's trace log of `busboyOptions.headers`), since they sit two levels deep.
  */
 export const REDACT_PATHS = [
   'authorization',
@@ -18,11 +28,10 @@ export const REDACT_PATHS = [
   '*.password',
   '*.ip',
   '*.deviceId',
-  'req.headers.authorization',
-  'req.headers.cookie',
-  'req.headers["x-forwarded-for"]',
+  ...SENSITIVE_HEADERS.map((header) => `headers${header.startsWith('[') ? '' : '.'}${header}`),
+  ...SENSITIVE_HEADERS.map((header) => `*.headers${header.startsWith('[') ? '' : '.'}${header}`),
   'req.remoteAddress',
-  'res.headers["set-cookie"]',
+  'req.remotePort',
 ];
 
 export interface CreateLoggerOptions {

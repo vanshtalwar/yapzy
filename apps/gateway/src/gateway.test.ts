@@ -16,6 +16,7 @@ import {
   nextEvent,
   prisma,
   startGateway,
+  testConfigWith,
   tokenFor,
 } from './test/helpers.ts';
 
@@ -98,6 +99,31 @@ describe('handshake', () => {
   });
 });
 
+describe('handshake rate limits', () => {
+  it('refuses connect loops per visitor with RATE_LIMITED', async () => {
+    const limited = await startGateway('limits', {
+      config: testConfigWith({ HANDSHAKE_LIMIT_PER_VISITOR: '3' }),
+    });
+    try {
+      const token = await tokenFor(newVisitorId());
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const socket = connect(limited.url, { token });
+        expect(await connectOutcome(socket)).toBe('connected');
+        socket.disconnect();
+      }
+      const fourth = connect(limited.url, { token });
+      expect(await connectOutcome(fourth)).toMatchObject({ data: { code: 'RATE_LIMITED' } });
+      fourth.disconnect();
+      // Other visitors are unaffected.
+      const other = connect(limited.url, { token: await tokenFor(newVisitorId()) });
+      expect(await connectOutcome(other)).toBe('connected');
+      other.disconnect();
+    } finally {
+      await limited.gateway.shutdown();
+    }
+  });
+});
+
 describe('events', () => {
   it('answers ping with the server time', async () => {
     const { socket } = await connectVisitor(nodeA.url);
@@ -126,6 +152,30 @@ describe('events', () => {
       ok: false,
       error: { code: 'VALIDATION_FAILED', message: 'Unknown event' },
     });
+  });
+
+  it('survives event names that are not strings (no crash, acked as unknown)', async () => {
+    const { socket } = await connectVisitor(nodeA.url);
+    // socket.io-parser accepts any JSON value as the event name.
+    const untyped = socket as unknown as {
+      timeout(ms: number): { emitWithAck(event: unknown, payload: unknown): Promise<unknown> };
+    };
+    for (const event of [1, 42.5]) {
+      expect(await untyped.timeout(2_000).emitWithAck(event, {})).toMatchObject({
+        ok: false,
+        error: { code: 'VALIDATION_FAILED', message: 'Unknown event' },
+      });
+    }
+    expect(await socket.timeout(2_000).emitWithAck('ping', {})).toMatchObject({ ok: true });
+    // Other non-string names are parse errors: socket.io drops that connection, the node lives.
+    const closed = nextEvent(socket, 'disconnect');
+    void untyped
+      .timeout(500)
+      .emitWithAck(null, {})
+      .catch(() => undefined);
+    await closed;
+    const { socket: next } = await connectVisitor(nodeA.url);
+    expect(await next.timeout(2_000).emitWithAck('ping', {})).toMatchObject({ ok: true });
   });
 
   it('rate limits bursts per socket with RATE_LIMITED acks', async () => {
@@ -183,6 +233,7 @@ describe('presence & lifecycle', () => {
     expect(await (await fetch(`${nodeA.url}/health`)).json()).toEqual({ status: 'ok' });
     const ready = await fetch(`${nodeA.url}/ready`);
     expect(ready.status).toBe(200);
+    expect(await ready.json()).toEqual({ status: 'ready', postgres: 'ok' });
   });
 
   it('publishes per-node socket counts that disappear when the node shuts down', async () => {

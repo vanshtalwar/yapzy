@@ -228,6 +228,8 @@ export function VideoChatScreen() {
               {participants.map((participant) => (
                 <VideoTile
                   key={participant.participantId}
+                  // WebRTC connection state of this peer, for tests and support tooling.
+                  data-rtc-state={participant.state}
                   // Client NSFW check flagged this video: keep it blurred (D-054 / Part 8).
                   className={cn('rounded-none', state.remoteFlagged && '[&_video]:blur-2xl')}
                   placeholder={

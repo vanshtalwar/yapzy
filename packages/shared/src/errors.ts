@@ -31,6 +31,8 @@ export const ErrorCode = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   TOTP_REQUIRED: 'TOTP_REQUIRED',
   TOTP_INVALID: 'TOTP_INVALID',
+  /** Production: admins must enrol two-factor authentication before anything else. */
+  TOTP_ENROLLMENT_REQUIRED: 'TOTP_ENROLLMENT_REQUIRED',
   ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',
   CSRF_FAILED: 'CSRF_FAILED',
 } as const;

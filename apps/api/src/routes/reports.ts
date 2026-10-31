@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { type PrismaClient } from '@app/db';
 import { type ApiEnv } from '@app/env';
-import { EVIDENCE_RETENTION_DAYS, reportPriority } from '@app/moderation';
+import { type BanChecker, EVIDENCE_RETENTION_DAYS, reportPriority } from '@app/moderation';
 import {
   ErrorCode,
   REPORT_FRAME_MAX_BYTES,
@@ -16,6 +16,7 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 
 import { type Clock } from '../deps.ts';
 import { AppError } from '../errors.ts';
+import { type ApiMetrics } from '../metrics.ts';
 import { InvalidImageError, sanitizeJpeg } from '../services/images.ts';
 import { type ApiJobs } from '../services/jobs.ts';
 import { type SessionState } from '../services/session-state.ts';
@@ -31,6 +32,8 @@ interface ReportDeps {
   jobs: ApiJobs;
   sessions: SessionState;
   clock: Clock;
+  metrics: ApiMetrics;
+  bans: BanChecker;
 }
 
 /**
@@ -40,7 +43,7 @@ interface ReportDeps {
  * and the transcript snapshot in the report row.
  */
 export const reportRoutes: FastifyPluginAsyncZod<ReportDeps> = async (app, deps) => {
-  const { config, prisma, objects, jobs, sessions, clock } = deps;
+  const { config, prisma, objects, jobs, sessions, clock, metrics, bans } = deps;
   await app.register(multipart, {
     limits: {
       fileSize: REPORT_FRAME_MAX_BYTES,
@@ -55,7 +58,8 @@ export const reportRoutes: FastifyPluginAsyncZod<ReportDeps> = async (app, deps)
     '/v1/reports',
     {
       onRequest: [app.authenticate],
-      schema: { response: { 201: reportResponseSchema } },
+      // 200 = this chat was already reported by this visitor (idempotent), 201 = new report.
+      schema: { response: { 200: reportResponseSchema, 201: reportResponseSchema } },
       config: {
         rateLimit: {
           ...REPORT_RATE_LIMIT,
@@ -72,22 +76,14 @@ export const reportRoutes: FastifyPluginAsyncZod<ReportDeps> = async (app, deps)
       }
 
       const fields: Record<string, string> = {};
-      const frames: Buffer[] = [];
+      const uploads: Buffer[] = [];
       for await (const part of request.parts()) {
         if (part.type === 'file') {
           if (part.fieldname !== 'frames') {
             await part.toBuffer(); // drain
             throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Unexpected file field');
           }
-          const bytes = await part.toBuffer(); // throws 413 past REPORT_FRAME_MAX_BYTES
-          try {
-            frames.push(await sanitizeJpeg(bytes));
-          } catch (error) {
-            if (error instanceof InvalidImageError) {
-              throw new AppError(400, ErrorCode.VALIDATION_FAILED, error.message);
-            }
-            throw error;
-          }
+          uploads.push(await part.toBuffer()); // throws 413 past REPORT_FRAME_MAX_BYTES
         } else if (typeof part.value === 'string') {
           fields[part.fieldname] = part.value;
         }
@@ -109,6 +105,29 @@ export const reportRoutes: FastifyPluginAsyncZod<ReportDeps> = async (app, deps)
       const reported = participants.get(reportedParticipantId);
       if (!reporterIn || reported === undefined || reported.visitorId === visitor.id) {
         throw new AppError(403, ErrorCode.FORBIDDEN, 'You can only report people you chatted with');
+      }
+      // A HARD-banned visitor's token stays valid until it expires; it must not be usable to
+      // retaliate against whoever reported them.
+      if ((await bans.findActiveBan({ visitorId: visitor.id }))?.type === 'HARD') {
+        throw new AppError(403, ErrorCode.BANNED, 'Access denied');
+      }
+      const existing = await prisma.report.findFirst({
+        where: { reporterId: visitor.id, sessionId, reportedParticipantId },
+        select: { id: true },
+      });
+      if (existing !== null) return reply.status(200).send({ reportId: existing.id });
+
+      // Decoded only now: people outside the chat can't make the API decode images.
+      const frames: Buffer[] = [];
+      for (const bytes of uploads) {
+        try {
+          frames.push(await sanitizeJpeg(bytes));
+        } catch (error) {
+          if (error instanceof InvalidImageError) {
+            throw new AppError(400, ErrorCode.VALIDATION_FAILED, error.message);
+          }
+          throw error;
+        }
       }
 
       const roleOf = (participantId: string) =>
@@ -165,9 +184,11 @@ export const reportRoutes: FastifyPluginAsyncZod<ReportDeps> = async (app, deps)
       await jobs.reportFiled({
         reportId: report.id,
         reportedId: reported.visitorId,
+        reporterId: visitor.id,
         sessionId,
         at: now.toISOString(),
       });
+      metrics.reports.inc({ reason, source: 'user' });
       request.log.info({ reportId: report.id, reason, frames: frames.length }, 'report filed');
       return reply.status(201).send({ reportId: report.id });
     },

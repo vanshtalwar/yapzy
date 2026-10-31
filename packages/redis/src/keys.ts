@@ -231,6 +231,19 @@ export function riskProfileKey(visitorId: string): string {
   return `risk:${assertSafeId('visitorId', visitorId)}`;
 }
 
+/** STRING (SET NX PX): serializes the distinct-reporter check + automatic ban per visitor. */
+export function reportThresholdLockKey(reportedId: string): string {
+  return `lock:report-threshold:${assertSafeId('reportedId', reportedId)}`;
+}
+
+/**
+ * STRING (SET NX, 24 h): a reporter's reports against one visitor cost that visitor trust only
+ * once a day, so one person filing many reports can't push someone into the shadow pool.
+ */
+export function reportPenaltyKey(reporterId: string, reportedId: string): string {
+  return `report:penalty:${assertSafeId('reporterId', reporterId)}:${assertSafeId('reportedId', reportedId)}`;
+}
+
 /** STRING: global frame-budget multiplier (≥ 1), written by the worker (D-054). */
 export const MOD_BUDGET_MULTIPLIER_KEY = 'mod:budget:multiplier';
 
@@ -241,6 +254,12 @@ export const MOD_FRAMES_WINDOW_SECONDS = 10;
 export function moderationFramesKey(windowStart: number): string {
   if (!Number.isInteger(windowStart) || windowStart < 0) throw new Error('Invalid window');
   return `mod:frames:${String(windowStart)}`;
+}
+
+/** STRING (SET NX): the one worker that recomputes the budget multiplier for this window. */
+export function moderationBudgetClaimKey(windowStart: number): string {
+  if (!Number.isInteger(windowStart) || windowStart < 0) throw new Error('Invalid window');
+  return `lock:mod:budget:${String(windowStart)}`;
 }
 
 // --- Rate limits & admin -----------------------------------------------------------------

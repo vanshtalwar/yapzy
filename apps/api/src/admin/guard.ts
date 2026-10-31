@@ -35,33 +35,46 @@ function sameToken(a: string, b: string): boolean {
  * preHandler factory: cookie session → active admin → CSRF header on mutations → permission.
  * Disabled admins lose access on their next request (the admin row is read every time).
  */
-export function createAdminGuard(deps: { prisma: PrismaClient; sessions: AdminSessions }) {
-  return (permission?: Permission) => async (request: FastifyRequest) => {
-    const session = await deps.sessions.get(request.cookies[ADMIN_COOKIE]);
-    if (session === null) throw new AppError(401, ErrorCode.UNAUTHORIZED, 'Not signed in');
-    const admin = await deps.prisma.adminUser.findUnique({ where: { id: session.adminId } });
-    if (admin?.disabledAt !== null) {
-      await deps.sessions.destroy(session.id);
-      throw new AppError(401, ErrorCode.UNAUTHORIZED, 'Not signed in');
-    }
-    if (!SAFE_METHODS.has(request.method)) {
-      const header = request.headers[ADMIN_CSRF_HEADER];
-      if (typeof header !== 'string' || !sameToken(header, session.csrf)) {
-        throw new AppError(403, ErrorCode.CSRF_FAILED, 'Missing or invalid CSRF token');
+export function createAdminGuard(deps: {
+  prisma: PrismaClient;
+  sessions: AdminSessions;
+  /** DEPLOY_ENV=production: admins without TOTP may only enrol (and see /me, log out). */
+  requireTotp: boolean;
+}) {
+  return (permission?: Permission, options: { enrolment?: boolean } = {}) =>
+    async (request: FastifyRequest) => {
+      const session = await deps.sessions.get(request.cookies[ADMIN_COOKIE]);
+      if (session === null) throw new AppError(401, ErrorCode.UNAUTHORIZED, 'Not signed in');
+      const admin = await deps.prisma.adminUser.findUnique({ where: { id: session.adminId } });
+      if (admin?.disabledAt !== null) {
+        await deps.sessions.destroy(session.id);
+        throw new AppError(401, ErrorCode.UNAUTHORIZED, 'Not signed in');
       }
-    }
-    if (permission !== undefined && !can(admin.role, permission)) {
-      throw new AppError(403, ErrorCode.FORBIDDEN, 'Not allowed for your role');
-    }
-    request.admin = {
-      id: admin.id,
-      email: admin.email,
-      role: admin.role,
-      sessionId: session.id,
-      csrf: session.csrf,
-      totpEnabled: admin.totpEnabled,
+      if (!SAFE_METHODS.has(request.method)) {
+        const header = request.headers[ADMIN_CSRF_HEADER];
+        if (typeof header !== 'string' || !sameToken(header, session.csrf)) {
+          throw new AppError(403, ErrorCode.CSRF_FAILED, 'Missing or invalid CSRF token');
+        }
+      }
+      if (deps.requireTotp && !admin.totpEnabled && options.enrolment !== true) {
+        throw new AppError(
+          403,
+          ErrorCode.TOTP_ENROLLMENT_REQUIRED,
+          'Set up two-factor authentication first',
+        );
+      }
+      if (permission !== undefined && !can(admin.role, permission)) {
+        throw new AppError(403, ErrorCode.FORBIDDEN, 'Not allowed for your role');
+      }
+      request.admin = {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+        sessionId: session.id,
+        csrf: session.csrf,
+        totpEnabled: admin.totpEnabled,
+      };
     };
-  };
 }
 
 export type AdminGuard = ReturnType<typeof createAdminGuard>;

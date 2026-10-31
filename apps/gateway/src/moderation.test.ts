@@ -242,6 +242,22 @@ describe('bans applied live (gw:control ban_applied)', () => {
     expect(normalMatched).toBe(false);
     await ack(n, 'queue:leave', {});
   });
+
+  it('re-evaluates the pool on chat:next (trust can drop mid-chat without ban_applied)', async () => {
+    const dropId = newVisitorId();
+    const drop = await visitor(nodeA.url, dropId);
+    const peer = await visitor(nodeB.url);
+    const { matchA } = await pair('ar', drop, peer);
+    await appRedis.set(trustKey(dropId), '5'); // e.g. reports processed during this chat
+    const waiting = await visitor(nodeB.url); // a normal visitor already searching
+    let normalMatched = false;
+    waiting.on('match:found', () => (normalMatched = true));
+    expect(await ack(waiting, 'queue:join', { mode: 'video', lang: 'ar' })).toEqual({ ok: true });
+    expect(await ack(drop, 'chat:next', { sessionId: matchA.sessionId })).toEqual({ ok: true });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(normalMatched).toBe(false); // the skipper now searches in the shadow pool
+    await ack(waiting, 'queue:leave', {});
+  });
 });
 
 describe('risk-based frame sampling', () => {

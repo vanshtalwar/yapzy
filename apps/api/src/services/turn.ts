@@ -7,6 +7,8 @@ export interface TurnCredentialsInput {
   ttlSeconds: number;
   host: string;
   port: number;
+  /** TURN over TLS (`turns:`, usually 443) for networks that only allow HTTPS-like traffic. */
+  tlsPort?: number;
   stunUrls: string[];
 }
 
@@ -34,7 +36,13 @@ export function createTurnCredentials(input: TurnCredentialsInput): {
     iceServers: [
       { urls: input.stunUrls },
       {
-        urls: [`${turnBase}?transport=udp`, `${turnBase}?transport=tcp`],
+        urls: [
+          `${turnBase}?transport=udp`,
+          `${turnBase}?transport=tcp`,
+          ...(input.tlsPort === undefined
+            ? []
+            : [`turns:${input.host}:${String(input.tlsPort)}?transport=tcp`]),
+        ],
         username,
         credential,
       },

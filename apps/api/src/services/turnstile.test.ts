@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { createCloudflareTurnstileVerifier, TurnstileUnavailableError } from './turnstile.ts';
 
-function verifierReturning(response: Response | Error) {
+function verifierReturning(
+  response: Response | Error,
+  options: { expectedHostnames?: string[]; strict?: boolean } = {},
+) {
   const calls: { url: string; body: string }[] = [];
   const fetchImpl: typeof fetch = (input, init) => {
     const url = input instanceof Request ? input.url : input.toString();
@@ -11,7 +14,7 @@ function verifierReturning(response: Response | Error) {
   };
   return {
     calls,
-    verifier: createCloudflareTurnstileVerifier({ secretKey: 'secret-x', fetchImpl }),
+    verifier: createCloudflareTurnstileVerifier({ secretKey: 'secret-x', fetchImpl, ...options }),
   };
 }
 
@@ -33,6 +36,36 @@ describe('Cloudflare Turnstile verifier', () => {
     expect(await verifier.verify('t')).toEqual({
       success: false,
       errorCodes: ['timeout-or-duplicate'],
+    });
+  });
+
+  it('checks the hostname and the widget action', async () => {
+    const result = (body: Record<string, unknown>, options = {}) =>
+      verifierReturning(Response.json({ success: true, ...body }), options).verifier.verify('t');
+    const hosts = { expectedHostnames: ['randomchat.example'] };
+    expect(await result({ hostname: 'RandomChat.example', action: 'session' }, hosts)).toEqual({
+      success: true,
+      errorCodes: [],
+    });
+    expect(await result({ hostname: 'evil.example', action: 'session' }, hosts)).toEqual({
+      success: false,
+      errorCodes: ['hostname-mismatch'],
+    });
+    expect(await result({ hostname: 'randomchat.example', action: 'login' }, hosts)).toEqual({
+      success: false,
+      errorCodes: ['action-mismatch'],
+    });
+    // Development: Cloudflare's test keys answer hostname example.com, no action.
+    const testKey = { hostname: 'example.com', metadata: { result_with_testing_key: true } };
+    expect((await result(testKey)).success).toBe(true);
+    // Production: the action must be echoed and testing-key results are refused.
+    expect(await result(testKey, { strict: true })).toEqual({
+      success: false,
+      errorCodes: ['action-missing'],
+    });
+    expect(await result({ ...testKey, action: 'session' }, { strict: true })).toEqual({
+      success: false,
+      errorCodes: ['testing-key'],
     });
   });
 

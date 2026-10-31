@@ -4,6 +4,7 @@ import { type Logger } from '@app/logger';
 import { type Redis } from '@app/redis';
 import { type ObjectStore } from '@app/storage';
 
+import { type ApiMetrics } from './metrics.ts';
 import { type ApiJobs } from './services/jobs.ts';
 import { type TurnstileVerifier } from './services/turnstile.ts';
 
@@ -27,4 +28,6 @@ export interface AppDeps {
   controlChannel?: string;
   clock?: Clock;
   logger?: Logger;
+  /** Prometheus metrics; a fresh registry per app when omitted. */
+  metrics?: ApiMetrics;
 }

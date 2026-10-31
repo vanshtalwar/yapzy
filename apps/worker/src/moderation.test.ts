@@ -222,6 +222,7 @@ describe('report-filed', () => {
       last = await handleReportFiled(deps, {
         reportId: report.id,
         reportedId: reported,
+        reporterId: reporter,
         sessionId,
         at: new Date().toISOString(),
       });
@@ -237,6 +238,35 @@ describe('report-filed', () => {
       source: 'REPORT_THRESHOLD',
       actionTaken: 'SHADOW_BANNED',
     });
+  });
+
+  it('charges one reporter at most once a day, however many reports they file', async () => {
+    const deps = moderationDeps();
+    const reported = await newVisitor(50);
+    const reporter = await newVisitor();
+    for (let index = 0; index < 5; index += 1) {
+      const sessionId = randomUUID();
+      const report = await prisma.report.create({
+        data: {
+          sessionId,
+          reporterId: reporter,
+          reportedId: reported,
+          reportedParticipantId: 'pReported002',
+          reason: 'HARASSMENT',
+        },
+      });
+      expect(
+        await handleReportFiled(deps, {
+          reportId: report.id,
+          reportedId: reported,
+          reporterId: reporter,
+          sessionId,
+          at: new Date().toISOString(),
+        }),
+      ).toEqual({ reporters: 1, shadowBanned: false });
+    }
+    // 50 − 10 once (not 50 − 5 × 10 = 0, which would mean the shadow pool).
+    expect(await redis.get(trustKey(reported))).toBe('40');
   });
 });
 
@@ -346,12 +376,23 @@ describe('frame budget', () => {
     });
     expect(up).toBe(2);
     expect(await redis.get(MOD_BUDGET_MULTIPLIER_KEY)).toBe('2');
-    await redis.set(moderationFramesKey(window), '50'); // 5/s
+    // Another worker replica in the same window doesn't compound it (×2 again would be 4).
+    expect(
+      await updateBudgetMultiplier({
+        redis,
+        budgetPerSec: 50,
+        backlog: () => Promise.resolve(0),
+        now,
+      }),
+    ).toBe(2);
+    expect(await redis.get(MOD_BUDGET_MULTIPLIER_KEY)).toBe('2');
+    const later = () => new Date(now().getTime() + 10_000);
+    await redis.set(moderationFramesKey(window + 10), '50'); // 5/s
     const down = await updateBudgetMultiplier({
       redis,
       budgetPerSec: 50,
       backlog: () => Promise.resolve(0),
-      now,
+      now: later,
     });
     expect(down).toBe(1);
     expect(await redis.ttl(MOD_BUDGET_MULTIPLIER_KEY)).toBeGreaterThan(0);

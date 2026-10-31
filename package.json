@@ -13,6 +13,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:coverage": "turbo run test -- --coverage",
+    "test:e2e": "turbo run build --filter=@app/api --filter=@app/gateway --filter=@app/worker --filter=@app/web --filter=@app/admin && pnpm --filter @app/e2e test:e2e",
     "clean": "turbo run clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -21,6 +23,10 @@
     "infra:logs": "docker compose --env-file .env -f infra/docker/docker-compose.yml logs -f --tail=100",
     "infra:ps": "docker compose --env-file .env -f infra/docker/docker-compose.yml ps",
     "infra:reset": "docker compose --env-file .env -f infra/docker/docker-compose.yml down -v --remove-orphans",
+    "obs:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile observability up -d --wait prometheus grafana",
+    "obs:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile observability stop prometheus grafana",
+    "stack:up": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile full up -d --build --wait postgres redis coturn minio api gateway worker web admin",
+    "stack:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile full stop api gateway worker web admin",
     "db:generate": "pnpm --filter @app/db generate",
     "db:migrate": "pnpm --filter @app/db migrate",
     "db:migrate:test": "pnpm --filter @app/db migrate:test",
@@ -33,6 +39,7 @@
   },
   "devDependencies": {
     "@app/config": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
     "prettier": "catalog:",
     "turbo": "catalog:"
   }

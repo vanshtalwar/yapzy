@@ -22,6 +22,7 @@ import {
 import { type LeaveReason, type SessionLogJob, sessionLogJobSchema } from '@app/shared/jobs';
 
 import { SocketError } from '../errors.ts';
+import { type GatewayMetrics } from '../metrics.ts';
 import { type GatewayModeration, NO_FRAMES } from '../moderation.ts';
 import { type GatewayServer, type GatewaySocket } from '../types.ts';
 import {
@@ -72,6 +73,10 @@ export interface LifecycleDeps {
   /** Current pool of a connected visitor from the ban cache + trust; 'banned' = HARD ban. */
   resolvePool: (socket: GatewaySocket) => Promise<MatchPool | 'banned'>;
   logger: Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
+  metrics: Pick<
+    GatewayMetrics,
+    'matches' | 'timeToMatch' | 'bucketHops' | 'sessionsEnded' | 'sessionDuration' | 'resumes'
+  >;
   now: () => Date;
 }
 
@@ -88,10 +93,13 @@ export interface InSession {
   self: ParticipantRecord;
 }
 
-type MatchedTicket = Pick<Ticket, 'ticketId' | 'visitorId' | 'interests' | 'autoRequeue'>;
+type MatchedTicket = Pick<
+  Ticket,
+  'ticketId' | 'visitorId' | 'interests' | 'autoRequeue' | 'createdAt'
+>;
 
 export function createLifecycle(deps: LifecycleDeps) {
-  const { io, redis, store, matchmaker, nodeId, config, logger } = deps;
+  const { io, redis, store, matchmaker, nodeId, config, logger, metrics } = deps;
   const clock = () => deps.now().getTime();
 
   /** Waiting-ticket timers (bucket hops + interest fallback) of searches started on this node. */
@@ -159,7 +167,7 @@ export function createLifecycle(deps: LifecycleDeps) {
     waitTimers.set(visitorId, timer);
   }
 
-  async function enqueueLog(sessionId: string): Promise<void> {
+  async function enqueueLog(sessionId: string, reason: LeaveReason): Promise<void> {
     try {
       const [meta, context, frames] = await Promise.all([
         store.meta(sessionId),
@@ -167,6 +175,11 @@ export function createLifecycle(deps: LifecycleDeps) {
         store.frameStats(sessionId),
       ]);
       if (meta === null || context === null) return;
+      metrics.sessionsEnded.inc({ mode: meta.mode, reason });
+      metrics.sessionDuration.observe(
+        { mode: meta.mode },
+        ((meta.endedAt ?? clock()) - meta.startedAt) / 1_000,
+      );
       const iso = (ms: number) => new Date(ms).toISOString();
       const job = sessionLogJobSchema.parse({
         sessionId,
@@ -209,11 +222,12 @@ export function createLifecycle(deps: LifecycleDeps) {
   /** Creates the session for a fresh match and tells every participant (any node). */
   async function createMatch(input: {
     family: QueueFamily;
+    bucket: number;
     sessionId: string;
     tickets: [MatchedTicket, MatchedTicket];
     commonInterests: string[];
   }): Promise<void> {
-    const { family, sessionId, tickets, commonInterests } = input;
+    const { family, bucket, sessionId, tickets, commonInterests } = input;
     const participants = await Promise.all(
       tickets.map(async (ticket) => ({
         participantId: newParticipantId(),
@@ -253,6 +267,13 @@ export function createLifecycle(deps: LifecycleDeps) {
 
     const statsKey = statsMatchesKey(new Date(now), randomInt(0, config.statsShards));
     await redis.multi().incr(statsKey).expire(statsKey, STATS_MATCHES_TTL_SECONDS).exec();
+    metrics.matches.inc({ mode: family.mode, pool: family.pool, bucket: String(bucket) });
+    for (const ticket of tickets) {
+      metrics.timeToMatch.observe(
+        { mode: family.mode },
+        Math.max(0, now - ticket.createdAt) / 1_000,
+      );
+    }
 
     for (const receiver of participants) {
       emitTo(receiver.visitorId, 'match:found', {
@@ -279,6 +300,7 @@ export function createLifecycle(deps: LifecycleDeps) {
 
   async function handleEnqueue(
     family: QueueFamily,
+    bucket: number,
     sessionId: string,
     self: MatchedTicket,
     result: EnqueueResult,
@@ -286,6 +308,7 @@ export function createLifecycle(deps: LifecycleDeps) {
     if (result.status !== 'matched') return false;
     await createMatch({
       family,
+      bucket,
       sessionId,
       tickets: [self, result.peer],
       commonInterests: result.commonInterests,
@@ -312,17 +335,18 @@ export function createLifecycle(deps: LifecycleDeps) {
       visitorId,
       interests: preferences.interests,
       autoRequeue: preferences.autoRequeue,
+      createdAt: now,
     };
 
     await store.setTicketRef(visitorId, { ...family, bucket, ticketId });
     const result = await matchmaker.enqueueOrMatch(
       { ...family, bucket },
-      { ...self, createdAt: now, nodeId },
+      { ...self, nodeId },
       phase,
       sessionId,
       { now, priority: opts.priority ?? false },
     );
-    if (await handleEnqueue(family, sessionId, self, result)) return;
+    if (await handleEnqueue(family, bucket, sessionId, self, result)) return;
 
     emitTo(visitorId, 'queue:waiting', { since: new Date(now).toISOString() });
     scheduleWait(visitorId, nextWaitDelay(buckets, phase, 0));
@@ -349,13 +373,14 @@ export function createLifecycle(deps: LifecycleDeps) {
 
     if (phase === 'interest' && waited >= config.interestFallbackMs) {
       const result = await matchmaker.promoteToAny(ref, ref.ticketId, sessionId, now);
-      if (await handleEnqueue(family, sessionId, ticket, result)) return;
+      if (await handleEnqueue(family, ref.bucket, sessionId, ticket, result)) return;
       if (result.status === 'not_waiting') return;
       phase = 'any';
     } else if (buckets > 1) {
       const hop = await matchmaker.hop(family, buckets, ref.bucket, ref.ticketId, sessionId, now);
       if (hop.status === 'not_waiting') return;
-      if (await handleEnqueue(family, sessionId, ticket, hop)) return;
+      metrics.bucketHops.inc({ mode: family.mode });
+      if (await handleEnqueue(family, hop.bucket, sessionId, ticket, hop)) return;
       if (!(await store.updateTicketRef(visitorId, { ...ref, bucket: hop.bucket }))) {
         // The visitor left (possibly via another node) while we hopped: undo the new ticket.
         await matchmaker.cancelTicket({ ...family, bucket: hop.bucket }, ref.ticketId);
@@ -440,7 +465,7 @@ export function createLifecycle(deps: LifecycleDeps) {
         sessionEnded: outcome.ended,
       });
     }
-    if (outcome.ended) await enqueueLog(sessionId);
+    if (outcome.ended) await enqueueLog(sessionId, reason);
     logger.debug({ sessionId, visitorId, reason, ended: outcome.ended }, 'left');
     return outcome;
   }
@@ -553,6 +578,8 @@ export function createLifecycle(deps: LifecycleDeps) {
   return {
     withVisitorLock,
     emitTo,
+    /** Searches whose wait timers run on this node (metrics). */
+    waitingCount: () => waitTimers.size,
 
     joinQueue(socket: GatewaySocket, preferences: QueuePreferences): Promise<void> {
       const { visitorId } = socket.data;
@@ -618,6 +645,11 @@ export function createLifecycle(deps: LifecycleDeps) {
           expectedSessionId: sessionId,
           earlyFailure: rtcFailed,
         });
+        // Like queue:join: trust may have dropped (reports, filter hits) since the last join, so
+        // a visitor who only ever presses Next must not keep the pool of their first join.
+        const pool = await deps.resolvePool(socket);
+        if (pool === 'banned') throw new SocketError(ErrorCode.BANNED, 'Access denied');
+        socket.data.pool = pool;
         await startSearching(searcherOf(socket, preferences));
       });
     },
@@ -651,8 +683,13 @@ export function createLifecycle(deps: LifecycleDeps) {
     ): Promise<SessionResumed> {
       const { visitorId } = socket.data;
       return withVisitorLock(visitorId, async () => {
-        const notResumable = () =>
-          new SocketError(ErrorCode.SESSION_NOT_RESUMABLE, 'This session can no longer be resumed');
+        const notResumable = () => {
+          metrics.resumes.inc({ outcome: 'not_resumable' });
+          return new SocketError(
+            ErrorCode.SESSION_NOT_RESUMABLE,
+            'This session can no longer be resumed',
+          );
+        };
         const ref = await store.getSessionRef(visitorId);
         if (ref?.sessionId !== sessionId) throw notResumable();
         const resumed = await store.resume(sessionId, ref.participantId, visitorId);
@@ -694,6 +731,7 @@ export function createLifecycle(deps: LifecycleDeps) {
             message.from !== ref.participantId &&
             (lastMessageId === undefined || message.id > lastMessageId), // ulids sort by time
         );
+        metrics.resumes.inc({ outcome: 'ok' });
         return {
           selfParticipantId: ref.participantId,
           peers: others.map(([pid]) => roleFor(context.initiator, ref.participantId, pid)),

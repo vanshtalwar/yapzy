@@ -16,26 +16,8 @@ for (const key of /** @type {const} */ ([
 }
 process.env.NEXT_PUBLIC_FORCE_TURN_RELAY = String(env.NEXT_PUBLIC_FORCE_TURN_RELAY);
 
-const isDev = process.env.NODE_ENV !== 'production';
-const gateway = new URL(env.NEXT_PUBLIC_GATEWAY_URL);
-const gatewayWs = `${gateway.protocol === 'https:' ? 'wss:' : 'ws:'}//${gateway.host}`;
-const turnstile = 'https://challenges.cloudflare.com';
-
-// Baseline CSP (finalized in Part 10). Next.js needs inline scripts unless nonces are used.
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''} ${turnstile}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  `connect-src 'self' ${new URL(env.NEXT_PUBLIC_API_URL).origin} ${gateway.origin} ${gatewayWs}${isDev ? ' ws: wss:' : ''}`,
-  "media-src 'self' blob:",
-  `frame-src ${turnstile}`,
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "object-src 'none'",
-].join('; ');
+// The CSP is set per request by proxy.ts (nonces); these headers are static.
+const production = process.env.NODE_ENV === 'production';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -44,15 +26,20 @@ const nextConfig = {
   // `next dev` would otherwise write an AGENTS.md here; agent docs live in CLAUDE.md/CONTEXT.md.
   agentRules: false,
   transpilePackages: ['@app/shared', '@app/ui'],
+  // Container images (Dockerfile sets NEXT_OUTPUT=standalone): a self-contained server with only
+  // the traced dependencies; local `next start` keeps the regular output.
+  ...(process.env.NEXT_OUTPUT === 'standalone'
+    ? { output: /** @type {const} */ ('standalone') }
+    : {}),
+  outputFileTracingRoot: path.join(import.meta.dirname, '../..'),
   // LAN testing (docs/LAN_TESTING.md): the dev server accepts the host the public URLs use.
-  allowedDevOrigins: [gateway.hostname],
+  allowedDevOrigins: [new URL(env.NEXT_PUBLIC_GATEWAY_URL).hostname],
   turbopack: { root: path.join(import.meta.dirname, '../..') },
   headers() {
     return Promise.resolve([
       {
         source: '/:path*',
         headers: [
-          { key: 'Content-Security-Policy', value: csp },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-Frame-Options', value: 'DENY' },
@@ -61,6 +48,10 @@ const nextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
           },
+          // Browsers ignore HSTS on plain http, so local production builds are unaffected.
+          ...(production
+            ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' }]
+            : []),
         ],
       },
     ]);

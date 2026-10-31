@@ -37,10 +37,11 @@ export interface ReportRouteDeps {
   trust: TrustStore;
   guard: AdminGuard;
   clock: Clock;
+  recordAction: (action: string) => void;
 }
 
 export const adminReportRoutes: FastifyPluginAsyncZod<ReportRouteDeps> = (app, deps) => {
-  const { config, prisma, objects, bans, trust, guard, clock } = deps;
+  const { config, prisma, objects, bans, trust, guard, clock, recordAction } = deps;
 
   async function load(id: string) {
     const report = await prisma.report.findUnique({ where: { id } });
@@ -217,6 +218,7 @@ export const adminReportRoutes: FastifyPluginAsyncZod<ReportRouteDeps> = (app, d
           metadata: { note: request.body.note ?? null },
         });
       });
+      recordAction('report_dismiss');
       return { ok: true as const };
     },
   );
@@ -307,6 +309,9 @@ export const adminReportRoutes: FastifyPluginAsyncZod<ReportRouteDeps> = (app, d
       // After the commit: caches and `ban_applied` (gateways end live sessions at once).
       if (outcome.score !== null) await trust.cache(report.reportedId, outcome.score);
       if (outcome.created !== null) await bans.activate(outcome.created);
+      recordAction('report_action');
+      if (ban !== undefined) recordAction(ban.type === 'HARD' ? 'ban_hard' : 'ban_shadow');
+      if (trustDelta !== undefined) recordAction('trust_adjust');
       return { ok: true as const };
     },
   );

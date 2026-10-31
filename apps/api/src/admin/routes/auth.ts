@@ -11,7 +11,7 @@ import {
   totpSetupResponseSchema,
   totpVerifySchema,
 } from '@app/shared';
-import { hmacHash } from '@app/shared/crypto';
+import { hashIp, hmacHash } from '@app/shared/crypto';
 import { hash, verify } from '@node-rs/argon2';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { generate, generateSecret, generateURI, verify as verifyTotp } from 'otplib';
@@ -81,8 +81,11 @@ export const adminAuthRoutes: FastifyPluginAsyncZod<AuthRouteDeps> = (app, deps)
     email: admin.email,
     role: admin.role,
     totpEnabled: admin.totpEnabled,
+    totpRequired: config.DEPLOY_ENV === 'production',
     csrfToken: csrf,
   });
+  /** /me, logout and TOTP enrolment stay open to admins who still have to enrol. */
+  const enrolment = guard(undefined, { enrolment: true });
 
   app.post(
     '/auth/login',
@@ -91,7 +94,7 @@ export const adminAuthRoutes: FastifyPluginAsyncZod<AuthRouteDeps> = (app, deps)
       config: {
         rateLimit: {
           ...ADMIN_LOGIN_RATE_LIMIT,
-          keyGenerator: (request) => hmacHash(request.ip, config.IP_HASH_PEPPER),
+          keyGenerator: (request) => hashIp(request.ip, config.IP_HASH_PEPPER),
         },
       },
     },
@@ -156,7 +159,7 @@ export const adminAuthRoutes: FastifyPluginAsyncZod<AuthRouteDeps> = (app, deps)
 
   app.post(
     '/auth/logout',
-    { preHandler: guard(), schema: { response: { 200: okSchema } } },
+    { preHandler: enrolment, schema: { response: { 200: okSchema } } },
     async (request, reply) => {
       const admin = adminOf(request);
       await sessions.destroy(admin.sessionId);
@@ -175,7 +178,7 @@ export const adminAuthRoutes: FastifyPluginAsyncZod<AuthRouteDeps> = (app, deps)
 
   app.get(
     '/auth/me',
-    { preHandler: guard(), schema: { response: { 200: adminMeSchema } } },
+    { preHandler: enrolment, schema: { response: { 200: adminMeSchema } } },
     (request) => {
       const admin = adminOf(request);
       return me(admin, admin.csrf);
@@ -185,7 +188,7 @@ export const adminAuthRoutes: FastifyPluginAsyncZod<AuthRouteDeps> = (app, deps)
   // TOTP enrolment: a new secret is stored encrypted but only enforced once verified.
   app.post(
     '/auth/totp/setup',
-    { preHandler: guard(), schema: { response: { 200: totpSetupResponseSchema } } },
+    { preHandler: enrolment, schema: { response: { 200: totpSetupResponseSchema } } },
     async (request) => {
       const admin = adminOf(request);
       if (admin.totpEnabled) {
@@ -217,7 +220,7 @@ export const adminAuthRoutes: FastifyPluginAsyncZod<AuthRouteDeps> = (app, deps)
 
   app.post(
     '/auth/totp/verify',
-    { preHandler: guard(), schema: { body: totpVerifySchema, response: { 200: okSchema } } },
+    { preHandler: enrolment, schema: { body: totpVerifySchema, response: { 200: okSchema } } },
     async (request) => {
       const admin = adminOf(request);
       const row = await prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id } });

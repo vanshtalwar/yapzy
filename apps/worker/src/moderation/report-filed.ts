@@ -1,4 +1,5 @@
 import { trustDelta } from '@app/moderation';
+import { reportPenaltyKey, reportThresholdLockKey } from '@app/redis';
 import { type ReportFiledJob } from '@app/shared/jobs';
 
 import { DAY_MS, type ModerationDeps } from './deps.ts';
@@ -12,12 +13,44 @@ export async function handleReportFiled(
   deps: ModerationDeps,
   job: ReportFiledJob,
 ): Promise<{ reporters: number; shadowBanned: boolean }> {
-  const { prisma, config } = deps;
   const at = new Date(job.at);
-  await deps.trust.adjust(job.reportedId, trustDelta('report_received'));
-  await deps.risk.reported(job.reportedId, at.getTime());
-  await deps.risk.flag(job.reportedId, at.getTime() + DAY_MS);
+  // Every report stays for review, but one reporter costs the reported visitor trust (and
+  // flags them) at most once a day: repeated reports from one person aren't extra evidence.
+  const firstFromReporter =
+    job.reporterId === undefined ||
+    (await deps.redis.set(
+      reportPenaltyKey(job.reporterId, job.reportedId),
+      job.reportId,
+      'EX',
+      DAY_MS / 1_000,
+      'NX',
+    )) === 'OK';
+  if (firstFromReporter) {
+    await deps.trust.adjust(job.reportedId, trustDelta('report_received'));
+    await deps.risk.reported(job.reportedId, at.getTime());
+    await deps.risk.flag(job.reportedId, at.getTime() + DAY_MS);
+  }
 
+  // Worker replicas may process two reports against the same visitor at once: serialize the
+  // threshold check and the ban (a busy lock fails the job; BullMQ retries it with backoff and
+  // the per-reporter key above keeps the retry from charging trust twice).
+  const lock = reportThresholdLockKey(job.reportedId);
+  if ((await deps.redis.set(lock, job.reportId, 'PX', 30_000, 'NX')) !== 'OK') {
+    throw new Error('report threshold check busy for this visitor; retrying');
+  }
+  try {
+    return await checkThreshold(deps, job, at);
+  } finally {
+    if ((await deps.redis.get(lock)) === job.reportId) await deps.redis.del(lock);
+  }
+}
+
+async function checkThreshold(
+  deps: ModerationDeps,
+  job: ReportFiledJob,
+  at: Date,
+): Promise<{ reporters: number; shadowBanned: boolean }> {
+  const { prisma, config } = deps;
   const reporters = (
     await prisma.report.findMany({
       where: {
@@ -62,5 +95,6 @@ export async function handleReportFiled(
     expiresAt: new Date(at.getTime() + config.autoBanHours * 3_600_000),
   });
   deps.logger.info({ visitorId: job.reportedId, reporters }, 'report threshold reached');
+  deps.observer?.action('report_threshold', 'shadow_banned');
   return { reporters, shadowBanned: true };
 }

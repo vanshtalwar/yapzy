@@ -2,6 +2,7 @@ import './globals.css';
 
 import { Toaster } from '@app/ui';
 import { type Metadata, type Viewport } from 'next';
+import { headers } from 'next/headers';
 import { type ReactNode } from 'react';
 
 export const metadata: Metadata = {
@@ -18,7 +19,9 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // Dynamic rendering: every response gets its own CSP nonce (proxy.ts).
+  await headers();
   return (
     <html lang="en">
       <body className="min-h-dvh">

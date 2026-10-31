@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { createLogger } from '@app/logger';
+import { metricsAccess } from '@app/metrics';
 import {
   createBanChecker,
   createBanService,
@@ -24,6 +25,7 @@ import {
 import { adminRoutes } from './admin/index.ts';
 import { type AppDeps, systemClock } from './deps.ts';
 import { AppError } from './errors.ts';
+import { createDefaultApiMetrics } from './metrics.ts';
 import { authPlugin } from './plugins/auth.ts';
 import { registerErrorHandling } from './plugins/error-handler.ts';
 import { configRoutes } from './routes/config.ts';
@@ -70,19 +72,60 @@ export async function buildApp(deps: AppDeps) {
     void reply.header('x-request-id', request.id);
   });
 
+  const metrics = deps.metrics ?? createDefaultApiMetrics(config.NODE_ENV !== 'test');
+  app.addHook('onResponse', async (request, reply) => {
+    // The route pattern (not the raw URL) keeps label cardinality bounded.
+    const route = request.routeOptions.url ?? 'unmatched';
+    const status = String(reply.statusCode);
+    metrics.httpDuration.observe(
+      { method: request.method, route, status },
+      reply.elapsedTime / 1_000,
+    );
+    if (reply.statusCode === 429) metrics.rateLimitHits.inc({ route });
+  });
+  const metricsAccessOptions = {
+    token: config.METRICS_TOKEN,
+    requireToken: config.DEPLOY_ENV === 'production',
+  };
+  if (metricsAccessOptions.requireToken && config.METRICS_TOKEN === undefined) {
+    app.log.warn('METRICS_TOKEN not set: /metrics is disabled (DEPLOY_ENV=production)');
+  }
+  app.get('/metrics', async (request, reply) => {
+    const access = metricsAccess(request.headers.authorization, metricsAccessOptions);
+    if (access === 'disabled') throw new AppError(404, ErrorCode.NOT_FOUND, 'Not found');
+    if (access === 'unauthorized') {
+      throw new AppError(401, ErrorCode.UNAUTHORIZED, 'Metrics token required');
+    }
+    return reply
+      .header('content-type', metrics.registry.contentType)
+      .header('cache-control', 'no-store')
+      .send(await metrics.registry.metrics());
+  });
+
   await app.register(helmet);
-  const allowedOrigins = new Set(config.CORS_ORIGINS);
+  const publicOrigins = new Set(config.CORS_ORIGINS);
+  const adminOrigins = new Set(config.ADMIN_ORIGINS);
   await app.register(cors, {
-    // Requests without Origin (curl, server-to-server) are not CORS requests at all.
-    origin: (origin, callback) => {
-      callback(null, origin === undefined || allowedOrigins.has(origin));
+    // Two policies: visitors use a Bearer header (no credentials, no admin header); only the
+    // admin origins may send the session cookie and CSRF header to /v1/admin/*. A script on
+    // the public site (XSS, compromised dependency) therefore can't act as a moderator who
+    // happens to visit it.
+    delegator: (request, callback) => {
+      const admin = request.url === '/v1/admin' || request.url.startsWith('/v1/admin/');
+      const origin = request.headers.origin;
+      // Requests without Origin (curl, server-to-server) are not CORS requests at all.
+      const allowed = origin === undefined || (admin ? adminOrigins : publicOrigins).has(origin);
+      callback(null, {
+        origin: allowed,
+        methods: ['GET', 'POST', 'OPTIONS'],
+        allowedHeaders: admin
+          ? ['content-type', ADMIN_CSRF_HEADER]
+          : ['authorization', 'content-type'],
+        credentials: admin,
+        exposedHeaders: ['x-request-id', 'retry-after'],
+        maxAge: 600,
+      });
     },
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['authorization', 'content-type', ADMIN_CSRF_HEADER],
-    // Admin sessions are cookies; credentials are only ever sent to allow-listed origins.
-    credentials: true,
-    exposedHeaders: ['x-request-id', 'retry-after'],
-    maxAge: 600,
   });
   await app.register(sensible);
 
@@ -129,10 +172,19 @@ export async function buildApp(deps: AppDeps) {
     tokens,
     clock,
   });
-  await app.register(turnRoutes, { config, clock });
+  await app.register(turnRoutes, { config, clock, bans });
   await app.register(statsRoutes, { online });
   const sessions = createSessionState(redis);
-  await app.register(reportRoutes, { config, prisma, objects, jobs, sessions, clock });
+  await app.register(reportRoutes, {
+    config,
+    prisma,
+    objects,
+    jobs,
+    sessions,
+    clock,
+    metrics,
+    bans,
+  });
   await app.register(frameRoutes, { config, redis, objects, jobs, sessions, clock });
 
   const banService = createBanService({
@@ -152,6 +204,9 @@ export async function buildApp(deps: AppDeps) {
     trust,
     online,
     clock,
+    recordAction: (action) => {
+      metrics.moderationActions.inc({ source: 'admin', action });
+    },
   });
 
   return app;

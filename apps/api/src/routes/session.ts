@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@app/db';
 import { type ApiEnv } from '@app/env';
 import { type BanChecker, type RiskProfiles, type TrustStore } from '@app/moderation';
 import { ErrorCode, sessionRequestSchema, sessionResponseSchema } from '@app/shared';
-import { hmacHash } from '@app/shared/crypto';
+import { hashIp, hmacHash } from '@app/shared/crypto';
 import { type VisitorTokenService } from '@app/shared/visitor-token';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 
@@ -26,7 +26,7 @@ export const SESSION_RATE_LIMIT = { max: 10, timeWindow: '1 minute' } as const;
 
 export const sessionRoutes: FastifyPluginAsyncZod<SessionRouteOptions> = (app, options) => {
   const { config, prisma, turnstile, bans, trust, risk, tokens, clock } = options;
-  const ipHashOf = (ip: string) => hmacHash(ip, config.IP_HASH_PEPPER);
+  const ipHashOf = (ip: string) => hashIp(ip, config.IP_HASH_PEPPER);
 
   async function upsertVisitor(deviceIdHash: string, ipHash: string, tosVersion: string) {
     const now = clock.now();
