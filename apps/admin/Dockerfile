@@ -4,7 +4,7 @@
 #     --build-arg NEXT_PUBLIC_API_URL=https://api.example.com .
 # Run time: ADMIN_EVIDENCE_ORIGIN = origin of presigned evidence URLs (CSP img-src).
 
-FROM node:24.22.2-alpine3.24 AS base
+FROM node:26.12.1-alpine3.24 AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 NEXT_TELEMETRY_DISABLED=1
 RUN corepack enable
 WORKDIR /repo
@@ -24,7 +24,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY --from=prune /repo/out/full/ .
 RUN pnpm turbo run build --filter=@app/admin
 
-FROM node:24.22.2-alpine3.24 AS runtime
+FROM node:26.12.1-alpine3.24 AS runtime
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3001 HOSTNAME=0.0.0.0
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/admin/.next/standalone ./
