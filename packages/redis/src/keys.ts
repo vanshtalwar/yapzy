@@ -262,6 +262,30 @@ export function moderationBudgetClaimKey(windowStart: number): string {
   return `lock:mod:budget:${String(windowStart)}`;
 }
 
+// --- SFU (Janus, Part 11) ----------------------------------------------------------------
+
+/**
+ * HASH: Janus nodeId → JSON { wsUrl, adminUrl, healthy, rooms, failures, lastCheckedAt },
+ * written by the gateway that holds SFU_HEALTH_LOCK_KEY; read for room placement.
+ */
+export const SFU_NODES_KEY = 'sfu:nodes';
+
+/**
+ * HASH: `<nodeId>:<roomId>` → JSON { sessionId, createdAt }: every room we created and the
+ * session it serves. Written before the room exists on Janus, removed after it is destroyed,
+ * so the orphan sweep can destroy anything on a node that isn't listed here.
+ */
+export const SFU_ROOMS_KEY = 'sfu:rooms';
+
+/** Field of SFU_ROOMS_KEY for one room. */
+export function sfuRoomField(nodeId: string, roomId: number): string {
+  if (!Number.isSafeInteger(roomId) || roomId <= 0) throw new Error('Invalid room id');
+  return `${assertSafeId('nodeId', nodeId)}:${String(roomId)}`;
+}
+
+/** STRING (SET NX PX, renewed by its owner): the one gateway that health-checks Janus nodes. */
+export const SFU_HEALTH_LOCK_KEY = 'lock:sfu:health';
+
 // --- Rate limits & admin -----------------------------------------------------------------
 
 /** Prefix for all rate-limit state, e.g. `rl:chat:message:<visitorId>`. */
