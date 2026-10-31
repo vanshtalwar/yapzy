@@ -21,6 +21,10 @@ export const ticketSchema = z.object({
   /** Epoch ms. */
   createdAt: z.number().int(),
   status: z.enum(TICKET_STATUSES),
+  /** Which queues the ticket sits in: its interest queues, or (after promotion) `q:any`. */
+  phase: z.enum(['interest', 'any']),
+  /** Requeue automatically (with priority) if a session fails early (D-048). */
+  autoRequeue: z.boolean().default(false),
   /** Gateway node that owns the waiting socket; lets the sweeper drop tickets of dead nodes. */
   nodeId: z.string().optional(),
   /** Set by the script when the ticket is matched. */
@@ -30,5 +34,6 @@ export const ticketSchema = z.object({
 export type Ticket = z.output<typeof ticketSchema>;
 
 export type NewTicket = Pick<Ticket, 'ticketId' | 'visitorId' | 'interests' | 'createdAt'> & {
+  autoRequeue?: boolean;
   nodeId?: string;
 };

@@ -1,8 +1,10 @@
 export {
+  BUCKET_CHOICES,
   type CancelResult,
   createMatchmaker,
+  type EnqueueOptions,
   type EnqueueResult,
-  type MatchDimensions,
+  type HopResult,
   type Matchmaker,
   type MatchmakerOptions,
   type Phase,

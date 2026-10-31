@@ -32,6 +32,12 @@ export const testConfig = createEnv(gatewayEnv, {
     IP_HASH_PEPPER: 'gateway-test-ip-pepper',
     JWT_SECRET,
     CORS_ORIGINS: ALLOWED_ORIGIN,
+    // One bucket by default keeps session tests deterministic; text:zh exercises buckets.
+    MM_BUCKETS: '1',
+    MM_BUCKETS_BY_QUEUE: '{"text:zh": 4}',
+    MATCH_ACK_TIMEOUT_MS: '1000',
+    RECONNECT_GRACE_MS: '1500',
+    EARLY_FAILURE_WINDOW_MS: '10000',
   },
 });
 
@@ -60,6 +66,7 @@ export function startGateway(
         presenceIntervalMs: 200,
         drainTimeoutMs: options.drainTimeoutMs ?? 300,
         interestFallbackMs: options.interestFallbackMs ?? 300,
+        deadlineIntervalMs: 100,
       },
     });
     const port = await gateway.listen(0, '127.0.0.1');

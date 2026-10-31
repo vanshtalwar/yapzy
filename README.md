@@ -112,13 +112,20 @@ With the API, both gateway nodes and the worker running (four terminals):
 RATE_LIMIT_DISABLED=true pnpm --filter @app/api dev   # lets 50 bots start sessions at once
 pnpm --filter @app/gateway dev:multi
 pnpm --filter @app/worker dev
-pnpm bots -- --clients 50 --gateways http://localhost:4001,http://localhost:4011 --mode text --duration 120
+pnpm bots -- --clients 50 --gateways http://localhost:4001,http://localhost:4011 \
+  --mode text --duration 120 --ghost-rate 0.1 --reconnect-rate 0.1
 ```
 
-Each bot queues with random interests, chats, then skips or ends, and repeats. The summary lists
-sessions (and any asymmetric matches), message delivery, protocol errors and p50/p95
+Each bot queues with random interests, acks its match, chats, then skips or ends, and repeats.
+`--ghost-rate` bots never send `match:ack` (their sessions must end after `MATCH_ACK_TIMEOUT_MS`);
+`--reconnect-rate` bots drop their socket mid-session, reconnect to another gateway and resume.
+Restart one gateway node during a run (Ctrl-C it and start it again): its bots reconnect to the
+other node and resume, and no session ends. The summary lists sessions (and any asymmetric
+matches), undelivered messages, resumes, ghost-session end times, protocol errors and p50/p95
 time-to-match; the exit code is 1 if anything was wrong. Browse the persisted sessions with
 `pnpm db:studio` → `ChatSessionLog`.
+
+To compare queue bucketing, start the gateways with `MM_BUCKETS=1` and then `MM_BUCKETS=4`.
 
 ## Layout
 

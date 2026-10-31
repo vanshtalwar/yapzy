@@ -115,6 +115,41 @@ export const gatewayEnv = baseEnv.extend({
   INTEREST_FALLBACK_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
   /** A matched pair won't be matched with each other again for this long. */
   RECENT_PAIR_TTL_MS: z.coerce.number().int().min(0).max(3_600_000).default(60_000),
+  // --- Session resilience (D-046…D-048) ---
+  /** A disconnected participant can `session:resume` this long before leaving for good. */
+  RECONNECT_GRACE_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
+  /** Participants must `match:ack` this soon after `match:found`. */
+  MATCH_ACK_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5_000),
+  /** Sessions failing this soon after the match requeue the innocent side with priority. */
+  EARLY_FAILURE_WINDOW_MS: z.coerce.number().int().min(0).max(120_000).default(10_000),
+  // --- Queue buckets & hot-key sharding (D-052, D-053) ---
+  MM_REGION: z
+    .string()
+    .regex(/^[a-z0-9-]{1,32}$/)
+    .default('local'),
+  MM_BUCKETS: z.coerce.number().int().min(1).max(1_024).default(4),
+  /** JSON overrides per `<mode>:<lang>`, e.g. {"video:en": 32}. */
+  MM_BUCKETS_BY_QUEUE: z
+    .string()
+    .default('')
+    .transform((value, context) => {
+      if (value.trim() === '') return {};
+      try {
+        return JSON.parse(value) as unknown;
+      } catch {
+        context.addIssue({ code: 'custom', message: 'must be JSON, e.g. {"video:en": 32}' });
+        return z.NEVER;
+      }
+    })
+    .pipe(
+      z.record(
+        z.string().regex(/^(text|video):[a-z]{2}$/, 'keys look like "video:en"'),
+        z.number().int().min(1).max(1_024),
+      ),
+    ),
+  MM_BUCKET_HOP_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
+  DEADLINE_SHARDS: z.coerce.number().int().min(1).max(1_024).default(16),
+  STATS_COUNTER_SHARDS: z.coerce.number().int().min(1).max(1_024).default(16),
 });
 
 export type GatewayEnv = z.output<typeof gatewayEnv>;

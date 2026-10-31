@@ -22,6 +22,11 @@ export const queueJoinSchema = z.object({
   mode: chatModeSchema,
   lang: langSchema,
   interests: interestsSchema.default([]),
+  /**
+   * If a session fails early through no fault of this visitor (the peer never acked or never
+   * came back), requeue them automatically at the head of the queue (D-048).
+   */
+  autoRequeue: z.boolean().default(false),
 });
 
 export const queueLeaveSchema = emptyPayload;
@@ -30,6 +35,15 @@ export const pingSchema = emptyPayload;
 export const sessionRefSchema = z.object({ sessionId: sessionIdSchema });
 export const chatNextSchema = sessionRefSchema;
 export const chatEndSchema = sessionRefSchema;
+/** Must arrive within MATCH_ACK_TIMEOUT_MS of `match:found` (ghost-tab protection, D-047). */
+export const matchAckSchema = sessionRefSchema;
+
+/** After a socket reconnect, on any node (D-046). */
+export const sessionResumeSchema = z.object({
+  sessionId: sessionIdSchema,
+  /** Last chat message id the client has; later messages are returned as `missedMessages`. */
+  lastMessageId: z.string().min(1).max(64).optional(),
+});
 
 export const chatMessageSchema = z.object({
   sessionId: sessionIdSchema,
@@ -106,6 +120,8 @@ export const matchFoundSchema = z.object({
   maxParticipants: z.number().int().min(2).max(16),
   selfParticipantId: participantIdSchema,
   peers: z.array(peerRoleSchema),
+  /** Server-chosen frame-sampling interval for this participant; null = none (Part 8, D-054). */
+  moderation: z.object({ frameIntervalMs: z.number().int().positive().nullable() }),
   commonInterests: z.array(z.string()),
 });
 
@@ -137,6 +153,12 @@ export const rtcIceOutSchema = z.object({
   candidate: iceCandidateSchema,
 });
 
+/** `peer:reconnecting` / `peer:resumed`: the peer's signaling connection dropped / came back. */
+export const peerPresenceSchema = z.object({
+  sessionId: sessionIdSchema,
+  participantId: participantIdSchema,
+});
+
 export const peerLeftSchema = z.object({
   sessionId: sessionIdSchema,
   participantId: participantIdSchema,
@@ -152,3 +174,10 @@ export const systemNoticeSchema = z.object({
 export const pongSchema = z.object({ serverTime: z.number().int() });
 
 export const chatMessageAckSchema = z.object({ id: z.string().min(1), at: z.iso.datetime() });
+
+export const sessionResumedSchema = z.object({
+  selfParticipantId: participantIdSchema,
+  peers: z.array(peerRoleSchema),
+  /** Messages from others sent while this client was away (oldest first). */
+  missedMessages: z.array(chatMessageOutSchema),
+});

@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import { createEnv, EnvValidationError } from './create-env.ts';
 import { applyEnvFileContent, findWorkspaceRoot } from './load-env-file.ts';
-import { apiEnv, baseEnv, databaseEnv, redisEnv } from './schemas.ts';
+import { apiEnv, baseEnv, databaseEnv, gatewayEnv, redisEnv } from './schemas.ts';
 
 const serviceEnv = baseEnv.extend({
   JWT_SECRET: z.string().min(32),
@@ -137,5 +137,35 @@ describe('apiEnv', () => {
     expect(
       createEnv(apiEnv, { source: { ...valid, RATE_LIMIT_DISABLED: 'false' } }).RATE_LIMIT_DISABLED,
     ).toBe(false);
+  });
+});
+
+describe('gatewayEnv', () => {
+  const valid = {
+    DATABASE_URL: 'postgresql://app:app@localhost:5432/app',
+    REDIS_URL: 'redis://localhost:6379',
+    IP_HASH_PEPPER: 'p'.repeat(16),
+    JWT_SECRET: 's'.repeat(32),
+    CORS_ORIGINS: 'http://localhost:3000',
+  };
+
+  it('parses bucket overrides and applies resilience defaults', () => {
+    const env = createEnv(gatewayEnv, {
+      source: { ...valid, MM_BUCKETS_BY_QUEUE: '{"video:en": 32, "text:de": 1}' },
+    });
+    expect(env.MM_BUCKETS_BY_QUEUE).toEqual({ 'video:en': 32, 'text:de': 1 });
+    expect(env.MM_BUCKETS).toBe(4);
+    expect(env.RECONNECT_GRACE_MS).toBe(15_000);
+    expect(env.MATCH_ACK_TIMEOUT_MS).toBe(5_000);
+    expect(env.MM_REGION).toBe('local');
+    expect(createEnv(gatewayEnv, { source: valid }).MM_BUCKETS_BY_QUEUE).toEqual({});
+  });
+
+  it('rejects malformed bucket overrides', () => {
+    for (const bad of ['{not json', '{"en": 4}', '{"video:en": 0}']) {
+      expect(() =>
+        createEnv(gatewayEnv, { source: { ...valid, MM_BUCKETS_BY_QUEUE: bad } }),
+      ).toThrow(/MM_BUCKETS_BY_QUEUE/);
+    }
   });
 });

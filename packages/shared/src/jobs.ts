@@ -24,6 +24,8 @@ export const LEAVE_REASONS = [
   'REPORTED',
   'BANNED',
   'SERVER_RESTART',
+  /** Never sent `match:ack` (ghost tab, D-047). */
+  'MATCH_TIMEOUT',
 ] as const;
 export type LeaveReason = (typeof LEAVE_REASONS)[number];
 

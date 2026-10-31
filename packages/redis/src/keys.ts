@@ -51,11 +51,31 @@ function assertInterest(interest: string): string {
 
 // --- Matchmaking -------------------------------------------------------------------------
 
-export function matchmakingTag(pool: MatchPool, mode: ChatMode, lang: SupportedLang): string {
-  assertOneOf('pool', pool, MATCH_POOLS);
-  assertOneOf('mode', mode, CHAT_MODES);
-  assertOneOf('lang', lang, SUPPORTED_LANGS);
-  return `{mm:${pool}:${mode}:${lang}}`;
+const REGION = /^[a-z0-9-]{1,32}$/;
+export const MAX_BUCKETS = 1024;
+
+/** One queue family `(region, pool, mode, lang)` is split into buckets (D-052). */
+export interface QueueFamily {
+  region: string;
+  pool: MatchPool;
+  mode: ChatMode;
+  lang: SupportedLang;
+}
+
+/** One bucket of a family: the unit that lives on one Redis Cluster slot. */
+export interface QueueBucket extends QueueFamily {
+  bucket: number;
+}
+
+export function matchmakingTag(dims: QueueBucket): string {
+  if (!REGION.test(dims.region)) throw new Error('Invalid region for Redis key');
+  assertOneOf('pool', dims.pool, MATCH_POOLS);
+  assertOneOf('mode', dims.mode, CHAT_MODES);
+  assertOneOf('lang', dims.lang, SUPPORTED_LANGS);
+  if (!Number.isInteger(dims.bucket) || dims.bucket < 0 || dims.bucket >= MAX_BUCKETS) {
+    throw new Error('Invalid bucket for Redis key');
+  }
+  return `{mm:${dims.region}:${dims.pool}:${dims.mode}:${dims.lang}:${String(dims.bucket)}}`;
 }
 
 export interface MatchmakingKeys {
@@ -70,12 +90,8 @@ export interface MatchmakingKeys {
   recent: string;
 }
 
-export function matchmakingKeys(
-  pool: MatchPool,
-  mode: ChatMode,
-  lang: SupportedLang,
-): MatchmakingKeys {
-  const tag = matchmakingTag(pool, mode, lang);
+export function matchmakingKeys(dims: QueueBucket): MatchmakingKeys {
+  const tag = matchmakingTag(dims);
   return {
     tag,
     queueAny: `${tag}:q:any`,
@@ -153,13 +169,38 @@ export function presenceNodeKey(nodeId: string): string {
 /** SET: known gateway node ids. */
 export const PRESENCE_NODES_KEY = 'presence:nodes';
 
-/** STRING: matches started in one UTC minute (yyyyMMddHHmm). */
-export function statsMatchesKey(at: Date): string {
+/**
+ * STRING: matches started in one UTC minute (yyyyMMddHHmm), sharded (D-053): writers INCR a
+ * random shard, readers sum all `shards`.
+ */
+export function statsMatchesKey(at: Date, shard: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  const minute = `${at.getUTCFullYear()}${pad(at.getUTCMonth() + 1)}${pad(at.getUTCDate())}${pad(
+  const minute = `${String(at.getUTCFullYear())}${pad(at.getUTCMonth() + 1)}${pad(at.getUTCDate())}${pad(
     at.getUTCHours(),
   )}${pad(at.getUTCMinutes())}`;
-  return `stats:matches:${minute}`;
+  if (!Number.isInteger(shard) || shard < 0) throw new Error('Invalid stats shard');
+  return `stats:matches:${minute}:${String(shard)}`;
+}
+
+// --- Session deadlines ---------------------------------------------------------------------
+
+/**
+ * ZSET (sharded, D-053): member `<kind>|<sessionId>|<participantId>`, score = deadline ms.
+ * The shard number is the hash tag, so each shard can live on a different Redis node.
+ */
+export function sessionDeadlinesKey(shard: number): string {
+  if (!Number.isInteger(shard) || shard < 0) throw new Error('Invalid deadline shard');
+  return `session:deadlines:{${String(shard)}}`;
+}
+
+/** Stable shard for a session id (FNV-1a), so all of a session's deadlines share a shard. */
+export function deadlineShardOf(sessionId: string, shards: number): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < sessionId.length; i += 1) {
+    hash ^= sessionId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % shards;
 }
 
 // --- Trust & safety ----------------------------------------------------------------------

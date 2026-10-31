@@ -7,6 +7,7 @@ import {
   chatTypingSchema,
   type ClientEventName,
   ErrorCode,
+  matchAckSchema,
   moderationSignalSchema,
   pingSchema,
   type Pong,
@@ -15,6 +16,8 @@ import {
   rtcDescriptionSchema,
   rtcIceSchema,
   rtcSummarySchema,
+  type SessionResumed,
+  sessionResumeSchema,
 } from '@app/shared';
 import { ulid } from 'ulid';
 
@@ -40,6 +43,8 @@ export const EVENT_COSTS = {
   'rtc:ice': 0.125,
   'rtc:summary': 1,
   'moderation:signal': 0.5,
+  'match:ack': 0.5,
+  'session:resume': 2,
   ping: 1,
 } as const satisfies Record<ClientEventName, number>;
 
@@ -53,10 +58,13 @@ export interface HandlerDeps {
   logger: { info(obj: object, msg: string): void };
 }
 
-/** Other participants who are still in the session. */
+/**
+ * Other participants still in the session. `reconnecting` ones are included: messages reach
+ * them via their room if they are back, or via `missedMessages` when they resume.
+ */
 function activeOthers({ ref, context }: InSession) {
   return [...context.participants].filter(
-    ([participantId, record]) => participantId !== ref.participantId && record.leftAt === undefined,
+    ([participantId, record]) => participantId !== ref.participantId && record.status !== 'left',
   );
 }
 
@@ -110,6 +118,23 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
 
   registerHandler(
     socket,
+    'match:ack',
+    matchAckSchema,
+    ({ sessionId }) => lifecycle.ack(socket, sessionId),
+    { cost: EVENT_COSTS['match:ack'] },
+  );
+
+  registerHandler(
+    socket,
+    'session:resume',
+    sessionResumeSchema,
+    ({ sessionId, lastMessageId }): Promise<SessionResumed> =>
+      lifecycle.resume(socket, sessionId, lastMessageId),
+    { cost: EVENT_COSTS['session:resume'] },
+  );
+
+  registerHandler(
+    socket,
     'chat:message',
     chatMessageSchema,
     async ({ sessionId, text }): Promise<ChatMessageAck> => {
@@ -117,9 +142,10 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
       const from = session.ref.participantId;
       const id = ulid();
       const at = now().toISOString();
-      await store.appendLog(sessionId, { id, from, text, at }, TRANSCRIPT_MAX_MESSAGES);
+      const message = { sessionId, from, id, text, at };
+      await store.appendLog(sessionId, message, TRANSCRIPT_MAX_MESSAGES);
       for (const [, record] of activeOthers(session)) {
-        lifecycle.emitTo(record.visitorId, 'chat:message', { sessionId, from, id, text, at });
+        lifecycle.emitTo(record.visitorId, 'chat:message', message);
       }
       return { id, at };
     },

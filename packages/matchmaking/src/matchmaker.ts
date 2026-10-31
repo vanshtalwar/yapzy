@@ -1,5 +1,6 @@
-import { matchmakingKeys, type MatchPool, type Redis } from '@app/redis';
-import { type ChatMode, type SupportedLang } from '@app/shared';
+import { randomInt } from 'node:crypto';
+
+import { matchmakingKeys, type QueueBucket, type QueueFamily, type Redis } from '@app/redis';
 import { type Result } from 'ioredis';
 import { z } from 'zod';
 
@@ -15,12 +16,6 @@ declare module 'ioredis' {
   }
 }
 
-export interface MatchDimensions {
-  pool: MatchPool;
-  mode: ChatMode;
-  lang: SupportedLang;
-}
-
 export type Phase = 'interest' | 'any';
 
 export type EnqueueResult =
@@ -31,11 +26,19 @@ export type EnqueueResult =
 export type CancelResult =
   { status: 'cancelled' } | { status: 'not_found' } | { status: 'matched'; sessionId: string };
 
+export type HopResult = { status: 'not_waiting' } | (EnqueueResult & { bucket: number });
+
 export interface MatchmakerOptions {
-  /** A matched pair won't be matched again for this long. */
+  /** A matched pair won't be matched again for this long (within one bucket). */
   recentPairTtlMs: number;
   /** Max queue entries inspected per queue per call (bounded work under load). */
   maxScan?: number;
+}
+
+export interface EnqueueOptions {
+  now?: number;
+  /** Push to the head of the queues (fair requeue, bucket hop). */
+  priority?: boolean;
 }
 
 const rawEnqueueResult = z.union([
@@ -61,22 +64,40 @@ function parseTicket(raw: string): Ticket {
   return ticketSchema.parse(JSON.parse(raw));
 }
 
+/**
+ * Buckets sampled per choice. The master design says 2; with few buckets and sparse queues,
+ * 2 random picks out of 4 miss the only bucket with a waiter half the time (D-056). Sampling
+ * up to 4 costs the same single round trip and still spreads load across 32–64 buckets.
+ */
+export const BUCKET_CHOICES = 4;
+
+/** Up to BUCKET_CHOICES distinct random buckets (all of them if there are fewer). */
+function candidates(bucketCount: number, exclude?: number): number[] {
+  const pool = Array.from({ length: bucketCount }, (_, i) => i).filter((b) => b !== exclude);
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = randomInt(0, i + 1);
+    [pool[i], pool[j]] = [pool[j] ?? 0, pool[i] ?? 0];
+  }
+  return pool.slice(0, BUCKET_CHOICES);
+}
+
 export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
   ensureCommands(redis);
   const maxScan = options.maxScan ?? 50;
 
   async function run(
-    dims: MatchDimensions,
+    dims: QueueBucket,
     ticket: NewTicket | Ticket,
     phase: Phase,
     op: 'enqueue' | 'promote',
     sessionId: string,
-    now: number,
+    { now = Date.now(), priority = false }: EnqueueOptions,
   ): Promise<EnqueueResult> {
-    const keys = matchmakingKeys(dims.pool, dims.mode, dims.lang);
-    const interestQueues = ticket.interests.map((interest) => keys.queueInterest(interest));
+    const keys = matchmakingKeys(dims);
+    const interestQueues =
+      phase === 'interest' ? ticket.interests.map((interest) => keys.queueInterest(interest)) : [];
     const ticketJson = JSON.stringify(
-      ticketSchema.parse({ ...ticket, status: 'waiting', sessionId: undefined }),
+      ticketSchema.parse({ ...ticket, status: 'waiting', phase, sessionId: undefined }),
     );
     const raw = await redis.mmEnqueueOrMatch(
       3 + interestQueues.length,
@@ -93,6 +114,7 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
       maxScan,
       sessionId,
       op,
+      priority ? '1' : '0',
     );
     const result = rawEnqueueResult.parse(raw);
     if (result[0] === 'matched') {
@@ -103,56 +125,129 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
     return { status: result[0] };
   }
 
+  async function getTicket(dims: QueueBucket, ticketId: string): Promise<Ticket | null> {
+    const raw = await redis.hget(matchmakingKeys(dims).tickets, ticketId);
+    return raw === null ? null : parseTicket(raw);
+  }
+
+  async function cancelTicket(dims: QueueBucket, ticketId: string): Promise<CancelResult> {
+    const keys = matchmakingKeys(dims);
+    const result = rawCancelResult.parse(await redis.mmCancelTicket(keys.tickets, ticketId));
+    if (result[0] === 'matched') return { status: 'matched', sessionId: result[1] };
+    return { status: result[0] };
+  }
+
+  /**
+   * "Power of d choices" (d = BUCKET_CHOICES): look at a few random buckets in one pipelined
+   * round trip; prefer the one with the most people waiting in the ticket's queues (an instant
+   * match is likely), else any (all empty). Queue lengths include not-yet-dropped dead refs; it
+   * is a heuristic, not an exact count.
+   */
+  async function chooseBucket(
+    family: QueueFamily,
+    bucketCount: number,
+    interests: string[],
+    { exclude }: { exclude?: number } = {},
+  ): Promise<number> {
+    const picks = candidates(bucketCount, exclude);
+    if (picks.length === 0) return exclude ?? 0;
+    if (picks.length === 1) return picks[0] ?? 0;
+
+    const pipeline = redis.pipeline();
+    for (const bucket of picks) {
+      const keys = matchmakingKeys({ ...family, bucket });
+      pipeline.llen(keys.queueAny);
+      for (const interest of interests) pipeline.llen(keys.queueInterest(interest));
+    }
+    const lengths = ((await pipeline.exec()) ?? []).map(([, value]) =>
+      typeof value === 'number' ? value : 0,
+    );
+    const perBucket = interests.length + 1;
+    let best = picks[0] ?? 0;
+    let bestWaiting = -1;
+    picks.forEach((bucket, index) => {
+      const waiting = lengths
+        .slice(index * perBucket, (index + 1) * perBucket)
+        .reduce((sum, n) => sum + n, 0);
+      if (waiting > bestWaiting) {
+        best = bucket;
+        bestWaiting = waiting;
+      }
+    });
+    return best; // picks are shuffled, so ties (e.g. all empty) resolve randomly
+  }
+
   return {
+    chooseBucket,
+    getTicket,
+    cancelTicket,
+
     /**
-     * Atomically matches the ticket against waiting tickets (interest queues for phase
-     * 'interest', `q:any` for 'any') or enqueues it. `sessionId` is recorded on both tickets
-     * if they match, so a concurrent cancel can tell which session the visitor ended up in.
+     * Atomically matches the ticket against waiting tickets of its bucket (interest queues for
+     * phase 'interest', `q:any` for 'any') or enqueues it (at the head if `priority`).
+     * `sessionId` is recorded on both tickets if they match, so a concurrent cancel can tell
+     * which session the visitor ended up in.
      */
     enqueueOrMatch(
-      dims: MatchDimensions,
+      dims: QueueBucket,
       ticket: NewTicket,
       phase: Phase,
       sessionId: string,
-      now: number = Date.now(),
+      opts: EnqueueOptions = {},
     ): Promise<EnqueueResult> {
-      return run(dims, ticket, phase, 'enqueue', sessionId, now);
+      return run(dims, ticket, phase, 'enqueue', sessionId, opts);
     },
 
     /** Interest fallback: scans `q:any` for a still-waiting ticket, else joins `q:any`. */
     async promoteToAny(
-      dims: MatchDimensions,
+      dims: QueueBucket,
       ticketId: string,
       sessionId: string,
       now: number = Date.now(),
     ): Promise<EnqueueResult> {
-      const ticket = await this.getTicket(dims, ticketId);
+      const ticket = await getTicket(dims, ticketId);
       if (ticket === null) return { status: 'not_waiting' };
-      // Interest queues are irrelevant in phase 'any'; the script re-reads the stored ticket.
-      return run(dims, { ...ticket, interests: [] }, 'any', 'promote', sessionId, now);
-    },
-
-    async cancelTicket(dims: MatchDimensions, ticketId: string): Promise<CancelResult> {
-      const keys = matchmakingKeys(dims.pool, dims.mode, dims.lang);
-      const result = rawCancelResult.parse(await redis.mmCancelTicket(keys.tickets, ticketId));
-      if (result[0] === 'matched') return { status: 'matched', sessionId: result[1] };
-      return { status: result[0] };
-    },
-
-    async getTicket(dims: MatchDimensions, ticketId: string): Promise<Ticket | null> {
-      const keys = matchmakingKeys(dims.pool, dims.mode, dims.lang);
-      const raw = await redis.hget(keys.tickets, ticketId);
-      return raw === null ? null : parseTicket(raw);
+      return run(dims, ticket, 'any', 'promote', sessionId, { now });
     },
 
     /**
-     * Deletes stale tickets of one pool/mode/lang: settled (matched/cancelled) tickets older
-     * than `settledAgeMs`, and waiting tickets older than `maxWaitingAgeMs` or owned by a dead
+     * Moves a still-waiting ticket to another bucket (D-052): cancel it in `fromBucket` only if
+     * it is still waiting (a concurrent match wins), then enqueue it elsewhere with priority and
+     * its original `createdAt`/phase/id. Never loses or duplicates a ticket: either the cancel
+     * fails (it was matched) or exactly one waiting copy exists afterwards.
+     */
+    async hop(
+      family: QueueFamily,
+      bucketCount: number,
+      fromBucket: number,
+      ticketId: string,
+      sessionId: string,
+      now: number = Date.now(),
+    ): Promise<HopResult> {
+      const from = { ...family, bucket: fromBucket };
+      const ticket = await getTicket(from, ticketId);
+      if (ticket?.status !== 'waiting') return { status: 'not_waiting' };
+      if ((await cancelTicket(from, ticketId)).status !== 'cancelled') {
+        return { status: 'not_waiting' };
+      }
+      const bucket = await chooseBucket(family, bucketCount, ticket.interests, {
+        exclude: fromBucket,
+      });
+      const result = await run({ ...family, bucket }, ticket, ticket.phase, 'enqueue', sessionId, {
+        now,
+        priority: true,
+      });
+      return { ...result, bucket };
+    },
+
+    /**
+     * Deletes stale tickets of one bucket: settled (matched/cancelled) tickets older than
+     * `settledAgeMs`, and waiting tickets older than `maxWaitingAgeMs` or owned by a dead
      * gateway node. Queue references to deleted tickets are dropped lazily by later scans.
      * Returns the number of tickets deleted.
      */
     async sweepStale(
-      dims: MatchDimensions,
+      dims: QueueBucket,
       opts: {
         now?: number;
         maxWaitingAgeMs: number;
@@ -162,7 +257,7 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
     ): Promise<number> {
       const now = opts.now ?? Date.now();
       const settledAgeMs = opts.settledAgeMs ?? 120_000;
-      const keys = matchmakingKeys(dims.pool, dims.mode, dims.lang);
+      const keys = matchmakingKeys(dims);
       const nodeAlive = new Map<string, boolean>();
       let cursor = '0';
       let dropped = 0;

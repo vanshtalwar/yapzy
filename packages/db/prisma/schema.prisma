@@ -42,6 +42,8 @@ enum LeaveReason {
   REPORTED
   BANNED
   SERVER_RESTART
+  /// Never acknowledged the match (ghost tab).
+  MATCH_TIMEOUT
 
   @@map("leave_reason")
 }

@@ -35,6 +35,7 @@ export const GATEWAY_DEFAULTS = {
   bucket: { capacity: 20, refillPerSecond: 5 },
   abuse: { capacity: 30, refillPerSecond: 0.5 },
   sweepIntervalMs: 30_000,
+  deadlineIntervalMs: 1_000,
 } as const;
 
 export interface GatewayOptions {
@@ -47,6 +48,7 @@ export interface GatewayOptions {
   /** Defaults to INTEREST_FALLBACK_MS. */
   interestFallbackMs?: number;
   sweepIntervalMs?: number;
+  deadlineIntervalMs?: number;
 }
 
 export interface GatewayDeps {
@@ -189,7 +191,12 @@ export async function createGateway(deps: GatewayDeps) {
     logger,
   });
 
-  const store = createSessionStore(redis);
+  const store = createSessionStore(redis, { deadlineShards: config.DEADLINE_SHARDS });
+  const bucketConfig = {
+    region: config.MM_REGION,
+    buckets: config.MM_BUCKETS,
+    bucketsByQueue: config.MM_BUCKETS_BY_QUEUE,
+  };
   const matchmaker = createMatchmaker(redis, { recentPairTtlMs: config.RECENT_PAIR_TTL_MS });
   const sessionLogQueue = new Queue<SessionLogJob>(QUEUE_NAMES.SESSION_LOG, {
     connection: { url: deps.redisUrl ?? config.REDIS_URL },
@@ -207,7 +214,15 @@ export async function createGateway(deps: GatewayDeps) {
     store,
     matchmaker,
     nodeId,
-    interestFallbackMs: options.interestFallbackMs ?? config.INTEREST_FALLBACK_MS,
+    config: {
+      ...bucketConfig,
+      hopMs: config.MM_BUCKET_HOP_MS,
+      interestFallbackMs: options.interestFallbackMs ?? config.INTEREST_FALLBACK_MS,
+      reconnectGraceMs: config.RECONNECT_GRACE_MS,
+      matchAckTimeoutMs: config.MATCH_ACK_TIMEOUT_MS,
+      earlyFailureWindowMs: config.EARLY_FAILURE_WINDOW_MS,
+      statsShards: config.STATS_COUNTER_SHARDS,
+    },
     // jobId = sessionId: a duplicate enqueue for the same session is ignored by BullMQ.
     enqueueSessionLog: async (job) => {
       await sessionLogQueue.add(QUEUE_NAMES.SESSION_LOG, job, { jobId: job.sessionId });
@@ -220,10 +235,32 @@ export async function createGateway(deps: GatewayDeps) {
     matchmaker,
     nodeId,
     intervalMs: options.sweepIntervalMs ?? GATEWAY_DEFAULTS.sweepIntervalMs,
+    buckets: bucketConfig,
     logger,
   });
-  // First hook: end sessions and cancel tickets of local visitors before they are told to leave.
-  shutdownHooks.push(() => lifecycle.endAllLocal());
+
+  // Ack/grace deadlines live in Redis; every node polls, ZREM decides who handles each (D-047).
+  let processingDeadlines = false;
+  const deadlineTimer = setInterval(() => {
+    if (processingDeadlines) return;
+    processingDeadlines = true;
+    lifecycle
+      .processDeadlines()
+      .catch((error: unknown) => {
+        logger.warn({ err: error }, 'deadline processing failed');
+      })
+      .finally(() => {
+        processingDeadlines = false;
+      });
+  }, options.deadlineIntervalMs ?? GATEWAY_DEFAULTS.deadlineIntervalMs);
+  deadlineTimer.unref();
+
+  // First hook: sessions SURVIVE a restart (D-046) — local participants become `reconnecting`
+  // and resume on another node; waiting tickets are cancelled; local timers stop.
+  shutdownHooks.push(async () => {
+    clearInterval(deadlineTimer);
+    await lifecycle.prepareShutdown();
+  });
 
   io.on('connection', (socket) => {
     const { visitorId } = socket.data;

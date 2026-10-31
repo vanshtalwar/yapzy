@@ -1,8 +1,10 @@
 import { randomInt, randomUUID } from 'node:crypto';
 
 import { type Logger } from '@app/logger';
-import { type MatchDimensions, type Matchmaker, type Ticket } from '@app/matchmaking';
+import { type EnqueueResult, type Matchmaker, type Ticket } from '@app/matchmaking';
 import {
+  type MatchPool,
+  type QueueFamily,
   type Redis,
   STATS_MATCHES_TTL_SECONDS,
   statsMatchesKey,
@@ -10,18 +12,22 @@ import {
   visitorSocketKey,
 } from '@app/redis';
 import {
-  type ChatMode,
   ErrorCode,
+  type PeerRole,
   type QueuePreferences,
   type ServerToClientEvents,
+  type SessionResumed,
 } from '@app/shared';
 import { type LeaveReason, type SessionLogJob, sessionLogJobSchema } from '@app/shared/jobs';
 
 import { SocketError } from '../errors.ts';
 import { type GatewayServer, type GatewaySocket } from '../types.ts';
 import {
-  type ActiveParticipant,
+  type Deadline,
+  type LeaveOutcome,
   newParticipantId,
+  type ParticipantRecord,
+  type ParticipantStatus,
   type SessionContext,
   type SessionRef,
   type SessionStore,
@@ -29,14 +35,27 @@ import {
 
 /** Leave reasons are never revealed to other participants beyond left/disconnected. */
 function publicReason(reason: LeaveReason): 'left' | 'disconnected' {
-  return reason === 'DISCONNECT' || reason === 'SERVER_RESTART' || reason === 'RTC_FAILED'
-    ? 'disconnected'
-    : 'left';
+  return reason === 'SKIP' || reason === 'STOP' || reason === 'REPORTED' || reason === 'BANNED'
+    ? 'left'
+    : 'disconnected';
 }
 
 /** How long a canceller waits for a just-matched session to be created by the matching node. */
 const MATCH_RACE_RETRIES = 20;
 const MATCH_RACE_DELAY_MS = 50;
+const DEADLINE_BATCH = 100;
+
+export interface LifecycleConfig {
+  region: string;
+  buckets: number;
+  bucketsByQueue: Record<string, number>;
+  hopMs: number;
+  interestFallbackMs: number;
+  reconnectGraceMs: number;
+  matchAckTimeoutMs: number;
+  earlyFailureWindowMs: number;
+  statsShards: number;
+}
 
 export interface LifecycleDeps {
   io: GatewayServer;
@@ -44,23 +63,33 @@ export interface LifecycleDeps {
   store: SessionStore;
   matchmaker: Matchmaker;
   nodeId: string;
-  interestFallbackMs: number;
+  config: LifecycleConfig;
   enqueueSessionLog: (job: SessionLogJob) => Promise<void>;
   logger: Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
   now: () => Date;
 }
 
+/** Everything needed to (re)queue a visitor — independent of which node holds their socket. */
+export interface Searcher {
+  visitorId: string;
+  pool: MatchPool;
+  preferences: QueuePreferences;
+}
+
 export interface InSession {
   ref: SessionRef;
   context: SessionContext;
+  self: ParticipantRecord;
 }
 
+type MatchedTicket = Pick<Ticket, 'ticketId' | 'visitorId' | 'interests' | 'autoRequeue'>;
+
 export function createLifecycle(deps: LifecycleDeps) {
-  const { io, redis, store, matchmaker, nodeId, logger } = deps;
+  const { io, redis, store, matchmaker, nodeId, config, logger } = deps;
   const clock = () => deps.now().getTime();
 
-  /** Interest-fallback timers of waiting visitors on this node. */
-  const promotionTimers = new Map<string, NodeJS.Timeout>();
+  /** Waiting-ticket timers (bucket hops + interest fallback) of searches started on this node. */
+  const waitTimers = new Map<string, NodeJS.Timeout>();
   /** Serializes lifecycle changes per visitor on this node (events, timers, disconnects). */
   const locks = new Map<string, Promise<unknown>>();
 
@@ -83,10 +112,45 @@ export function createLifecycle(deps: LifecycleDeps) {
     return run;
   }
 
-  function clearPromotion(visitorId: string): void {
-    const timer = promotionTimers.get(visitorId);
+  function bucketCount(family: Pick<QueueFamily, 'mode' | 'lang'>): number {
+    return config.bucketsByQueue[`${family.mode}:${family.lang}`] ?? config.buckets;
+  }
+
+  function clearWait(visitorId: string): void {
+    const timer = waitTimers.get(visitorId);
     if (timer !== undefined) clearTimeout(timer);
-    promotionTimers.delete(visitorId);
+    waitTimers.delete(visitorId);
+  }
+
+  /**
+   * Next wait action: a bucket hop (if > 1 bucket) or the interest fallback, whichever first.
+   * Hops are jittered (75–125 %): two lonely tickets that joined together would otherwise hop
+   * in lockstep and keep swapping buckets past each other.
+   */
+  function nextWaitDelay(buckets: number, phase: 'interest' | 'any', waitedMs: number) {
+    const hop =
+      buckets > 1
+        ? Math.round(config.hopMs * (0.75 + Math.random() * 0.5))
+        : Number.POSITIVE_INFINITY;
+    const promote =
+      phase === 'interest'
+        ? Math.max(0, config.interestFallbackMs - waitedMs)
+        : Number.POSITIVE_INFINITY;
+    const delay = Math.min(hop, promote);
+    return Number.isFinite(delay) ? delay : null;
+  }
+
+  function scheduleWait(visitorId: string, delay: number | null): void {
+    clearWait(visitorId);
+    if (delay === null) return;
+    const timer = setTimeout(() => {
+      waitTimers.delete(visitorId);
+      withVisitorLock(visitorId, () => waitTick(visitorId)).catch((error: unknown) => {
+        logger.warn({ err: error, visitorId }, 'waiting-ticket tick failed');
+      });
+    }, delay);
+    timer.unref();
+    waitTimers.set(visitorId, timer);
   }
 
   async function enqueueLog(sessionId: string): Promise<void> {
@@ -117,180 +181,308 @@ export function createLifecycle(deps: LifecycleDeps) {
     }
   }
 
+  function roleFor(initiator: string, receiver: string, other: string): PeerRole {
+    // Mesh: the initiator (impolite peer) creates the offer for the pair.
+    const receiverStarts = initiator === receiver;
+    return { participantId: other, initiator: receiverStarts, polite: !receiverStarts };
+  }
+
   /** Creates the session for a fresh match and tells every participant (any node). */
   async function createMatch(input: {
-    mode: ChatMode;
+    family: QueueFamily;
     sessionId: string;
-    self: { visitorId: string; ticketId: string };
-    peer: Ticket;
+    tickets: [MatchedTicket, MatchedTicket];
     commonInterests: string[];
   }): Promise<void> {
-    const { mode, sessionId, self, peer, commonInterests } = input;
-    const participants: ActiveParticipant[] = [
-      { participantId: newParticipantId(), visitorId: self.visitorId },
-      { participantId: newParticipantId(), visitorId: peer.visitorId },
-    ];
+    const { family, sessionId, tickets, commonInterests } = input;
+    const participants = tickets.map((ticket) => ({
+      participantId: newParticipantId(),
+      visitorId: ticket.visitorId,
+      pool: family.pool,
+      interests: ticket.interests,
+      autoRequeue: ticket.autoRequeue,
+    }));
+    const initiator = participants[randomInt(0, participants.length)]?.participantId ?? '';
     const now = clock();
-    await store.createSession({ sessionId, mode, commonInterests, participants, now });
-    await Promise.all([
-      store.deleteTicketRef(self.visitorId, self.ticketId),
-      store.deleteTicketRef(peer.visitorId, peer.ticketId),
-    ]);
-    clearPromotion(self.visitorId);
-    clearPromotion(peer.visitorId);
 
-    const statsKey = statsMatchesKey(new Date(now));
+    await store.createSession({
+      sessionId,
+      mode: family.mode,
+      lang: family.lang,
+      commonInterests,
+      initiator,
+      participants,
+      now,
+    });
+    // Ghost-tab protection (D-047): everyone must `match:ack` in time.
+    await Promise.all(
+      participants.map(({ participantId }) =>
+        store.addDeadline(
+          { kind: 'ack', sessionId, participantId },
+          now + config.matchAckTimeoutMs,
+        ),
+      ),
+    );
+    await Promise.all(tickets.map((t) => store.deleteTicketRef(t.visitorId, t.ticketId)));
+    for (const t of tickets) clearWait(t.visitorId);
+
+    const statsKey = statsMatchesKey(new Date(now), randomInt(0, config.statsShards));
     await redis.multi().incr(statsKey).expire(statsKey, STATS_MATCHES_TTL_SECONDS).exec();
 
-    // One random initiator (impolite peer, creates the offer) per pair.
-    const initiatorIndex = randomInt(0, participants.length);
-    participants.forEach((receiver, index) => {
+    for (const receiver of participants) {
       emitTo(receiver.visitorId, 'match:found', {
         sessionId,
-        mode,
+        mode: family.mode,
         topology: 'mesh',
         maxParticipants: 2,
         selfParticipantId: receiver.participantId,
         peers: participants
           .filter((other) => other !== receiver)
-          .map((other) => ({
-            participantId: other.participantId,
-            initiator: index === initiatorIndex,
-            polite: index !== initiatorIndex,
-          })),
+          .map((other) => roleFor(initiator, receiver.participantId, other.participantId)),
+        moderation: { frameIntervalMs: null }, // risk-based sampling arrives in Part 8
         commonInterests,
       });
-    });
-    logger.info({ sessionId, mode, visitors: participants.map((p) => p.visitorId) }, 'matched');
+    }
+    logger.info(
+      { sessionId, mode: family.mode, visitors: participants.map((p) => p.visitorId) },
+      'matched',
+    );
   }
 
-  async function startSearching(socket: GatewaySocket, preferences: QueuePreferences) {
-    const { visitorId, pool } = socket.data;
-    const dims: MatchDimensions = { pool, mode: preferences.mode, lang: preferences.lang };
+  async function handleEnqueue(
+    family: QueueFamily,
+    sessionId: string,
+    self: MatchedTicket,
+    result: EnqueueResult,
+  ): Promise<boolean> {
+    if (result.status !== 'matched') return false;
+    await createMatch({
+      family,
+      sessionId,
+      tickets: [self, result.peer],
+      commonInterests: result.commonInterests,
+    });
+    return true;
+  }
+
+  async function startSearching(searcher: Searcher, opts: { priority?: boolean } = {}) {
+    const { visitorId, pool, preferences } = searcher;
+    const family: QueueFamily = {
+      region: config.region,
+      pool,
+      mode: preferences.mode,
+      lang: preferences.lang,
+    };
+    const buckets = bucketCount(family);
+    const bucket = await matchmaker.chooseBucket(family, buckets, preferences.interests);
     const ticketId = randomUUID();
     const sessionId = randomUUID();
     const now = clock();
     const phase = preferences.interests.length > 0 ? 'interest' : 'any';
+    const self: MatchedTicket = {
+      ticketId,
+      visitorId,
+      interests: preferences.interests,
+      autoRequeue: preferences.autoRequeue,
+    };
 
-    await store.setTicketRef(visitorId, { ...dims, ticketId });
+    await store.setTicketRef(visitorId, { ...family, bucket, ticketId });
     const result = await matchmaker.enqueueOrMatch(
-      dims,
-      { ticketId, visitorId, interests: preferences.interests, createdAt: now, nodeId },
+      { ...family, bucket },
+      { ...self, createdAt: now, nodeId },
       phase,
       sessionId,
-      now,
+      { now, priority: opts.priority ?? false },
     );
+    if (await handleEnqueue(family, sessionId, self, result)) return;
 
-    if (result.status === 'matched') {
-      await createMatch({
-        mode: dims.mode,
-        sessionId,
-        self: { visitorId, ticketId },
-        peer: result.peer,
-        commonInterests: result.commonInterests,
-      });
-      return;
-    }
-
-    socket.data.state = 'waiting';
     emitTo(visitorId, 'queue:waiting', { since: new Date(now).toISOString() });
-    if (phase === 'interest') schedulePromotion(socket, dims, ticketId);
+    scheduleWait(visitorId, nextWaitDelay(buckets, phase, 0));
   }
 
-  function schedulePromotion(socket: GatewaySocket, dims: MatchDimensions, ticketId: string) {
-    const { visitorId } = socket.data;
-    clearPromotion(visitorId);
-    const timer = setTimeout(() => {
-      promotionTimers.delete(visitorId);
-      withVisitorLock(visitorId, async () => {
-        if (socket.disconnected) return;
-        const ref = await store.getTicketRef(visitorId);
-        if (ref?.ticketId !== ticketId) return; // matched, cancelled or replaced meanwhile
-        const sessionId = randomUUID();
-        const result = await matchmaker.promoteToAny(dims, ticketId, sessionId, clock());
-        if (result.status === 'matched') {
-          await createMatch({
-            mode: dims.mode,
-            sessionId,
-            self: { visitorId, ticketId },
-            peer: result.peer,
-            commonInterests: result.commonInterests,
-          });
-        }
-      }).catch((error: unknown) => {
-        logger.warn({ err: error, visitorId }, 'interest fallback failed');
-      });
-    }, deps.interestFallbackMs);
-    timer.unref();
-    promotionTimers.set(visitorId, timer);
+  /** Interest fallback and bucket hopping for a still-waiting ticket (D-052). */
+  async function waitTick(visitorId: string): Promise<void> {
+    const ref = await store.getTicketRef(visitorId);
+    if (ref === null) return;
+    const ticket = await matchmaker.getTicket(ref, ref.ticketId);
+    if (ticket?.status !== 'waiting') return;
+
+    const family: QueueFamily = {
+      region: ref.region,
+      pool: ref.pool,
+      mode: ref.mode,
+      lang: ref.lang,
+    };
+    const buckets = bucketCount(family);
+    const now = clock();
+    const waited = now - ticket.createdAt;
+    const sessionId = randomUUID();
+    let phase = ticket.phase;
+
+    if (phase === 'interest' && waited >= config.interestFallbackMs) {
+      const result = await matchmaker.promoteToAny(ref, ref.ticketId, sessionId, now);
+      if (await handleEnqueue(family, sessionId, ticket, result)) return;
+      if (result.status === 'not_waiting') return;
+      phase = 'any';
+    } else if (buckets > 1) {
+      const hop = await matchmaker.hop(family, buckets, ref.bucket, ref.ticketId, sessionId, now);
+      if (hop.status === 'not_waiting') return;
+      if (await handleEnqueue(family, sessionId, ticket, hop)) return;
+      if (!(await store.updateTicketRef(visitorId, { ...ref, bucket: hop.bucket }))) {
+        // The visitor left (possibly via another node) while we hopped: undo the new ticket.
+        await matchmaker.cancelTicket({ ...family, bucket: hop.bucket }, ref.ticketId);
+        return;
+      }
+    }
+    scheduleWait(visitorId, nextWaitDelay(buckets, phase, waited));
   }
 
-  /** Leaves the visitor's current session (atomic, idempotent). Returns false if not in one. */
-  async function leaveSession(
+  function deadlinesOf(sessionId: string, participantId: string): Deadline[] {
+    return [
+      { kind: 'ack', sessionId, participantId },
+      { kind: 'grace', sessionId, participantId },
+    ];
+  }
+
+  async function requeueInnocent(
+    sessionId: string,
+    others: { participantId: string; visitorId: string; priorStatus: ParticipantStatus }[],
+  ): Promise<void> {
+    const context = await store.context(sessionId);
+    if (context === null) return;
+    for (const other of others) {
+      const record = context.participants.get(other.participantId);
+      // Only people who were really there (acked, connected) and asked for it.
+      if (other.priorStatus !== 'active' || record?.autoRequeue !== true) continue;
+      const { state } = await store.visitorState(other.visitorId);
+      if (state !== 'idle') continue;
+      await startSearching(
+        {
+          visitorId: other.visitorId,
+          pool: record.pool,
+          preferences: {
+            mode: context.mode,
+            lang: context.lang,
+            interests: record.interests,
+            autoRequeue: true,
+          },
+        },
+        { priority: true },
+      );
+      logger.debug({ sessionId, visitorId: other.visitorId }, 'requeued with priority');
+    }
+  }
+
+  /**
+   * Core leave: one atomic script, then clean-up and notifications. On an early failure that
+   * wasn't the others' fault (`earlyFailure`), active participants with auto-requeue are
+   * requeued at the head of the queue BEFORE they hear `peer:left` (D-048).
+   */
+  async function leaveParticipant(
+    sessionId: string,
+    participantId: string,
     visitorId: string,
     reason: LeaveReason,
-    expectedSessionId?: string,
-  ): Promise<boolean> {
-    const ref = await store.getSessionRef(visitorId);
-    if (ref === null) return false;
-    if (expectedSessionId !== undefined && ref.sessionId !== expectedSessionId) return false;
+    opts: { requireStatus?: ParticipantStatus; earlyFailure?: boolean } = {},
+  ): Promise<LeaveOutcome> {
+    const now = clock();
+    const outcome = await store.leave(sessionId, participantId, reason, now, opts.requireStatus);
+    if (outcome.status !== 'left') return outcome;
 
-    const outcome = await store.leave(ref.sessionId, ref.participantId, reason, clock());
-    await store.deleteSessionRef(visitorId, ref.sessionId);
-    if (outcome.status !== 'left') return true;
+    await store.removeDeadlines(deadlinesOf(sessionId, participantId));
+    await store.deleteSessionRef(visitorId, sessionId);
 
-    // Clear the others' refs BEFORE telling them: a client that requeues the instant it sees
-    // `peer:left` must already be idle.
     if (outcome.ended) {
-      await Promise.all(
-        outcome.others.map((other) => store.deleteSessionRef(other.visitorId, ref.sessionId)),
+      await store.removeDeadlines(
+        outcome.others.flatMap((other) => deadlinesOf(sessionId, other.participantId)),
       );
+      await Promise.all(
+        outcome.others.map((other) => store.deleteSessionRef(other.visitorId, sessionId)),
+      );
+      if (opts.earlyFailure === true && now - outcome.startedAt <= config.earlyFailureWindowMs) {
+        await requeueInnocent(sessionId, outcome.others);
+      }
     }
+
     for (const other of outcome.others) {
       emitTo(other.visitorId, 'peer:left', {
-        sessionId: ref.sessionId,
-        participantId: ref.participantId,
+        sessionId,
+        participantId,
         reason: publicReason(reason),
         sessionEnded: outcome.ended,
       });
     }
-    if (outcome.ended) await enqueueLog(ref.sessionId);
-    logger.debug({ sessionId: ref.sessionId, visitorId, reason, ended: outcome.ended }, 'left');
+    if (outcome.ended) await enqueueLog(sessionId);
+    logger.debug({ sessionId, visitorId, reason, ended: outcome.ended }, 'left');
+    return outcome;
+  }
+
+  /** Leaves the visitor's current session. Returns false if not in one. */
+  async function leaveSession(
+    visitorId: string,
+    reason: LeaveReason,
+    opts: { expectedSessionId?: string; earlyFailure?: boolean } = {},
+  ): Promise<boolean> {
+    const ref = await store.getSessionRef(visitorId);
+    if (ref === null) return false;
+    if (opts.expectedSessionId !== undefined && ref.sessionId !== opts.expectedSessionId) {
+      return false;
+    }
+    const outcome = await leaveParticipant(ref.sessionId, ref.participantId, visitorId, reason, {
+      earlyFailure: opts.earlyFailure ?? false,
+    });
+    // A ref to a session that is gone or that we already left is stale either way.
+    if (outcome.status !== 'left') await store.deleteSessionRef(visitorId, ref.sessionId);
     return true;
   }
 
   /**
-   * A cancel can lose the race against a match made on another node; the matching node is then
-   * creating the session right now. Wait for it to appear and leave it.
+   * Signaling connection lost: keep the session (D-046). The participant becomes
+   * `reconnecting`; a grace deadline in Redis ends it if they don't resume in time.
    */
-  async function leaveWhenCreated(visitorId: string, sessionId: string, reason: LeaveReason) {
-    for (let attempt = 0; attempt < MATCH_RACE_RETRIES; attempt += 1) {
-      const ref = await store.getSessionRef(visitorId);
-      if (ref?.sessionId === sessionId) {
-        await leaveSession(visitorId, reason, sessionId);
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, MATCH_RACE_DELAY_MS));
+  async function markReconnecting(visitorId: string): Promise<void> {
+    const ref = await store.getSessionRef(visitorId);
+    if (ref === null) return;
+    const now = clock();
+    const others = await store.disconnect(ref.sessionId, ref.participantId, now);
+    if (others === null) return;
+    await store.addDeadline(
+      { kind: 'grace', sessionId: ref.sessionId, participantId: ref.participantId },
+      now + config.reconnectGraceMs,
+    );
+    for (const other of others) {
+      emitTo(other.visitorId, 'peer:reconnecting', {
+        sessionId: ref.sessionId,
+        participantId: ref.participantId,
+      });
     }
-    logger.warn({ visitorId, sessionId }, 'matched session never appeared; giving up leave');
   }
 
-  /** Cancels the visitor's waiting ticket, if any. Returns false if not waiting. */
-  async function cancelSearch(visitorId: string, reasonIfMatched: LeaveReason): Promise<boolean> {
-    clearPromotion(visitorId);
+  /**
+   * Cancels the visitor's waiting ticket. A cancel can lose the race against a match made on
+   * another node, which is creating the session right now: wait for it and apply `onMatched`.
+   */
+  async function cancelSearch(
+    visitorId: string,
+    onMatched: (sessionId: string) => Promise<void>,
+  ): Promise<boolean> {
+    clearWait(visitorId);
     const ref = await store.getTicketRef(visitorId);
     if (ref === null) return false;
     const result = await matchmaker.cancelTicket(ref, ref.ticketId);
     await store.deleteTicketRef(visitorId, ref.ticketId);
-    if (result.status === 'matched')
-      await leaveWhenCreated(visitorId, result.sessionId, reasonIfMatched);
-    return true;
-  }
+    if (result.status !== 'matched') return true;
 
-  /** Clears whatever the visitor was doing (queue and/or session). */
-  async function abandon(visitorId: string, reason: LeaveReason): Promise<void> {
-    await cancelSearch(visitorId, reason);
-    await leaveSession(visitorId, reason);
+    for (let attempt = 0; attempt < MATCH_RACE_RETRIES; attempt += 1) {
+      const session = await store.getSessionRef(visitorId);
+      if (session?.sessionId === result.sessionId) {
+        await onMatched(result.sessionId);
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, MATCH_RACE_DELAY_MS));
+    }
+    logger.warn({ visitorId, sessionId: result.sessionId }, 'matched session never appeared');
+    return true;
   }
 
   async function requireSession(visitorId: string, sessionId: string): Promise<SessionRef> {
@@ -301,18 +493,62 @@ export function createLifecycle(deps: LifecycleDeps) {
     return session;
   }
 
+  function searcherOf(socket: GatewaySocket, preferences: QueuePreferences): Searcher {
+    return { visitorId: socket.data.visitorId, pool: socket.data.pool, preferences };
+  }
+
+  async function handleDeadline(deadline: Deadline): Promise<void> {
+    const context = await store.context(deadline.sessionId);
+    const record = context?.participants.get(deadline.participantId);
+    if (record === undefined) return;
+    await withVisitorLock(record.visitorId, () =>
+      leaveParticipant(
+        deadline.sessionId,
+        deadline.participantId,
+        record.visitorId,
+        deadline.kind === 'ack' ? 'MATCH_TIMEOUT' : 'DISCONNECT',
+        {
+          // Someone who acked / resumed since the deadline was set must not be removed.
+          requireStatus: deadline.kind === 'ack' ? 'pending' : 'reconnecting',
+          earlyFailure: true,
+        },
+      ),
+    );
+  }
+
+  /** Cancel a waiting ticket and keep (but mark) any session: used for lost connections. */
+  async function suspend(visitorId: string): Promise<void> {
+    await cancelSearch(visitorId, () => markReconnecting(visitorId));
+    await markReconnecting(visitorId);
+  }
+
   return {
     withVisitorLock,
+    emitTo,
 
     joinQueue(socket: GatewaySocket, preferences: QueuePreferences): Promise<void> {
       const { visitorId } = socket.data;
       return withVisitorLock(visitorId, async () => {
-        const { state } = await store.visitorState(visitorId);
-        if (state !== 'idle') {
-          throw new SocketError(ErrorCode.INVALID_STATE, `Cannot join the queue while ${state}`);
+        const { state, session } = await store.visitorState(visitorId);
+        if (state === 'in_session' && session !== null) {
+          // After a page reload the old session is still `reconnecting`: leave it first.
+          const context = await store.context(session.sessionId);
+          const self = context?.participants.get(session.participantId);
+          if (context?.state === 'active' && self !== undefined && self.status !== 'reconnecting') {
+            throw new SocketError(
+              ErrorCode.INVALID_STATE,
+              'Cannot join the queue while in_session',
+            );
+          }
+          await leaveSession(visitorId, 'DISCONNECT', {
+            expectedSessionId: session.sessionId,
+            earlyFailure: true,
+          });
+        } else if (state === 'waiting') {
+          throw new SocketError(ErrorCode.INVALID_STATE, 'Cannot join the queue while waiting');
         }
         socket.data.preferences = preferences;
-        await startSearching(socket, preferences);
+        await startSearching(searcherOf(socket, preferences));
       });
     },
 
@@ -323,7 +559,9 @@ export function createLifecycle(deps: LifecycleDeps) {
         if (state !== 'waiting') {
           throw new SocketError(ErrorCode.INVALID_STATE, `Not waiting (currently ${state})`);
         }
-        await cancelSearch(visitorId, 'STOP');
+        await cancelSearch(visitorId, async (sessionId) => {
+          await leaveSession(visitorId, 'STOP', { expectedSessionId: sessionId });
+        });
         socket.data.state = 'idle';
       });
     },
@@ -337,8 +575,8 @@ export function createLifecycle(deps: LifecycleDeps) {
         if (preferences === null) {
           throw new SocketError(ErrorCode.INVALID_STATE, 'No queue preferences on this socket');
         }
-        await leaveSession(visitorId, 'SKIP', sessionId);
-        await startSearching(socket, preferences);
+        await leaveSession(visitorId, 'SKIP', { expectedSessionId: sessionId });
+        await startSearching(searcherOf(socket, preferences));
       });
     },
 
@@ -347,14 +585,84 @@ export function createLifecycle(deps: LifecycleDeps) {
       const { visitorId } = socket.data;
       return withVisitorLock(visitorId, async () => {
         await requireSession(visitorId, sessionId);
-        await leaveSession(visitorId, 'STOP', sessionId);
+        await leaveSession(visitorId, 'STOP', { expectedSessionId: sessionId });
         socket.data.state = 'idle';
       });
     },
 
+    /** `match:ack`: the client really is there (D-047). */
+    async ack(socket: GatewaySocket, sessionId: string): Promise<void> {
+      const ref = await requireSession(socket.data.visitorId, sessionId);
+      const result = await store.ack(sessionId, ref.participantId, clock());
+      if (result === 'left' || result === 'not_found') {
+        throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Session is over');
+      }
+      await store.removeDeadlines([{ kind: 'ack', sessionId, participantId: ref.participantId }]);
+      socket.data.state = 'in_session';
+    },
+
+    /** `session:resume` after a reconnect, on any node (D-046). */
+    resume(
+      socket: GatewaySocket,
+      sessionId: string,
+      lastMessageId: string | undefined,
+    ): Promise<SessionResumed> {
+      const { visitorId } = socket.data;
+      return withVisitorLock(visitorId, async () => {
+        const notResumable = () =>
+          new SocketError(ErrorCode.SESSION_NOT_RESUMABLE, 'This session can no longer be resumed');
+        const ref = await store.getSessionRef(visitorId);
+        if (ref?.sessionId !== sessionId) throw notResumable();
+        const resumed = await store.resume(sessionId, ref.participantId, visitorId);
+        if (resumed === null) throw notResumable();
+        await store.removeDeadlines([
+          { kind: 'grace', sessionId, participantId: ref.participantId },
+        ]);
+
+        const context = await store.context(sessionId);
+        const self = context?.participants.get(ref.participantId);
+        if (context === null || self === undefined) throw notResumable();
+        socket.data.state = 'in_session';
+        socket.data.preferences = {
+          mode: context.mode,
+          lang: context.lang,
+          interests: self.interests,
+          autoRequeue: self.autoRequeue,
+        };
+
+        const others = [...context.participants].filter(
+          ([pid, record]) => pid !== ref.participantId && record.status !== 'left',
+        );
+        if (resumed.wasReconnecting) {
+          for (const [, record] of others) {
+            emitTo(record.visitorId, 'peer:resumed', {
+              sessionId,
+              participantId: ref.participantId,
+            });
+          }
+        }
+
+        // No lastMessageId = "I have none of this session's messages": return everything from
+        // the others (≤ 100, the client dedupes by id). A time-based cut-off would lose
+        // messages sent between the real drop and the server noticing it (up to the ping
+        // timeout).
+        const log = await store.readLog(sessionId);
+        const missedMessages = log.filter(
+          (message) =>
+            message.from !== ref.participantId &&
+            (lastMessageId === undefined || message.id > lastMessageId), // ulids sort by time
+        );
+        return {
+          selfParticipantId: ref.participantId,
+          peers: others.map(([pid]) => roleFor(context.initiator, ref.participantId, pid)),
+          missedMessages,
+        };
+      });
+    },
+
     /**
-     * Membership check for in-session events: the session ref must name `sessionId` and the
-     * visitor must still be an active participant of an active session.
+     * Membership check for in-session events: the session ref must name `sessionId`, the
+     * session must be active and the sender must not have left.
      */
     async inSession(socket: GatewaySocket, sessionId: string): Promise<InSession> {
       const ref = await store.getSessionRef(socket.data.visitorId);
@@ -363,46 +671,58 @@ export function createLifecycle(deps: LifecycleDeps) {
       }
       const context = await store.context(sessionId);
       const self = context?.participants.get(ref.participantId);
-      if (context?.state !== 'active' || self === undefined || self.leftAt !== undefined) {
+      if (context?.state !== 'active' || self === undefined || self.status === 'left') {
         throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Session is over');
       }
-      return { ref, context };
+      return { ref, context, self };
     },
-
-    emitTo,
 
     /**
-     * New connection: anything left over from the visitor's previous socket (ticket, session)
-     * belongs to a connection that no longer exists — there is no session resume.
+     * New connection for this visitor: a previous socket's waiting ticket is dropped (the
+     * client requeues), but its session only becomes `reconnecting` — the client can still
+     * `session:resume` (D-046).
      */
     reconcile(socket: GatewaySocket): Promise<void> {
-      return withVisitorLock(socket.data.visitorId, () =>
-        abandon(socket.data.visitorId, 'DISCONNECT'),
-      );
+      return withVisitorLock(socket.data.visitorId, () => suspend(socket.data.visitorId));
     },
 
-    /** Disconnect clean-up, skipped if a newer socket of the same visitor took over. */
+    /** Disconnect: skipped if a newer socket of the same visitor took over. */
     onDisconnect(socket: GatewaySocket): Promise<void> {
       const { visitorId } = socket.data;
       return withVisitorLock(visitorId, async () => {
         const owner = await redis.get(visitorSocketKey(visitorId));
         if (owner !== null && owner !== socket.id) return;
-        await abandon(visitorId, 'DISCONNECT');
+        await suspend(visitorId);
       });
     },
 
-    /** Shutdown hook: end every local visitor's queue ticket and session. */
-    async endAllLocal(): Promise<void> {
+    /** Claims due ack/grace deadlines (exactly once across nodes) and applies them. */
+    async processDeadlines(): Promise<number> {
+      const due = await store.claimDueDeadlines(clock(), DEADLINE_BATCH);
+      await Promise.all(
+        due.map((deadline) =>
+          handleDeadline(deadline).catch((error: unknown) => {
+            logger.warn({ err: error, ...deadline }, 'deadline handling failed');
+          }),
+        ),
+      );
+      return due.length;
+    },
+
+    /**
+     * Shutdown hook (D-046): sessions survive. Local in-session visitors become `reconnecting`
+     * (so another node expires them if they never come back); local waiting tickets are
+     * cancelled (clients requeue on their new node). Timers stop.
+     */
+    async prepareShutdown(): Promise<void> {
       const sockets = [...io.of('/').sockets.values()];
       await Promise.allSettled(
         sockets.map((socket) =>
-          withVisitorLock(socket.data.visitorId, () =>
-            abandon(socket.data.visitorId, 'SERVER_RESTART'),
-          ),
+          withVisitorLock(socket.data.visitorId, () => suspend(socket.data.visitorId)),
         ),
       );
-      for (const timer of promotionTimers.values()) clearTimeout(timer);
-      promotionTimers.clear();
+      for (const timer of waitTimers.values()) clearTimeout(timer);
+      waitTimers.clear();
     },
   };
 }

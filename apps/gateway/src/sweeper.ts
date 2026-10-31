@@ -2,20 +2,22 @@ import { type Logger } from '@app/logger';
 import { type Matchmaker } from '@app/matchmaking';
 import { MATCHMAKING_SWEEP_LOCK_KEY, presenceNodeKey, type Redis } from '@app/redis';
 
-import { allMatchDimensions } from './sessions/store.ts';
+import { allQueueBuckets, type BucketConfig } from './buckets.ts';
 
 /** A waiting ticket this old is assumed abandoned even if its node is alive. */
 const MAX_WAITING_AGE_MS = 30 * 60 * 1000;
 
 /**
  * Every `intervalMs`, one gateway (whoever wins `SET NX PX` on the lock) sweeps stale tickets
- * from every matchmaking tag. Tickets of crashed nodes are detected via presence keys.
+ * from every bucket of every matchmaking family. (Buckets beyond a lowered MM_BUCKETS are no
+ * longer visited; their tickets age out of the visitors' 24 h refs.) Tickets of crashed nodes are detected via presence keys.
  */
 export function startTicketSweeper(deps: {
   redis: Redis;
   matchmaker: Matchmaker;
   nodeId: string;
   intervalMs: number;
+  buckets: BucketConfig;
   logger: Pick<Logger, 'debug' | 'warn'>;
 }) {
   const { redis, matchmaker, nodeId, intervalMs, logger } = deps;
@@ -39,7 +41,7 @@ export function startTicketSweeper(deps: {
     );
     if (locked === null) return 0;
     let dropped = 0;
-    for (const dims of allMatchDimensions()) {
+    for (const dims of allQueueBuckets(deps.buckets)) {
       dropped += await matchmaker.sweepStale(dims, {
         maxWaitingAgeMs: MAX_WAITING_AGE_MS,
         isNodeAlive,

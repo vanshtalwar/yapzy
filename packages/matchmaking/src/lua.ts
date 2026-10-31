@@ -1,7 +1,7 @@
 // Lua scripts for matchmaking. Every script touches only keys of ONE matchmaking tag
-// ({mm:<pool>:<mode>:<lang>}), all passed via KEYS, so each runs atomically on one Redis
-// Cluster slot. Tickets are JSON: { ticketId, visitorId, interests, createdAt, status,
-// nodeId?, sessionId? }.
+// ({mm:<region>:<pool>:<mode>:<lang>:<bucket>}), all passed via KEYS, so each runs atomically
+// on one Redis Cluster slot. Tickets are JSON: { ticketId, visitorId, interests, createdAt,
+// status, phase, autoRequeue, nodeId?, sessionId? }.
 //
 // Note: Redis' cjson encodes an empty Lua table as `{}`, so a ticket re-encoded by a script may
 // carry `"interests":{}`; the TypeScript ticket schema normalizes that back to [].
@@ -9,14 +9,17 @@
 /**
  * KEYS: tickets, recent, q:any, q:int:<interest>... (the ticket's own interest queues)
  * ARGV: ticketJson, ticketId, visitorId, phase ('interest'|'any'), nowMs, recentTtlMs,
- *       maxScan, sessionId (used only on match), op ('enqueue'|'promote')
+ *       maxScan, sessionId (used only on match), op ('enqueue'|'promote'), priority ('1'|'0')
+ * A priority ticket is pushed to the HEAD of its queues (fair requeue, bucket hops).
+ * Enqueueing over an existing CANCELLED ticket with the same id is allowed (a ticket hopping
+ * back into a bucket it left earlier); any other existing ticket is a duplicate.
  * Returns: {'waiting'} | {'duplicate'} | {'not_waiting'} | {'matched', peerJson, common...}
  */
 export const ENQUEUE_OR_MATCH = `
 local tickets, recent, qany = KEYS[1], KEYS[2], KEYS[3]
 local ticketId, visitorId, phase = ARGV[2], ARGV[3], ARGV[4]
 local now, recentTtl, maxScan = tonumber(ARGV[5]), tonumber(ARGV[6]), tonumber(ARGV[7])
-local sessionId, op = ARGV[8], ARGV[9]
+local sessionId, op, priority = ARGV[8], ARGV[9], ARGV[10] == '1'
 
 local self
 local existing = redis.call('HGET', tickets, ticketId)
@@ -24,8 +27,10 @@ if op == 'promote' then
   if not existing then return {'not_waiting'} end
   self = cjson.decode(existing)
   if self.status ~= 'waiting' then return {'not_waiting'} end
+  self.phase = 'any'
+  redis.call('HSET', tickets, ticketId, cjson.encode(self))
 else
-  if existing then return {'duplicate'} end
+  if existing and cjson.decode(existing).status ~= 'cancelled' then return {'duplicate'} end
   self = cjson.decode(ARGV[1])
   redis.call('HSET', tickets, ticketId, ARGV[1])
 end
@@ -79,7 +84,9 @@ for _, queue in ipairs(queues) do
 end
 
 if not match then
-  for _, queue in ipairs(queues) do redis.call('RPUSH', queue, ticketId) end
+  for _, queue in ipairs(queues) do
+    if priority then redis.call('LPUSH', queue, ticketId) else redis.call('RPUSH', queue, ticketId) end
+  end
   return {'waiting'}
 end
 

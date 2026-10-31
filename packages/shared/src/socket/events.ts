@@ -11,6 +11,8 @@ export const CLIENT_EVENTS = {
   RTC_ICE: 'rtc:ice',
   RTC_SUMMARY: 'rtc:summary',
   MODERATION_SIGNAL: 'moderation:signal',
+  MATCH_ACK: 'match:ack',
+  SESSION_RESUME: 'session:resume',
   PING: 'ping',
 } as const;
 
@@ -26,6 +28,8 @@ export const SERVER_EVENTS = {
   RTC_OFFER: 'rtc:offer',
   RTC_ANSWER: 'rtc:answer',
   RTC_ICE: 'rtc:ice',
+  PEER_RECONNECTING: 'peer:reconnecting',
+  PEER_RESUMED: 'peer:resumed',
   PEER_LEFT: 'peer:left',
   SYSTEM_NOTICE: 'system:notice',
 } as const;

@@ -27,6 +27,7 @@ export type RtcDescriptionPayload = z.input<typeof schemas.rtcDescriptionSchema>
 export type RtcIcePayload = z.input<typeof schemas.rtcIceSchema>;
 export type RtcSummaryPayload = z.input<typeof schemas.rtcSummarySchema>;
 export type ModerationSignalPayload = z.input<typeof schemas.moderationSignalSchema>;
+export type SessionResumePayload = z.input<typeof schemas.sessionResumeSchema>;
 export type EmptyPayload = Record<string, never>;
 
 export type QueueWaiting = z.output<typeof schemas.queueWaitingSchema>;
@@ -38,6 +39,8 @@ export type ChatTypingOut = z.output<typeof schemas.chatTypingOutSchema>;
 export type RtcDescriptionOut = z.output<typeof schemas.rtcDescriptionOutSchema>;
 export type RtcIceOut = z.output<typeof schemas.rtcIceOutSchema>;
 export type PeerLeft = z.output<typeof schemas.peerLeftSchema>;
+export type PeerPresence = z.output<typeof schemas.peerPresenceSchema>;
+export type SessionResumed = z.output<typeof schemas.sessionResumedSchema>;
 export type SystemNotice = z.output<typeof schemas.systemNoticeSchema>;
 export type Pong = z.output<typeof schemas.pongSchema>;
 /** Ack data for `chat:message`: the server-assigned id and timestamp of the stored message. */
@@ -60,6 +63,8 @@ export interface ClientToServerEvents {
   'rtc:ice': (payload: RtcIcePayload, ack: AckCallback) => void;
   'rtc:summary': (payload: RtcSummaryPayload, ack: AckCallback) => void;
   'moderation:signal': (payload: ModerationSignalPayload, ack: AckCallback) => void;
+  'match:ack': (payload: SessionRefPayload, ack: AckCallback) => void;
+  'session:resume': (payload: SessionResumePayload, ack: AckCallback<SessionResumed>) => void;
   ping: (payload: EmptyPayload, ack: AckCallback<Pong>) => void;
 }
 
@@ -72,6 +77,8 @@ export interface ServerToClientEvents {
   'rtc:offer': (payload: RtcDescriptionOut) => void;
   'rtc:answer': (payload: RtcDescriptionOut) => void;
   'rtc:ice': (payload: RtcIceOut) => void;
+  'peer:reconnecting': (payload: PeerPresence) => void;
+  'peer:resumed': (payload: PeerPresence) => void;
   'peer:left': (payload: PeerLeft) => void;
   'system:notice': (payload: SystemNotice) => void;
 }

@@ -28,6 +28,7 @@ describe('socket contract', () => {
       mode: 'video',
       lang: 'en',
       interests: [],
+      autoRequeue: false,
     });
     expect(
       queueJoinSchema.parse({ mode: 'text', lang: 'de', interests: [' Music', 'music'] }).interests,
