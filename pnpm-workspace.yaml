@@ -69,7 +69,7 @@ catalog:
   tsup: ^9.0.0
   tsx: ^4.23.15
   turbo: ^2.11.10
-  '@types/node': ^24.0.0
+  '@types/node': ^26.6.6
   '@types/proxy-addr': ^2.0.3
   '@types/qrcode': ^1.5.5
   '@types/react': ^19.3.0
