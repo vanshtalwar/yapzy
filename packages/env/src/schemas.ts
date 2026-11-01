@@ -126,6 +126,69 @@ const commaList = z.string().transform((value) =>
     .filter((item) => item.length > 0),
 );
 
+const wsUrl = z.url({ protocol: /^wss?$/, error: 'must be a ws:// or wss:// URL' });
+
+/**
+ * `JANUS_NODES`: JSON list of Janus nodes `{ id, wsUrl, adminUrl }` (Part 11). `wsUrl` is
+ * handed to browsers; `adminUrl` (Admin API) is for the gateway only. Empty = no SFU.
+ */
+const janusNodes = z
+  .string()
+  .default('[]')
+  .transform((value, context) => {
+    if (value.trim() === '') return [];
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        message: 'must be JSON, e.g. [{"id":"janus-1","wsUrl":"ws://…","adminUrl":"ws://…"}]',
+      });
+      return z.NEVER;
+    }
+  })
+  .pipe(
+    z
+      .array(
+        z.object({
+          id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+          wsUrl,
+          adminUrl: wsUrl,
+        }),
+      )
+      .max(64)
+      .refine((nodes) => new Set(nodes.map((node) => node.id)).size === nodes.length, {
+        message: 'node ids must be unique',
+      }),
+  );
+
+/** Janus secrets end up in its config files: letters, digits, "-" and "_" only. */
+const janusSecret = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/, '16-128 of A-Z a-z 0-9 _ -');
+
+/** SFU + group calls (Parts 11–12). Secrets are required once JANUS_NODES lists a node. */
+export const sfuEnv = z.object({
+  JANUS_NODES: janusNodes,
+  JANUS_ADMIN_SECRET: janusSecret.optional(),
+  JANUS_TOKEN_SECRET: janusSecret.optional(),
+  /** Max video bitrate per publisher in a Janus room (bps). */
+  SFU_PUBLISHER_BITRATE: z.coerce.number().int().min(64_000).max(10_000_000).default(600_000),
+  /** Every participant must confirm a mesh → SFU switch within this long, else it rolls back. */
+  SFU_UPGRADE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(10_000),
+  /** Development only: every video call starts on Janus. */
+  DEV_FORCE_SFU: z.stringbool().default(false),
+  /** Every participant of a group call, and every joiner, needs at least this trust score. */
+  GROUP_MIN_TRUST: z.coerce.number().int().min(0).max(100).default(60),
+  /** A call looking for one more person gives up after this long. */
+  SEEK_PARTICIPANT_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(30_000),
+});
+
+/** Integration tests against the dev Janus container (packages/sfu). */
+export const janusTestEnv = baseEnv.extend({
+  JANUS_NODES: janusNodes,
+  JANUS_ADMIN_SECRET: janusSecret,
+  JANUS_TOKEN_SECRET: janusSecret,
+});
+
 /**
  * `TRUST_PROXY`: empty/"false" = don't trust X-Forwarded-For (dev default); a number = trust
  * that many hops; otherwise a comma list of proxy IPs/CIDRs. `true` (trust everyone) is
@@ -316,9 +379,26 @@ export const gatewayEnv = baseEnv
      */
     HANDSHAKE_LIMIT_PER_VISITOR: z.coerce.number().int().min(1).max(1_000_000).default(30),
     HANDSHAKE_LIMIT_PER_IP: z.coerce.number().int().min(1).max(10_000_000).default(600),
+    // --- SFU + group calls (Parts 11–12) ---
+    ...sfuEnv.shape,
   })
   .superRefine((env, context) => {
-    productionGuards<typeof env>(['JWT_SECRET', 'IP_HASH_PEPPER'])(env, context);
+    productionGuards<typeof env>([
+      'JWT_SECRET',
+      'IP_HASH_PEPPER',
+      'JANUS_ADMIN_SECRET',
+      'JANUS_TOKEN_SECRET',
+    ])(env, context);
+    if (env.JANUS_NODES.length === 0) return;
+    for (const key of ['JANUS_ADMIN_SECRET', 'JANUS_TOKEN_SECRET'] as const) {
+      if (env[key] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'required when JANUS_NODES lists a node',
+        });
+      }
+    }
   });
 
 export type GatewayEnv = z.output<typeof gatewayEnv>;
@@ -366,6 +446,8 @@ export const webEnv = baseEnv
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().min(1).default('1x00000000000000000000AA'),
     /** Relay-only ICE for video (verify TURN, or hide IPs from peers at a bandwidth cost). */
     NEXT_PUBLIC_FORCE_TURN_RELAY: z.stringbool().default(false),
+    /** Janus nodes (Part 11): their browser-facing `wsUrl`s go into the CSP's connect-src. */
+    JANUS_NODES: janusNodes,
   })
   .superRefine((env, context) => {
     if (

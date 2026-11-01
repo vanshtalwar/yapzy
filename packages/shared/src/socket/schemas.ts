@@ -129,10 +129,27 @@ export const peerRoleSchema = z.object({
   polite: z.boolean(),
 });
 
+/** `mesh` = P2P (2 people); `sfu` = Janus VideoRoom (Part 11, D-050). */
+export const TOPOLOGIES = ['mesh', 'sfu'] as const;
+
+/**
+ * Where and how to join the call's Janus room: the node's browser-facing WebSocket URL, the
+ * room and this participant's own signed token (Janus API + the room's allowed list, D-051).
+ * `epoch` increases with every topology change (upgrade, failover).
+ */
+export const sfuJoinSchema = z.object({
+  wsUrl: z.url({ protocol: /^wss?$/ }),
+  roomId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  token: z.string().min(1).max(512),
+  epoch: z.number().int().positive(),
+});
+
 export const matchFoundSchema = z.object({
   sessionId: sessionIdSchema,
   mode: chatModeSchema,
-  topology: z.literal('mesh'),
+  topology: z.enum(TOPOLOGIES),
+  /** Present when the call starts on Janus (`topology: 'sfu'`). */
+  sfu: sfuJoinSchema.optional(),
   maxParticipants: z.number().int().min(2).max(16),
   selfParticipantId: participantIdSchema,
   peers: z.array(peerRoleSchema),
@@ -142,6 +159,36 @@ export const matchFoundSchema = z.object({
 });
 
 export const participantJoinedSchema = peerRoleSchema.extend({ sessionId: sessionIdSchema });
+
+/** `call:topologyReady` / `call:sfuToken`: about the topology of this epoch. */
+export const callEpochSchema = z.object({
+  sessionId: sessionIdSchema,
+  epoch: z.number().int().positive(),
+});
+
+/** Why a mesh → SFU switch was rolled back (the P2P call keeps running). */
+export const ROLLBACK_REASONS = ['timeout', 'failed', 'unavailable'] as const;
+
+/**
+ * `call:topology`: join Janus (an upgrade, or a new room after a node failed — same shape,
+ * higher epoch), or stay on P2P because the upgrade failed. Never sfu → mesh otherwise.
+ */
+export const callTopologySchema = z.discriminatedUnion('topology', [
+  z.object({
+    sessionId: sessionIdSchema,
+    topology: z.literal('sfu'),
+    epoch: z.number().int().positive(),
+    sfu: sfuJoinSchema.omit({ epoch: true }),
+  }),
+  z.object({
+    sessionId: sessionIdSchema,
+    topology: z.literal('mesh'),
+    epoch: z.number().int().positive(),
+    reason: z.enum(ROLLBACK_REASONS),
+  }),
+]);
+
+export const sfuTokenSchema = z.object({ token: z.string().min(1).max(512) });
 
 export const chatMessageOutSchema = z.object({
   sessionId: sessionIdSchema,
@@ -204,4 +251,9 @@ export const sessionResumedSchema = z.object({
   peers: z.array(peerRoleSchema),
   /** Messages from others sent while this client was away (oldest first). */
   missedMessages: z.array(chatMessageOutSchema),
+  /**
+   * The call's Janus room as of now (Part 11): a `call:topology` sent while this client was
+   * away (an upgrade, a failover) would otherwise be lost. Absent while the call is P2P only.
+   */
+  sfu: sfuJoinSchema.optional(),
 });

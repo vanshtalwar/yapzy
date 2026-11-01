@@ -23,10 +23,17 @@ TURN_HOST=192.168.1.20
 STUN_URLS=stun:192.168.1.20:3478
 # coturn listens on 127.0.0.1 only unless you opt in (it relays for anyone with credentials)
 TURN_BIND_IP=0.0.0.0
+# Janus (calls through the SFU, group calls): candidates and the browsers' Janus URL must be
+# reachable from the phone. The Admin API (7188) stays on 127.0.0.1 regardless.
+JANUS_PUBLIC_IP=192.168.1.20
+JANUS_BIND_IP=0.0.0.0
+JANUS_NODES=[{"id":"janus-1","wsUrl":"ws://192.168.1.20:8188","adminUrl":"ws://localhost:7188"}]
 ```
 
-Then `pnpm infra:up` (coturn picks up `TURN_EXTERNAL_IP` and `TURN_BIND_IP`) and restart
-`pnpm dev`. Set `TURN_BIND_IP` back to empty (or remove it) when you are done: even with the
+Then `pnpm infra:up` (coturn picks up `TURN_EXTERNAL_IP` and `TURN_BIND_IP`, Janus
+`JANUS_PUBLIC_IP` and `JANUS_BIND_IP`) and restart `pnpm dev`. Behind the HTTPS proxy of option B,
+Janus needs a `wss://` URL as well (proxy port 8188 like the gateway) — browsers refuse `ws://`
+from an `https://` page. Set `TURN_BIND_IP` back to empty (or remove it) when you are done: even with the
 relay restrictions in `turnserver.conf`, an open TURN server on a shared network is best avoided. The web dev
 server accepts requests for the host in `NEXT_PUBLIC_GATEWAY_URL` (`allowedDevOrigins` in
 `apps/web/next.config.mjs`), so its HMR and assets work from the LAN address.

@@ -4,6 +4,7 @@ import { createPrismaClient } from '@app/db';
 import { createEnv, databaseTestEnv, type GatewayEnv, gatewayEnv, redisTestEnv } from '@app/env';
 import { createLogger, type Logger } from '@app/logger';
 import { createRedis } from '@app/redis';
+import { type AdminSocket } from '@app/sfu';
 import { createVisitorTokenService } from '@app/shared/visitor-token';
 import { io as connectClient, type Socket as ClientSocket } from 'socket.io-client';
 
@@ -66,6 +67,8 @@ export function startGateway(
     interestFallbackMs?: number;
     config?: GatewayEnv;
     logger?: Logger;
+    /** Fake Janus Admin API (`@app/sfu/testing`) for configs with JANUS_NODES. */
+    sfuSocketFactory?: (url: string, protocol: string) => AdminSocket;
   } = {},
 ) {
   return (async (): Promise<{ gateway: Gateway; port: number; url: string }> => {
@@ -82,6 +85,10 @@ export function startGateway(
         drainTimeoutMs: options.drainTimeoutMs ?? 300,
         interestFallbackMs: options.interestFallbackMs ?? 300,
         deadlineIntervalMs: 100,
+        sfuHealthIntervalMs: 100,
+        ...(options.sfuSocketFactory === undefined
+          ? {}
+          : { sfuSocketFactory: options.sfuSocketFactory }),
       },
     });
     const port = await gateway.listen(0, '127.0.0.1');

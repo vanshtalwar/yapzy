@@ -18,6 +18,7 @@ import {
   type QueuePreferences,
   type ServerToClientEvents,
   type SessionResumed,
+  type SfuToken,
 } from '@app/shared';
 import { type LeaveReason, type SessionLogJob, sessionLogJobSchema } from '@app/shared/jobs';
 
@@ -25,6 +26,7 @@ import { SocketError } from '../errors.ts';
 import { type GatewayMetrics } from '../metrics.ts';
 import { type GatewayModeration, NO_FRAMES } from '../moderation.ts';
 import { type GatewayServer, type GatewaySocket } from '../types.ts';
+import { type SfuOrchestrator } from './sfu.ts';
 import {
   type Deadline,
   type LeaveOutcome,
@@ -58,6 +60,8 @@ export interface LifecycleConfig {
   matchAckTimeoutMs: number;
   earlyFailureWindowMs: number;
   statsShards: number;
+  /** Development only (DEV_FORCE_SFU): every video call starts on Janus. */
+  forceSfu: boolean;
 }
 
 export interface LifecycleDeps {
@@ -70,6 +74,8 @@ export interface LifecycleDeps {
   enqueueSessionLog: (job: SessionLogJob) => Promise<void>;
   /** Trust & safety decisions (Part 8): frame schedules, pools. */
   moderation: GatewayModeration;
+  /** Janus rooms, upgrades and failover (Part 11). */
+  sfu: SfuOrchestrator;
   /** Current pool of a connected visitor from the ban cache + trust; 'banned' = HARD ban. */
   resolvePool: (socket: GatewaySocket) => Promise<MatchPool | 'banned'>;
   logger: Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
@@ -184,7 +190,7 @@ export function createLifecycle(deps: LifecycleDeps) {
       const job = sessionLogJobSchema.parse({
         sessionId,
         mode: meta.mode,
-        topology: 'mesh',
+        topology: meta.topology,
         maxParticipants: meta.maxParticipants,
         commonInterests: meta.commonInterests,
         startedAt: iso(meta.startedAt),
@@ -228,18 +234,28 @@ export function createLifecycle(deps: LifecycleDeps) {
     commonInterests: string[];
   }): Promise<void> {
     const { family, bucket, sessionId, tickets, commonInterests } = input;
+    const ids = tickets.map(() => newParticipantId());
+    // DEV_FORCE_SFU: start on Janus right away; without a healthy node it stays P2P.
+    const room =
+      config.forceSfu && family.mode === 'video' ? await deps.sfu.openRoom(sessionId, ids) : null;
     const participants = await Promise.all(
-      tickets.map(async (ticket) => ({
-        participantId: newParticipantId(),
-        visitorId: ticket.visitorId,
-        pool: family.pool,
-        interests: ticket.interests,
-        autoRequeue: ticket.autoRequeue,
-        // Risk-based frame sampling per participant (D-054); never blocks the match.
-        frames: await deps.moderation
-          .scheduleFor(ticket.visitorId, { mode: family.mode })
-          .catch(() => NO_FRAMES),
-      })),
+      tickets.map(async (ticket, index) => {
+        const participantId = ids[index] ?? newParticipantId();
+        const sfuToken = room?.tokens.get(participantId);
+        return {
+          participantId,
+          visitorId: ticket.visitorId,
+          pool: family.pool,
+          interests: ticket.interests,
+          autoRequeue: ticket.autoRequeue,
+          // Risk-based frame sampling per participant (D-054); never blocks the match. SFU
+          // calls are sampled at the `high` tier.
+          frames: await deps.moderation
+            .scheduleFor(ticket.visitorId, { mode: family.mode, groupCall: room !== null })
+            .catch(() => NO_FRAMES),
+          ...(sfuToken === undefined ? {} : { sfuToken }),
+        };
+      }),
     );
     const initiator = participants[randomInt(0, participants.length)]?.participantId ?? '';
     const now = clock();
@@ -252,6 +268,7 @@ export function createLifecycle(deps: LifecycleDeps) {
       initiator,
       participants,
       now,
+      ...(room === null ? {} : { sfu: room.placement }),
     });
     // Ghost-tab protection (D-047): everyone must `match:ack` in time.
     await Promise.all(
@@ -276,10 +293,15 @@ export function createLifecycle(deps: LifecycleDeps) {
     }
 
     for (const receiver of participants) {
+      const sfu =
+        room === null || receiver.sfuToken === undefined
+          ? null
+          : deps.sfu.joinInfo(room.placement, receiver.sfuToken, 1);
       emitTo(receiver.visitorId, 'match:found', {
         sessionId,
         mode: family.mode,
-        topology: 'mesh',
+        topology: sfu === null ? 'mesh' : 'sfu',
+        ...(sfu === null ? {} : { sfu }),
         maxParticipants: 2,
         selfParticipantId: receiver.participantId,
         peers: participants
@@ -465,9 +487,23 @@ export function createLifecycle(deps: LifecycleDeps) {
         sessionEnded: outcome.ended,
       });
     }
+    afterLeaveSfu(sessionId, participantId, outcome.ended);
     if (outcome.ended) await enqueueLog(sessionId, reason);
     logger.debug({ sessionId, visitorId, reason, ended: outcome.ended }, 'left');
     return outcome;
+  }
+
+  /**
+   * Janus clean-up after a leave, off the leave path: the room goes when the session ends,
+   * otherwise only the leaver (allowed list + kick). Failures leave work for the orphan sweep.
+   */
+  function afterLeaveSfu(sessionId: string, participantId: string, ended: boolean): void {
+    (async () => {
+      const context = await store.context(sessionId);
+      if (context?.sfu != null) await deps.sfu.afterLeave(context, participantId, ended);
+    })().catch((error: unknown) => {
+      logger.warn({ err: error, sessionId }, 'janus clean-up after a leave failed');
+    });
   }
 
   /** Leaves the visitor's current session. Returns false if not in one. */
@@ -551,6 +587,10 @@ export function createLifecycle(deps: LifecycleDeps) {
   }
 
   async function handleDeadline(deadline: Deadline): Promise<void> {
+    if (deadline.kind === 'upgrade') {
+      await deps.sfu.upgradeExpired(deadline.sessionId, deadline.epoch);
+      return;
+    }
     const context = await store.context(deadline.sessionId);
     const record = context?.participants.get(deadline.participantId);
     if (record === undefined) return;
@@ -567,6 +607,23 @@ export function createLifecycle(deps: LifecycleDeps) {
         },
       ),
     );
+  }
+
+  /**
+   * Membership check for in-session events: the session ref must name `sessionId`, the
+   * session must be active and the sender must not have left.
+   */
+  async function inSession(socket: GatewaySocket, sessionId: string): Promise<InSession> {
+    const ref = await store.getSessionRef(socket.data.visitorId);
+    if (ref?.sessionId !== sessionId) {
+      throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Not in this session');
+    }
+    const context = await store.context(sessionId);
+    const self = context?.participants.get(ref.participantId);
+    if (context?.state !== 'active' || self === undefined || self.status === 'left') {
+      throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Session is over');
+    }
+    return { ref, context, self };
   }
 
   /** Cancel a waiting ticket and keep (but mark) any session: used for lost connections. */
@@ -732,18 +789,20 @@ export function createLifecycle(deps: LifecycleDeps) {
             (lastMessageId === undefined || message.id > lastMessageId), // ulids sort by time
         );
         metrics.resumes.inc({ outcome: 'ok' });
+        // A `call:topology` sent while this client was away is lost: hand out the room now.
+        const sfu =
+          context.sfu === null || self.sfuToken === undefined
+            ? null
+            : deps.sfu.joinInfo(context.sfu, self.sfuToken, context.topologyEpoch);
         return {
           selfParticipantId: ref.participantId,
           peers: others.map(([pid]) => roleFor(context.initiator, ref.participantId, pid)),
           missedMessages,
+          ...(sfu === null ? {} : { sfu }),
         };
       });
     },
 
-    /**
-     * Membership check for in-session events: the session ref must name `sessionId`, the
-     * session must be active and the sender must not have left.
-     */
     /**
      * `rtc:summary` arrives when a peer connection closes, often after the session ended: it
      * only needs the visitor to have been in this video session, and `peer` to be someone else
@@ -834,17 +893,37 @@ export function createLifecycle(deps: LifecycleDeps) {
       });
     },
 
-    async inSession(socket: GatewaySocket, sessionId: string): Promise<InSession> {
-      const ref = await store.getSessionRef(socket.data.visitorId);
-      if (ref?.sessionId !== sessionId) {
-        throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Not in this session');
+    inSession,
+
+    // --- Topology (Part 11) ---------------------------------------------------------------
+
+    /** `call:topologyReady`: this participant receives everyone through the new topology. */
+    async topologyReady(socket: GatewaySocket, sessionId: string, epoch: number): Promise<void> {
+      const { ref } = await inSession(socket, sessionId);
+      await deps.sfu.ready(sessionId, ref.participantId, epoch);
+    },
+
+    /**
+     * `call:sfuToken`: Janus checks the signed token on every request (keepalives too), so a
+     * call longer than the token lifetime needs fresh ones. Only for the current room.
+     */
+    async sfuToken(socket: GatewaySocket, sessionId: string, epoch: number): Promise<SfuToken> {
+      const { context } = await inSession(socket, sessionId);
+      if (context.sfu === null || context.topologyEpoch !== epoch) {
+        throw new SocketError(ErrorCode.INVALID_STATE, 'No media server room for this call');
       }
-      const context = await store.context(sessionId);
-      const self = context?.participants.get(ref.participantId);
-      if (context?.state !== 'active' || self === undefined || self.status === 'left') {
-        throw new SocketError(ErrorCode.NOT_IN_SESSION, 'Session is over');
+      return { token: deps.sfu.newToken() };
+    },
+
+    /** `dev:upgradeToSfu` (development only): switch a running P2P call to Janus. */
+    async devUpgrade(socket: GatewaySocket, sessionId: string): Promise<void> {
+      await inSession(socket, sessionId);
+      const outcome = await deps.sfu.upgrade(sessionId);
+      if (outcome === 'started') return;
+      if (outcome === 'unavailable') {
+        throw new SocketError(ErrorCode.SERVICE_UNAVAILABLE, 'No media server available');
       }
-      return { ref, context, self };
+      throw new SocketError(ErrorCode.INVALID_STATE, `Cannot switch this call (${outcome})`);
     },
 
     /**

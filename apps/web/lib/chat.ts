@@ -99,6 +99,12 @@ export function getChatController(): ChatController {
       },
     },
   });
+  if (process.env.NEXT_PUBLIC_DEV_HOOKS === 'true') {
+    // DEPLOY_ENV=development only: `randomchat.upgradeToSfu()` in the console switches a P2P
+    // call to Janus (the gateway accepts it only with NODE_ENV=development).
+    const chat = controller;
+    Object.assign(window, { randomchat: { upgradeToSfu: () => chat.devUpgradeToSfu() } });
+  }
   return controller;
 }
 

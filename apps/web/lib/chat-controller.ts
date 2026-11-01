@@ -1,5 +1,6 @@
 import {
   type AckResponse,
+  callTopologySchema,
   chatMessageAckSchema,
   chatMessageOutSchema,
   chatTypingOutSchema,
@@ -15,6 +16,7 @@ import {
   rtcDescriptionOutSchema,
   rtcIceOutSchema,
   sessionResumedSchema,
+  sfuTokenSchema,
   systemNoticeSchema,
 } from '@app/shared';
 import { type z } from 'zod';
@@ -60,6 +62,8 @@ export interface ChatControllerDeps {
   requeueDelayMs?: number;
   /** Stop sending "typing" after this much inactivity. */
   typingIdleMs?: number;
+  /** A Janus call that lost its media waits this long for the gateway's failover. */
+  sfuFailoverWaitMs?: number;
   document?: Document;
   /** Receives `pagehide`, `online` (defaults to `window`). */
   window?: EventTarget;
@@ -105,6 +109,7 @@ export function createChatController(deps: ChatControllerDeps) {
   const ghostTabMs = deps.ghostTabMs ?? 60_000;
   const requeueDelayMs = deps.requeueDelayMs ?? 400;
   const typingIdleMs = deps.typingIdleMs ?? 3_000;
+  const sfuFailoverWaitMs = deps.sfuFailoverWaitMs ?? 15_000;
   const doc = deps.document ?? (typeof document === 'undefined' ? undefined : document);
   const win = deps.window ?? (typeof window === 'undefined' ? undefined : window);
 
@@ -119,6 +124,7 @@ export function createChatController(deps: ChatControllerDeps) {
   let requeueTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let iceRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let sfuFailTimer: ReturnType<typeof setTimeout> | undefined;
   /** Session we skipped locally but the server has not let go of yet (chat:next refused). */
   let leaving: string | null = null;
   const detach: (() => void)[] = [];
@@ -141,7 +147,13 @@ export function createChatController(deps: ChatControllerDeps) {
 
   /** Fire-and-forget (signaling, summaries): the server still acks, nobody waits. */
   function send<
-    E extends 'rtc:offer' | 'rtc:answer' | 'rtc:ice' | 'rtc:summary' | 'moderation:signal',
+    E extends
+      | 'rtc:offer'
+      | 'rtc:answer'
+      | 'rtc:ice'
+      | 'rtc:summary'
+      | 'moderation:signal'
+      | 'call:topologyReady',
   >(event: E, payload: Payload<E>): void {
     (socket.emit as (event: string, payload: unknown, ack: () => void) => void)(
       event,
@@ -175,6 +187,7 @@ export function createChatController(deps: ChatControllerDeps) {
   }
 
   function endCall(): void {
+    clearTimeout(sfuFailTimer);
     callModeration?.stop();
     callModeration = null;
     if (call === null) return;
@@ -191,7 +204,9 @@ export function createChatController(deps: ChatControllerDeps) {
     const { sessionId } = match;
     const options: CallManagerOptions = {
       sessionId,
+      selfParticipantId: match.selfParticipantId,
       peers: match.peers,
+      ...(match.topology === 'sfu' && match.sfu !== undefined ? { sfu: match.sfu } : {}),
       localStream,
       iceServers: video.iceServers.peek() ?? [],
       forceRelay: video.forceRelay,
@@ -210,11 +225,34 @@ export function createChatController(deps: ChatControllerDeps) {
       onChange: (view) => {
         store.getState().setCall(view);
       },
-      onFailed: () => {
+      onFailed: (participantId) => {
         const current = state();
         if (current.status !== 'matched' || current.sessionId !== sessionId) return;
+        if (participantId === null) {
+          // Janus unreachable: if its node died, the gateway moves the call (call:topology).
+          // Only if nothing arrives in time is the call given up.
+          clearTimeout(sfuFailTimer);
+          sfuFailTimer = setTimeout(() => {
+            if (state().status === 'matched' && state().sessionId === sessionId) {
+              notify('Couldn’t reconnect the video. Finding someone new…');
+              void skip('rtc_failed');
+            }
+          }, sfuFailoverWaitMs);
+          return;
+        }
         notify('Couldn’t connect the video. Finding someone new…');
         void skip('rtc_failed');
+      },
+      onTopologyReady: (epoch) => {
+        clearTimeout(sfuFailTimer);
+        send('call:topologyReady', { sessionId, epoch });
+      },
+      refreshSfuToken: async (epoch) => {
+        const response = await emit('call:sfuToken', { sessionId, epoch });
+        return response.ok ? (valid(sfuTokenSchema, response.data)?.token ?? null) : null;
+      },
+      onSummaries: (summaries) => {
+        reportSummaries(sessionId, summaries);
       },
     };
     call = (video.createCall ?? ((o: CallManagerOptions) => new CallManager(o)))(options);
@@ -320,6 +358,8 @@ export function createChatController(deps: ChatControllerDeps) {
     const resumed = response.ok ? valid(sessionResumedSchema, response.data) : null;
     if (resumed !== null) {
       store.getState().resumed(resumed);
+      // A `call:topology` sent while we were away (switch, failover) is in the answer.
+      if (resumed.sfu !== undefined && call?.sessionId === sessionId) call.switchToSfu(resumed.sfu);
       call?.recover(); // signals may have been lost while we were away
       return;
     }
@@ -533,6 +573,16 @@ export function createChatController(deps: ChatControllerDeps) {
       const signal = valid(rtcIceOutSchema, raw);
       if (signal !== null) call?.handleSignal({ kind: 'ice', ...signal });
     });
+    socket.on('call:topology', (raw) => {
+      const change = valid(callTopologySchema, raw);
+      if (change === null || call?.sessionId !== change.sessionId) return;
+      if (change.topology === 'sfu') {
+        clearTimeout(sfuFailTimer);
+        call.switchToSfu({ ...change.sfu, epoch: change.epoch });
+      } else {
+        call.rollback(change.epoch);
+      }
+    });
     socket.on('peer:reconnecting', (raw) => {
       const event = valid(peerPresenceSchema, raw);
       if (event !== null) store.getState().peerReconnecting(event);
@@ -668,6 +718,17 @@ export function createChatController(deps: ChatControllerDeps) {
       if (state().status === 'matched' && state().sessionId === sessionId) await skip();
     },
 
+    /**
+     * Development only (`dev:upgradeToSfu`): switch the running P2P call to Janus — exposed
+     * as `randomchat.upgradeToSfu()` in the browser console.
+     */
+    async devUpgradeToSfu(): Promise<string> {
+      const { status, sessionId } = state();
+      if (status !== 'matched' || sessionId === null) return 'not in a call';
+      const response = await emit('dev:upgradeToSfu', { sessionId });
+      return response.ok ? 'switching to Janus…' : response.error.message;
+    },
+
     /** Remote media of the current call, for `<video>` elements (never put it in state). */
     remoteStream(participantId: string): MediaStream | null {
       return call?.remoteStream(participantId) ?? null;
@@ -688,6 +749,7 @@ export function createChatController(deps: ChatControllerDeps) {
       clearTimeout(requeueTimer);
       clearTimeout(reconnectTimer);
       clearTimeout(iceRefreshTimer);
+      clearTimeout(sfuFailTimer);
       const { status, sessionId } = state();
       endCall();
       if (socket.connected) {

@@ -222,6 +222,9 @@ export function VideoChatScreen() {
         <div
           className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-stage"
           aria-busy={searching}
+          // P2P or Janus (Part 11), for tests and support tooling.
+          data-topology={matched ? (state.call?.topology ?? 'mesh') : undefined}
+          data-switching={state.call?.switching === true ? 'true' : undefined}
         >
           {matched && participants.length > 0 ? (
             <VideoGrid count={participants.length} className="p-0">
@@ -277,6 +280,7 @@ export function VideoChatScreen() {
                   <RemoteVideo
                     participantId={participant.participantId}
                     trackCount={participant.trackCount}
+                    revision={state.call?.epoch ?? 0}
                   />
                 </VideoTile>
               ))}

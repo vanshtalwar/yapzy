@@ -38,6 +38,7 @@
     "@app/metrics": "workspace:*",
     "@app/moderation": "workspace:*",
     "@app/redis": "workspace:*",
+    "@app/sfu": "workspace:*",
     "@app/shared": "workspace:*",
     "@types/node": "catalog:",
     "@types/proxy-addr": "catalog:",

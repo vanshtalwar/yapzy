@@ -1,5 +1,6 @@
 import { TRANSCRIPT_MAX_MESSAGES } from '@app/redis';
 import {
+  callEpochSchema,
   chatEndSchema,
   type ChatMessageAck,
   chatMessageSchema,
@@ -16,8 +17,10 @@ import {
   rtcDescriptionSchema,
   rtcIceSchema,
   rtcSummarySchema,
+  sessionRefSchema,
   type SessionResumed,
   sessionResumeSchema,
+  type SfuToken,
 } from '@app/shared';
 import { ulid } from 'ulid';
 
@@ -49,12 +52,17 @@ export const EVENT_COSTS = {
   'match:ack': 0.5,
   'session:resume': 2,
   ping: 1,
+  'call:topologyReady': 1,
+  'call:sfuToken': 1,
+  'dev:upgradeToSfu': 2,
 } as const satisfies Record<ClientEventName, number>;
 
 /** Typing indicators are relayed on change, and repeats at most every 2 s. */
 export const TYPING_REPEAT_MS = 2_000;
 
 export interface HandlerDeps {
+  /** Registers development-only events (`dev:upgradeToSfu`). */
+  development: boolean;
   lifecycle: Lifecycle;
   store: SessionStore;
   now: () => Date;
@@ -89,10 +97,16 @@ function activeOthers({ ref, context }: InSession) {
   );
 }
 
-/** WebRTC signals are addressed to exactly one active participant of a video session. */
+/**
+ * WebRTC signals are addressed to exactly one active participant of a P2P video session. Once
+ * a call runs on Janus, clients signal with Janus directly; relaying stops (Part 11).
+ */
 function recipient(session: InSession, to: string): string {
   if (session.context.mode !== 'video') {
     throw new SocketError(ErrorCode.INVALID_STATE, 'WebRTC signaling requires a video session');
+  }
+  if (session.context.topology === 'sfu') {
+    throw new SocketError(ErrorCode.INVALID_STATE, 'This call runs on the media server');
   }
   const target = activeOthers(session).find(([participantId]) => participantId === to);
   if (target === undefined) {
@@ -268,6 +282,35 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     },
     { cost: EVENT_COSTS['rtc:summary'] },
   );
+
+  // --- Topology (Part 11) ------------------------------------------------------------------
+
+  registerHandler(
+    socket,
+    'call:topologyReady',
+    callEpochSchema,
+    ({ sessionId, epoch }) => lifecycle.topologyReady(socket, sessionId, epoch),
+    { cost: EVENT_COSTS['call:topologyReady'] },
+  );
+
+  registerHandler(
+    socket,
+    'call:sfuToken',
+    callEpochSchema,
+    ({ sessionId, epoch }): Promise<SfuToken> => lifecycle.sfuToken(socket, sessionId, epoch),
+    { cost: EVENT_COSTS['call:sfuToken'] },
+  );
+
+  // Development only: elsewhere the event stays unknown (acked "Unknown event" + a strike).
+  if (deps.development) {
+    registerHandler(
+      socket,
+      'dev:upgradeToSfu',
+      sessionRefSchema,
+      ({ sessionId }) => lifecycle.devUpgrade(socket, sessionId),
+      { cost: EVENT_COSTS['dev:upgradeToSfu'] },
+    );
+  }
 
   /**
    * Client-side NSFW classifier results. Unverified, so low weight: recorded for review

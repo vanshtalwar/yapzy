@@ -1,26 +1,22 @@
 import { randomInt } from 'node:crypto';
 
-import {
-  hgetallJson,
-  hsetJson,
-  type Redis,
-  SFU_HEALTH_LOCK_KEY,
-  SFU_NODES_KEY,
-} from '@app/redis';
+import { hgetallJson, hsetJson, type Redis, SFU_HEALTH_LOCK_KEY, SFU_NODES_KEY } from '@app/redis';
 import { z } from 'zod';
 
 import { type AdminSocket, createJanusAdminClient } from './admin-client.ts';
 import { createVideoRoomAdmin, type VideoRoomAdmin } from './videoroom.ts';
 
-const wsUrl = z.url({ protocol: /^wss?$/, error: 'must be a ws:// or wss:// URL' });
+const wsUrl = z.url({ protocol: /^wss?$/ });
 
-/** One Janus node from JANUS_NODES. `wsUrl` is for browsers, `adminUrl` for the backend only. */
-export const janusNodeSchema = z.object({
-  id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
-  wsUrl,
-  adminUrl: wsUrl,
-});
-export type JanusNode = z.output<typeof janusNodeSchema>;
+/**
+ * One Janus node from JANUS_NODES (validated by `@app/env`). `wsUrl` is for browsers,
+ * `adminUrl` for the backend only.
+ */
+export interface JanusNode {
+  id: string;
+  wsUrl: string;
+  adminUrl: string;
+}
 
 /** `sfu:nodes` value: what the health checker last saw. */
 export const nodeHealthSchema = z.object({
@@ -74,9 +70,8 @@ export function createSfuRegistry(deps: SfuRegistryDeps) {
     admins.set(node.id, createVideoRoomAdmin(client, deps.adminSecret));
   }
 
-  async function health(): Promise<Map<string, NodeHealth>> {
-    const all = await hgetallJson(deps.redis, SFU_NODES_KEY, nodeHealthSchema);
-    return new Map(Object.entries(all));
+  function health(): Promise<Map<string, NodeHealth>> {
+    return hgetallJson(deps.redis, SFU_NODES_KEY, nodeHealthSchema);
   }
 
   return {
@@ -96,25 +91,32 @@ export function createSfuRegistry(deps: SfuRegistryDeps) {
     health,
 
     /**
-     * One authenticated Admin API round trip (list rooms with the admin key) and the new
-     * health entry. Doesn't write it: the leader does (see `startSfuHealthLoop`).
+     * One authenticated Admin API round trip (list rooms with the admin key): the node's new
+     * health entry and its room ids (null if it didn't answer). Doesn't write the entry: the
+     * leader does (see `startSfuHealthLoop`).
      */
-    async check(nodeId: string, previous: NodeHealth | undefined): Promise<NodeHealth> {
+    async check(
+      nodeId: string,
+      previous: NodeHealth | undefined,
+    ): Promise<{ health: NodeHealth; roomIds: number[] | null }> {
       const node = byId.get(nodeId);
       if (node === undefined) throw new Error(`Unknown Janus node ${nodeId}`);
       const base = { wsUrl: node.wsUrl, adminUrl: node.adminUrl, lastCheckedAt: now() };
       try {
-        const rooms = await this.admin(nodeId).listRooms();
-        return { ...base, healthy: true, rooms: rooms.length, failures: 0 };
+        const roomIds = await this.admin(nodeId).listRooms();
+        return { health: { ...base, healthy: true, rooms: roomIds.length, failures: 0 }, roomIds };
       } catch {
         const failures = (previous?.failures ?? 0) + 1;
         // Placement leaves a failing node alone at once; failover waits for a second failure
         // so one slow answer doesn't move every call.
         return {
-          ...base,
-          healthy: previous?.healthy === true && failures < UNHEALTHY_AFTER_FAILURES,
-          rooms: previous?.rooms ?? 0,
-          failures,
+          health: {
+            ...base,
+            healthy: previous?.healthy === true && failures < UNHEALTHY_AFTER_FAILURES,
+            rooms: previous?.rooms ?? 0,
+            failures,
+          },
+          roomIds: null,
         };
       }
     },
@@ -132,10 +134,14 @@ export function createSfuRegistry(deps: SfuRegistryDeps) {
       let best: { node: JanusNode; rooms: number; tie: number } | null = null;
       for (const node of deps.nodes) {
         const entry = entries.get(node.id);
-        if (node.id === options.exclude || entry === undefined || !entry.healthy) continue;
+        if (node.id === options.exclude || entry?.healthy !== true) continue;
         if (entry.failures > 0 || now() - entry.lastCheckedAt > STALE_HEALTH_MS) continue;
         const tie = randomInt(0, 1_000_000);
-        if (best === null || entry.rooms < best.rooms || (entry.rooms === best.rooms && tie < best.tie)) {
+        if (
+          best === null ||
+          entry.rooms < best.rooms ||
+          (entry.rooms === best.rooms && tie < best.tie)
+        ) {
           best = { node, rooms: entry.rooms, tie };
         }
       }

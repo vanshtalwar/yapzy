@@ -219,8 +219,11 @@ export async function stopStack(): Promise<void> {
   );
 }
 
-/** Graceful gateway restart (like a deploy): sessions must survive it (D-046). */
-export async function restartGateway(): Promise<void> {
+/**
+ * Graceful gateway restart (like a deploy): sessions must survive it (D-046). `env` adds
+ * variables for the new process (e.g. DEV_FORCE_SFU); restart without it to go back.
+ */
+export async function restartGateway(env: Record<string, string> = {}): Promise<void> {
   const state = readState();
   const spec = SERVICES.find((service) => service.name === 'gateway');
   const pid = state.pids.gateway;
@@ -228,7 +231,10 @@ export async function restartGateway(): Promise<void> {
     throw new Error('restartGateway needs the stack started by the tests');
   }
   await stop(pid, spec.port);
-  state.pids.gateway = start(spec);
+  state.pids.gateway = start({ ...spec, env: { ...spec.env, ...env } });
   writeState(state);
   await waitForUrl(spec.ready);
 }
+
+/** Did the tests start the stack (gateway restarts possible)? */
+export const ownsStack = (): boolean => readState().owned;

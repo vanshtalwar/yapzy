@@ -14,6 +14,12 @@ export const CLIENT_EVENTS = {
   MATCH_ACK: 'match:ack',
   SESSION_RESUME: 'session:resume',
   PING: 'ping',
+  /** The client receives every peer through the new topology and closed the old one (Part 11). */
+  CALL_TOPOLOGY_READY: 'call:topologyReady',
+  /** A fresh Janus token for API requests during a long call (signed tokens expire, D-120). */
+  CALL_SFU_TOKEN: 'call:sfuToken',
+  /** Development only: switch a running P2P call to Janus. */
+  DEV_UPGRADE_TO_SFU: 'dev:upgradeToSfu',
 } as const;
 
 export type ClientEventName = (typeof CLIENT_EVENTS)[keyof typeof CLIENT_EVENTS];
@@ -32,6 +38,8 @@ export const SERVER_EVENTS = {
   PEER_RESUMED: 'peer:resumed',
   PEER_LEFT: 'peer:left',
   SYSTEM_NOTICE: 'system:notice',
+  /** Switch to (or, on failover, move within) Janus — or roll a failed switch back (Part 11). */
+  CALL_TOPOLOGY: 'call:topology',
 } as const;
 
 export type ServerEventName = (typeof SERVER_EVENTS)[keyof typeof SERVER_EVENTS];

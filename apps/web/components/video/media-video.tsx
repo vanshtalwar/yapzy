@@ -42,9 +42,12 @@ export function LocalVideo({ className }: { className?: string }) {
 export function RemoteVideo({
   participantId,
   trackCount,
+  revision,
 }: {
   participantId: string;
   trackCount: number;
+  /** Changes when the call's media path changes (P2P → Janus, failover): re-attach. */
+  revision: number;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [needsTap, setNeedsTap] = useState(false);
@@ -64,7 +67,7 @@ export function RemoteVideo({
         () => undefined,
       );
     });
-  }, [participantId, trackCount]);
+  }, [participantId, trackCount, revision]);
 
   return (
     <>

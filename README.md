@@ -8,8 +8,8 @@ shadow and hard bans) and a moderator dashboard are built in.
 
 |            |                                                                                                                                                                                               |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status** | Feature-complete development build (Parts 1–10). Group video for 3–4 people (Janus SFU, Parts 11–12) is in progress. **Not yet launched:** see [Production readiness](#production-readiness). |
-| **Tested** | 316 unit/integration tests, 8 Playwright end-to-end tests, load tests with 5,000 concurrent clients, crash drills for gateway, Redis and worker                                               |
+| **Status** | Feature-complete development build (Parts 1–11): calls can run through a Janus SFU and switch to it mid-call. Adding a 3rd and 4th person (Part 12) is in progress. **Not yet launched:** see [Production readiness](#production-readiness). |
+| **Tested** | 347 unit/integration tests, 11 Playwright end-to-end tests (+ a Janus failover drill), load tests with 5,000 concurrent clients, crash drills for gateway, Redis and worker                    |
 | **Docs**   | [Developer guide](docs/DEVELOPMENT.md) · [LAN testing](docs/LAN_TESTING.md)                                                                                                                   |
 
 ## Contents
@@ -60,6 +60,8 @@ flowchart LR
   B -- WebSocket --> GW[Gateway nodes<br/>Socket.io]
   B <-. WebRTC media .-> P[Stranger's browser]
   B -. relay when P2P fails .-> T[coturn<br/>TURN/STUN]
+  B <-. group calls: WebRTC + Janus API .-> J[Janus VideoRoom<br/>SFU nodes]
+  GW -- Admin API: rooms, tokens --> J
   ADM[Admin dashboard<br/>Next.js] -- REST --> API
   API --> R[(Redis)]
   GW --> R
@@ -74,7 +76,10 @@ flowchart LR
   gateway nodes share the same queues without double-matching anyone. Nodes talk to each other
   through the sharded Socket.io Redis adapter and a control channel.
 - **Media never touches the app servers.** Two-person video is peer-to-peer (DTLS-SRTP); coturn
-  relays only when a direct path fails or relay mode is forced.
+  relays only when a direct path fails or relay mode is forced. Group calls run through **Janus
+  VideoRoom** (each person uploads once, Janus forwards); a P2P call switches to Janus
+  make-before-break, without a visible freeze. The gateway places rooms on the least-loaded healthy
+  Janus node, issues per-participant signed tokens and moves calls to another node if one fails.
 - **Redis holds everything live** (queues, sessions, presence, rate limits, caches); every key has
   a TTL. **PostgreSQL holds only what must last:** visitors (hashed identifiers), reports,
   evidence metadata, bans, moderation events, admins, audit logs, session metadata.
@@ -91,7 +96,7 @@ flowchart LR
 | Real-time           | Socket.io 4 with the sharded Redis adapter (ioredis)                                                                                       |
 | Data                | PostgreSQL 18 + Prisma 7, Redis 8 (Lua matchmaking), S3-compatible storage (MinIO in development)                                          |
 | Jobs                | BullMQ                                                                                                                                     |
-| Media               | WebRTC, coturn 4.18; Janus VideoRoom for group calls (in progress)                                                                         |
+| Media               | WebRTC, coturn 4.18; Janus 1.4.3 VideoRoom (built from source, VideoRoom + WebSockets only) for group calls                                |
 | Safety              | Cloudflare Turnstile, obscenity text filter, NSFWJS in the browser, pluggable server classifier and CSAM hash matcher                      |
 | Observability       | pino logs (redacted), Prometheus metrics, Grafana dashboard                                                                                |
 | Quality             | Vitest, Testing Library, Playwright, ESLint, Prettier, GitHub Actions, gitleaks, Dependabot                                                |
@@ -103,7 +108,7 @@ Requires **Node.js 24**, **pnpm 12** (`corepack enable pnpm`) and **Docker** wit
 ```bash
 pnpm install
 cp .env.example .env    # replace the "dev-only" secrets, e.g. `openssl rand -hex 32`
-pnpm infra:up           # Postgres, Redis, coturn, MinIO
+pnpm infra:up           # Postgres, Redis, coturn, MinIO, Janus (first run builds Janus: ~5 min)
 pnpm db:migrate
 pnpm db:seed            # dev admin + sample data
 pnpm dev
@@ -133,6 +138,7 @@ staging environment, but launching to real users needs the work listed there.
 | gateway | `apps/gateway/Dockerfile`               | 4001                              | `/health`, `/ready` | Stateless, scale on socket count (~2,500 sockets per process measured) |
 | worker  | `apps/worker/Dockerfile`                | 4002 (`/health`, `/metrics` only) | `/health`           | Scale on job backlog                                                   |
 | migrate | `apps/api/Dockerfile`, target `migrate` | —                                 | exits 0             | Run once per release, before the apps                                  |
+| janus   | `infra/docker/janus/Dockerfile`         | 8188 (Janus API, wss), 7188 (Admin API, private), RTP UDP range | TCP on 8188/7188; the gateway checks the Admin API | One per media host; the gateway fails calls over between nodes |
 
 Infrastructure: PostgreSQL (managed, HA, with PgBouncer), Redis with replicas and failover (split
 the BullMQ Redis with AOF from the ephemeral one), S3-compatible object storage, coturn on hosts
@@ -179,8 +185,9 @@ Turnstile test keys or `NODE_ENV` other than `production`.
 | Data stores   | `DATABASE_URL` (via PgBouncer; migrations use a direct URL), `REDIS_URL` (`rediss://`), `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET_EVIDENCE`, `S3_BUCKET_FRAMES`   |
 | Network       | `CORS_ORIGINS` (web origins, also the WebSocket allowlist), `ADMIN_ORIGINS`, `TRUST_PROXY` (exact hop count or CIDRs of your CDN/load balancer, never `true`), `TURNSTILE_HOSTNAMES` |
 | Media         | `TURN_HOST`, `TURN_PORT`, `TURN_TLS_PORT=443`, `STUN_URLS`, `TURN_CREDENTIAL_TTL_SECONDS`                                                                                            |
+| Group video   | `JANUS_NODES` (gateway and web: `wsUrl` for browsers, `adminUrl` private), `JANUS_ADMIN_SECRET`, `JANUS_TOKEN_SECRET` (also given to each Janus node), `JANUS_PUBLIC_IP` (per node), `SFU_PUBLISHER_BITRATE`, `SFU_UPGRADE_TIMEOUT_MS` |
 | Capacity      | `MM_REGION`, `MM_BUCKETS`, `MM_BUCKETS_BY_QUEUE`, `DEADLINE_SHARDS=64`, `STATS_COUNTER_SHARDS`, `WORKER_CONCURRENCY`, `MOD_FRAME_BUDGET_PER_SEC`, `HANDSHAKE_LIMIT_PER_IP`           |
-| Must stay off | `RATE_LIMIT_DISABLED`, `DEV_FORCE_FLAG_VISITOR_IDS` (both ignored outside development)                                                                                               |
+| Must stay off | `RATE_LIMIT_DISABLED`, `DEV_FORCE_FLAG_VISITOR_IDS`, `DEV_FORCE_SFU` (all ignored outside development)                                                                                |
 
 Bucket and shard counts can only be **raised** on a live fleet; lowering them orphans waiting
 tickets or deadlines.
@@ -212,6 +219,10 @@ tickets or deadlines.
 - Admin dashboard behind an access proxy, VPN or IP allowlist, on the same registrable domain as
   the API (the admin cookie is `SameSite=Lax`).
 - TURN needs public IPs, a wide UDP relay port range, TLS on 443 and network-level DDoS protection.
+- Janus nodes need public IPs (`JANUS_PUBLIC_IP`) with their RTP UDP range open and the Janus API
+  behind TLS (wss). The **Admin API port must only be reachable from the gateways** (private
+  network); it is protected by `JANUS_ADMIN_SECRET`, and the web CSP only allows the nodes'
+  client URLs. Nodes must not be shared between environments (orphaned rooms are destroyed).
 
 ### 6. Monitor
 
@@ -219,7 +230,8 @@ Import [`infra/docker/grafana/dashboards/randomchat.json`](infra/docker/grafana/
 Alert at least on: `gateway_adapter_subscriber_oldest_pending_seconds` > 15 (cross-node delivery
 failing; the gateway's `/health` also turns 503 so the pod is replaced), drops in
 `gateway_sockets_connected`, time-to-match p99, error rates, Redis latency and memory, BullMQ
-backlog and failures, TURN relay share.
+backlog and failures, TURN relay share, `sfu_node_healthy` = 0, `sfu_failovers_total` and
+`sfu_upgrades_total{outcome="rolled_back"}`.
 
 ## Scaling
 
@@ -296,7 +308,7 @@ apps/
   gateway/    Socket.io gateway: matchmaking, text relay, WebRTC signalling (port 4001)
   worker/     BullMQ jobs: session logs, moderation, retention (metrics on 4002)
 packages/     config, env, logger, metrics, shared (types + schemas), ui, db (Prisma), redis,
-              matchmaking (Lua), moderation, storage, sfu (Janus, in progress)
+              matchmaking (Lua), moderation, storage, sfu (Janus Admin API, tokens, node health)
 e2e/          Playwright suite
 infra/        Docker Compose (local infra, `full` and `observability` profiles), coturn, Janus,
               Prometheus, Grafana

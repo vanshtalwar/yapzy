@@ -184,7 +184,11 @@ export function createJanusAdminClient(options: JanusAdminClientOptions) {
     /** A synchronous plugin request (`message_plugin`); returns the plugin's response body. */
     async messagePlugin(plugin: string, body: Record<string, unknown>): Promise<unknown> {
       const label = typeof body.request === 'string' ? body.request : 'message_plugin';
-      const reply = await request(label, { janus: 'message_plugin', plugin, request: body }, 'success');
+      const reply = await request(
+        label,
+        { janus: 'message_plugin', plugin, request: body },
+        'success',
+      );
       return reply.response;
     },
 

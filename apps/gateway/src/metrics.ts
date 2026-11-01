@@ -8,6 +8,8 @@ export function createGatewayMetrics(registry: Registry) {
     waiting: () => 0,
     subscriberPending: () => 0,
     subscriberOldestMs: () => 0,
+    /** Last `sfu:nodes` health (any gateway reads it; the leader writes it). */
+    sfuNodes: (): { nodeId: string; healthy: boolean; rooms: number }[] => [],
   };
   return {
     registry,
@@ -127,6 +129,53 @@ export function createGatewayMetrics(registry: Registry) {
       name: 'moderation_actions_total',
       help: 'Moderation actions by source and kind',
       labelNames: ['source', 'action'] as const,
+      registers: [registry],
+    }),
+    // --- Janus SFU (Part 11) ---
+    sfuNodeRooms: new Gauge({
+      name: 'sfu_node_rooms',
+      help: 'Rooms per Janus node at the last health check (sum = SFU rooms active)',
+      labelNames: ['node'] as const,
+      registers: [registry],
+      collect() {
+        this.reset();
+        for (const node of sources.sfuNodes()) this.set({ node: node.nodeId }, node.rooms);
+      },
+    }),
+    sfuNodeHealthy: new Gauge({
+      name: 'sfu_node_healthy',
+      help: 'Janus node health at the last check (1 = healthy)',
+      labelNames: ['node'] as const,
+      registers: [registry],
+      collect() {
+        this.reset();
+        for (const node of sources.sfuNodes())
+          this.set({ node: node.nodeId }, node.healthy ? 1 : 0);
+      },
+    }),
+    sfuUpgrades: new Counter({
+      name: 'sfu_upgrades_total',
+      help: 'P2P → Janus switches by outcome (started, succeeded, rolled_back, unavailable)',
+      labelNames: ['outcome'] as const,
+      registers: [registry],
+    }),
+    sfuUpgradeDuration: new Histogram({
+      name: 'sfu_upgrade_duration_seconds',
+      help: 'Start of a P2P → Janus switch until every participant confirmed it',
+      buckets: [0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15],
+      registers: [registry],
+    }),
+    sfuFailovers: new Counter({
+      name: 'sfu_failovers_total',
+      help: 'Calls on a lost Janus room, by outcome (moved, rolled_back, failed)',
+      labelNames: ['outcome'] as const,
+      registers: [registry],
+    }),
+    sfuAdminLatency: new Histogram({
+      name: 'sfu_admin_request_duration_seconds',
+      help: 'Janus Admin API requests by request and outcome',
+      labelNames: ['request', 'outcome'] as const,
+      buckets: [0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 3],
       registers: [registry],
     }),
   };

@@ -10,12 +10,21 @@ export interface RemoteParticipantView {
   quality: Quality | null;
   /** Number of remote tracks received so far; a change means "re-attach the <video>". */
   trackCount: number;
+  /** Janus audio-level events say this participant is talking (SFU calls only). */
+  speaking?: boolean;
 }
 
 export interface CallView {
   sessionId: string;
   topology: 'mesh' | 'sfu';
   participants: RemoteParticipantView[];
+  /** A switch to Janus (or to a new Janus room) is in progress behind the current media. */
+  switching: boolean;
+  /**
+   * 0 while P2P, else the epoch of the Janus room in use. It changes whenever the media path
+   * changes (switch, failover): the UI re-attaches every `<video>` to the new streams.
+   */
+  epoch: number;
 }
 
 /** An incoming WebRTC signal for this client (validated by the socket contract). */
@@ -34,8 +43,8 @@ export type PeerSummary = Omit<RtcSummaryPayload, 'sessionId'>;
 
 /**
  * How media reaches the other participants. `MeshTransport` (Part 7): one RTCPeerConnection
- * per remote participant. Part 11 adds an `SfuTransport` (Janus) behind the same interface;
- * the CallManager can then run both while it switches make-before-break, which is why the UI
+ * per remote participant. `SfuTransport` (Part 11): one publisher + one subscriber connection
+ * to Janus. The CallManager runs both while it switches make-before-break, which is why the UI
  * only ever asks the CallManager for participants and streams.
  */
 export interface CallTransport {
@@ -52,6 +61,8 @@ export interface CallTransport {
   setIceServers(iceServers: RTCIceServer[]): void;
   /** The network or the signaling connection changed: recover what isn't connected. */
   recover(): void;
+  /** SFU only: receive a participant's high (large tile) or low (small tile) video layer. */
+  setVideoQuality?(participantId: string, level: 'high' | 'low'): void;
   /** Closes everything; one summary per peer connection that was still open. */
   close(): PeerSummary[];
 }

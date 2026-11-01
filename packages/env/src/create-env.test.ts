@@ -270,6 +270,58 @@ describe('gatewayEnv', () => {
       ).toThrow(/MM_BUCKETS_BY_QUEUE/);
     }
   });
+
+  it('reads Janus nodes; their secrets are required once a node is listed (Part 11)', () => {
+    const node = { id: 'janus-1', wsUrl: 'ws://localhost:8188', adminUrl: 'ws://localhost:7188' };
+    const off = createEnv(gatewayEnv, { source: valid });
+    expect(off).toMatchObject({
+      JANUS_NODES: [],
+      SFU_PUBLISHER_BITRATE: 600_000,
+      SFU_UPGRADE_TIMEOUT_MS: 10_000,
+      DEV_FORCE_SFU: false,
+    });
+    const secrets = {
+      JANUS_ADMIN_SECRET: 'admin-secret-0123456789',
+      JANUS_TOKEN_SECRET: 'token-secret-0123456789',
+    };
+    const on = createEnv(gatewayEnv, {
+      source: { ...valid, ...secrets, JANUS_NODES: JSON.stringify([node]), DEV_FORCE_SFU: 'true' },
+    });
+    expect(on.JANUS_NODES).toEqual([node]);
+    expect(on.DEV_FORCE_SFU).toBe(true);
+    expect(() =>
+      createEnv(gatewayEnv, { source: { ...valid, JANUS_NODES: JSON.stringify([node]) } }),
+    ).toThrow(/JANUS_ADMIN_SECRET[\s\S]*JANUS_TOKEN_SECRET/);
+    for (const bad of [
+      '[{nope',
+      JSON.stringify([{ ...node, wsUrl: 'http://localhost:8188' }]),
+      JSON.stringify([node, node]), // duplicate ids
+    ]) {
+      expect(() =>
+        createEnv(gatewayEnv, { source: { ...valid, ...secrets, JANUS_NODES: bad } }),
+      ).toThrow(/JANUS_NODES/);
+    }
+    // Secrets go into Janus config files: no quotes or spaces.
+    expect(() =>
+      createEnv(gatewayEnv, {
+        source: { ...valid, ...secrets, JANUS_ADMIN_SECRET: 'has "quotes" in it!' },
+      }),
+    ).toThrow(/JANUS_ADMIN_SECRET/);
+    expect(() =>
+      createEnv(gatewayEnv, {
+        source: {
+          ...valid,
+          JANUS_NODES: JSON.stringify([node]),
+          JANUS_ADMIN_SECRET: 'dev-only-janus-admin-secret-change-me',
+          JANUS_TOKEN_SECRET: 'token-secret-0123456789',
+          NODE_ENV: 'production',
+          DEPLOY_ENV: 'production',
+          JWT_SECRET: 'x'.repeat(40),
+          IP_HASH_PEPPER: 'y'.repeat(20),
+        },
+      }),
+    ).toThrow(/JANUS_ADMIN_SECRET/);
+  });
 });
 
 describe('workerEnv', () => {

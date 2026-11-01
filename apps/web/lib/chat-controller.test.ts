@@ -395,7 +395,13 @@ function setupVideo(opts: { stream?: boolean } = {}) {
             return null;
           },
           remoteStream: () => null,
-          view: () => ({ sessionId: options.sessionId, topology: 'mesh', participants: [] }),
+          view: () => ({
+            sessionId: options.sessionId,
+            topology: 'mesh',
+            participants: [],
+            switching: false,
+            epoch: 0,
+          }),
           replaceLocalTrack: (track: unknown) => {
             fake.tracks.push(track);
             return Promise.resolve();

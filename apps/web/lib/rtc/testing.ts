@@ -8,8 +8,11 @@ export class FakeTrack {
   enabled = true;
   stopped = false;
   contentHint = '';
+  /** Remote tracks start muted and unmute when media arrives (SFU readiness). */
+  muted = false;
   onended: (() => void) | null = null;
   private readonly deviceId: string;
+  private readonly listeners = new Map<string, (() => void)[]>();
 
   constructor(kind: 'audio' | 'video', deviceId = `${kind}-default`) {
     trackCounter += 1;
@@ -24,6 +27,39 @@ export class FakeTrack {
 
   getSettings(): MediaTrackSettings {
     return { deviceId: this.deviceId };
+  }
+
+  addEventListener(type: string, listener: () => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  /** Test helper: media started flowing on this remote track. */
+  unmute(): void {
+    this.muted = false;
+    for (const listener of this.listeners.get('unmute') ?? []) listener();
+  }
+}
+
+/** Minimal RTCRtpTransceiver: a mid, a sender (local track) and a receiver (remote track). */
+export class FakeTransceiver {
+  mid: string | null;
+  readonly direction: RTCRtpTransceiverDirection;
+  readonly sender: FakeSender;
+  readonly receiver: { track: FakeTrack };
+  readonly sendEncodings: RTCRtpEncodingParameters[];
+
+  constructor(options: {
+    mid: string | null;
+    direction: RTCRtpTransceiverDirection;
+    sendTrack?: FakeTrack | null;
+    receiveTrack: FakeTrack;
+    sendEncodings?: RTCRtpEncodingParameters[];
+  }) {
+    this.mid = options.mid;
+    this.direction = options.direction;
+    this.sender = new FakeSender(options.sendTrack ?? null);
+    this.receiver = { track: options.receiveTrack };
+    this.sendEncodings = options.sendEncodings ?? [];
   }
 }
 
@@ -95,6 +131,7 @@ export class FakePeerConnection {
   localDescription: RTCSessionDescriptionInit | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
   readonly senders: FakeSender[] = [];
+  readonly transceivers: FakeTransceiver[] = [];
   readonly addedCandidates: RTCIceCandidateInit[] = [];
   readonly log: string[] = [];
   /** Were all four handlers set when the first track/remote description was applied? */
@@ -132,6 +169,30 @@ export class FakePeerConnection {
 
   getSenders(): FakeSender[] {
     return this.senders;
+  }
+
+  addTransceiver(
+    track: FakeTrack,
+    init: {
+      direction?: RTCRtpTransceiverDirection;
+      sendEncodings?: RTCRtpEncodingParameters[];
+    } = {},
+  ): FakeTransceiver {
+    this.log.push(`addTransceiver:${track.kind}`);
+    const transceiver = new FakeTransceiver({
+      mid: String(this.transceivers.length),
+      direction: init.direction ?? 'sendrecv',
+      sendTrack: track,
+      receiveTrack: new FakeTrack(track.kind),
+      ...(init.sendEncodings === undefined ? {} : { sendEncodings: init.sendEncodings }),
+    });
+    this.transceivers.push(transceiver);
+    this.senders.push(transceiver.sender);
+    return transceiver;
+  }
+
+  getTransceivers(): FakeTransceiver[] {
+    return this.transceivers;
   }
 
   setLocalDescription(): Promise<void> {
@@ -206,6 +267,16 @@ export class FakePeerConnection {
 
   fireTrack(track: FakeTrack): void {
     this.ontrack?.({ track } as unknown as RTCTrackEvent);
+  }
+
+  /** A remote (muted) track on m-line `mid`, as a subscriber receives it from Janus. */
+  fireRemoteTrack(mid: string, kind: 'audio' | 'video'): FakeTrack {
+    const track = new FakeTrack(kind);
+    track.muted = true;
+    const transceiver = new FakeTransceiver({ mid, direction: 'recvonly', receiveTrack: track });
+    this.transceivers.push(transceiver);
+    this.ontrack?.({ track, transceiver } as unknown as RTCTrackEvent);
+    return track;
   }
 
   fireCandidate(candidate: RTCIceCandidateInit | null): void {

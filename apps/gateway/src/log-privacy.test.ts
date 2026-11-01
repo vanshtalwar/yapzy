@@ -1,5 +1,6 @@
 import { createCapturingLogger, findSecrets } from '@app/logger/testing';
-import { type MatchFound, type SessionResumed } from '@app/shared';
+import { createFakeJanus } from '@app/sfu/testing';
+import { type CallTopology, type MatchFound, type SessionResumed } from '@app/shared';
 import { type Socket as ClientSocket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -28,9 +29,14 @@ const TEXT = 'LOG-PRIVACY gateway text 5e2b';
 const BLOCKED_TEXT = 'LOG-PRIVACY see evil-site.example.com';
 const INVALID_TEXT = `LOG-PRIVACY invalid payload ${'x'.repeat(600)}`;
 const UNKNOWN_PAYLOAD = 'LOG-PRIVACY unknown event 77aa';
+const JANUS_ADMIN_SECRET = 'log-privacy-janus-admin-secret';
+const JANUS_TOKEN_SECRET = 'log-privacy-janus-token-secret';
+const janus = createFakeJanus({ adminSecret: JANUS_ADMIN_SECRET });
 let node: { gateway: Gateway; url: string };
 const clients: ClientSocket[] = [];
 const tokens: string[] = [];
+/** Janus tokens handed to clients (bearer credentials for the media server). */
+const janusTokens: string[] = [];
 
 interface AckResult {
   ok: boolean;
@@ -50,7 +56,7 @@ async function visitor(visitorId = newVisitorId()) {
   return { socket, visitorId };
 }
 
-async function pair(mode: 'text' | 'video', lang: 'fr' | 'it') {
+async function pair(mode: 'text' | 'video', lang: 'fr' | 'it' | 'de') {
   const a = await visitor();
   const b = await visitor();
   const join = { mode, lang, autoRequeue: false };
@@ -69,8 +75,18 @@ async function pair(mode: 'text' | 'video', lang: 'fr' | 'it') {
 beforeAll(async () => {
   await appRedis.flushdb();
   node = await startGateway('logs', {
-    config: testConfigWith({ TRUST_PROXY: '127.0.0.1', LOG_LEVEL: 'trace' }),
+    config: testConfigWith({
+      TRUST_PROXY: '127.0.0.1',
+      LOG_LEVEL: 'trace',
+      NODE_ENV: 'development', // dev:upgradeToSfu
+      JANUS_NODES: JSON.stringify([
+        { id: 'fj-logs', wsUrl: 'ws://fj-logs.test:8188', adminUrl: 'ws://fj-logs.test:7188' },
+      ]),
+      JANUS_ADMIN_SECRET,
+      JANUS_TOKEN_SECRET,
+    }),
     logger: logs.logger,
+    sfuSocketFactory: () => janus.createSocket(),
   });
 });
 
@@ -140,6 +156,22 @@ describe('gateway logs', () => {
     });
     await ack(video.a.socket, 'chat:end', { sessionId: video.matchA.sessionId });
 
+    // Janus (Part 11): an upgrade hands out tokens; neither they nor the secrets are logged.
+    await expect.poll(async () => (await node.gateway.sfuRegistry.pickNode()) !== null).toBe(true);
+    const group = await pair('video', 'de');
+    const announced = nextEvent<CallTopology>(group.a.socket, 'call:topology');
+    expect(
+      await ack(group.a.socket, 'dev:upgradeToSfu', { sessionId: group.matchA.sessionId }),
+    ).toMatchObject({ ok: true });
+    const upgrade = await announced;
+    if (upgrade.topology === 'sfu') janusTokens.push(upgrade.sfu.token);
+    const refreshed = await ack(group.a.socket, 'call:sfuToken', {
+      sessionId: group.matchA.sessionId,
+      epoch: upgrade.epoch,
+    });
+    janusTokens.push((refreshed.data as { token: string }).token);
+    await ack(group.a.socket, 'chat:end', { sessionId: group.matchA.sessionId });
+
     // A forged token is rejected without being logged.
     const forged = `${tokens[0]?.slice(0, -4) ?? ''}AAAA`;
     const rejected = connect(node.url, { token: forged, headers: { 'x-forwarded-for': RAW_IP } });
@@ -159,6 +191,10 @@ describe('gateway logs', () => {
       'forged token': forged,
     };
     tokens.forEach((token, index) => (secrets[`visitor token ${String(index)}`] = token));
+    expect(janusTokens).toHaveLength(2);
+    janusTokens.forEach((token, index) => (secrets[`janus token ${String(index)}`] = token));
+    secrets['janus admin secret'] = JANUS_ADMIN_SECRET;
+    secrets['janus token secret'] = JANUS_TOKEN_SECRET;
     expect(findSecrets(output, secrets)).toEqual([]);
   });
 });

@@ -12,8 +12,16 @@ import {
   GW_CONTROL_CHANNEL,
   type GwControlMessage,
   subscribeControl,
+  visitorRoom,
 } from '@app/redis';
-import { NOTICE_CODES } from '@app/shared';
+import {
+  type AdminSocket,
+  createRoomBook,
+  createSfuRegistry,
+  startSfuHealthLoop,
+  sweepOrphanRooms,
+} from '@app/sfu';
+import { NOTICE_CODES, type ServerToClientEvents } from '@app/shared';
 import {
   BULLMQ_PREFIX,
   type ModerationEventJob,
@@ -35,6 +43,7 @@ import { startPresence } from './presence.ts';
 import { attachGuards, type GuardOptions, markSocketReady } from './register-handler.ts';
 import { createRtcStats } from './rtc-stats.ts';
 import { createLifecycle } from './sessions/lifecycle.ts';
+import { createSfuOrchestrator } from './sessions/sfu.ts';
 import { createSessionStore } from './sessions/store.ts';
 import { createSingleSocketPolicy } from './single-socket.ts';
 import { startTicketSweeper } from './sweeper.ts';
@@ -67,6 +76,9 @@ export interface GatewayOptions {
   interestFallbackMs?: number;
   sweepIntervalMs?: number;
   deadlineIntervalMs?: number;
+  /** Tests: a fake Janus Admin API (`@app/sfu/testing`) instead of real WebSockets. */
+  sfuSocketFactory?: (url: string, protocol: string) => AdminSocket;
+  sfuHealthIntervalMs?: number;
 }
 
 export interface GatewayDeps {
@@ -276,6 +288,48 @@ export async function createGateway(deps: GatewayDeps) {
   });
 
   const store = createSessionStore(redis, { deadlineShards: config.DEADLINE_SHARDS });
+
+  // --- Janus (Part 11) -----------------------------------------------------------------------
+  const emitToVisitor = <E extends keyof ServerToClientEvents>(
+    visitorId: string,
+    event: E,
+    ...args: Parameters<ServerToClientEvents[E]>
+  ): void => {
+    io.to(visitorRoom(visitorId)).emit(event, ...args);
+  };
+  const sfuHealth: { checkNow?: () => void } = {};
+  const sfuRegistry = createSfuRegistry({
+    redis,
+    nodes: config.JANUS_NODES,
+    adminSecret: config.JANUS_ADMIN_SECRET ?? '',
+    now: () => now().getTime(),
+    onRequest: (request, durationMs, outcome) => {
+      metrics.sfuAdminLatency.observe({ request, outcome }, durationMs / 1_000);
+    },
+    onConnectionLost: () => {
+      sfuHealth.checkNow?.();
+    },
+    ...(options.sfuSocketFactory === undefined ? {} : { createSocket: options.sfuSocketFactory }),
+  });
+  const roomBook = createRoomBook(redis);
+  const sfu = createSfuOrchestrator({
+    store,
+    registry: sfuRegistry,
+    book: roomBook,
+    config: {
+      adminSecret: config.JANUS_ADMIN_SECRET ?? '',
+      tokenSecret: config.JANUS_TOKEN_SECRET ?? '',
+      publisherBitrate: config.SFU_PUBLISHER_BITRATE,
+      upgradeTimeoutMs: config.SFU_UPGRADE_TIMEOUT_MS,
+    },
+    emitTo: emitToVisitor,
+    logger,
+    metrics,
+    clock: () => now().getTime(),
+  });
+  if (config.DEV_FORCE_SFU && config.NODE_ENV !== 'development') {
+    logger.warn('DEV_FORCE_SFU ignored outside NODE_ENV=development');
+  }
   const bucketConfig = {
     region: config.MM_REGION,
     buckets: config.MM_BUCKETS,
@@ -301,12 +355,14 @@ export async function createGateway(deps: GatewayDeps) {
       matchAckTimeoutMs: config.MATCH_ACK_TIMEOUT_MS,
       earlyFailureWindowMs: config.EARLY_FAILURE_WINDOW_MS,
       statsShards: config.STATS_COUNTER_SHARDS,
+      forceSfu: config.DEV_FORCE_SFU && config.NODE_ENV === 'development',
     },
     // jobId = sessionId: a duplicate enqueue for the same session is ignored by BullMQ.
     enqueueSessionLog: async (job) => {
       await sessionLogQueue.add(QUEUE_NAMES.SESSION_LOG, job, { jobId: job.sessionId });
     },
     moderation,
+    sfu,
     resolvePool: async (socket) => {
       const { visitorId, ipHash } = socket.data;
       const ban = await bans.findActiveBan({ visitorId, ipHash });
@@ -321,6 +377,41 @@ export async function createGateway(deps: GatewayDeps) {
   metrics.sources.waiting = () => lifecycle.waitingCount();
   metrics.sources.subscriberPending = () => subscriber.pendingCount();
   metrics.sources.subscriberOldestMs = () => subscriber.oldestPendingMs();
+
+  // One gateway (lock holder) health-checks the Janus nodes and fails calls over (Part 11).
+  let sfuNodesSeen: { nodeId: string; healthy: boolean; rooms: number }[] = [];
+  metrics.sources.sfuNodes = () => sfuNodesSeen;
+  const healthLoop = sfuRegistry.enabled
+    ? startSfuHealthLoop({
+        redis,
+        registry: sfuRegistry,
+        book: roomBook,
+        owner: nodeId,
+        ...(options.sfuHealthIntervalMs === undefined
+          ? {}
+          : { intervalMs: options.sfuHealthIntervalMs }),
+        onRoomsLost: (rooms) => sfu.failover(rooms),
+        onTransition: (janusNode, healthy) => {
+          if (!healthy) logger.warn({ janusNode }, 'janus node unhealthy: moving its calls');
+        },
+        logger,
+        now: () => now().getTime(),
+      })
+    : null;
+  sfuHealth.checkNow = () => healthLoop?.checkNow();
+  const sfuMetricsTimer = setInterval(() => {
+    sfuRegistry
+      .health()
+      .then((health) => {
+        sfuNodesSeen = [...health].map(([id, entry]) => ({
+          nodeId: id,
+          healthy: entry.healthy,
+          rooms: entry.rooms,
+        }));
+      })
+      .catch(() => undefined);
+  }, 5_000);
+  sfuMetricsTimer.unref();
   const subscriberWatchdog = setInterval(() => {
     const stuck = subscriber.oldestPendingMs() > GATEWAY_DEFAULTS.subscriberStuckMs;
     if (stuck && !subscriberStuck) {
@@ -357,9 +448,21 @@ export async function createGateway(deps: GatewayDeps) {
     intervalMs: options.sweepIntervalMs ?? GATEWAY_DEFAULTS.sweepIntervalMs,
     buckets: bucketConfig,
     logger,
+    ...(sfuRegistry.enabled
+      ? {
+          sweepRooms: () =>
+            sweepOrphanRooms({
+              registry: sfuRegistry,
+              book: roomBook,
+              adminSecret: config.JANUS_ADMIN_SECRET ?? '',
+              inUse: (room) => sfu.inUse(room),
+              now: () => now().getTime(),
+            }),
+        }
+      : {}),
   });
 
-  // Ack/grace deadlines live in Redis; every node polls, ZREM decides who handles each (D-047).
+  // Ack/grace/upgrade deadlines live in Redis; every node polls, ZREM decides who handles each (D-047).
   let processingDeadlines = false;
   const deadlineTimer = setInterval(() => {
     if (processingDeadlines) return;
@@ -380,6 +483,8 @@ export async function createGateway(deps: GatewayDeps) {
   shutdownHooks.push(async () => {
     clearInterval(deadlineTimer);
     clearInterval(subscriberWatchdog);
+    clearInterval(sfuMetricsTimer);
+    await healthLoop?.stop(); // hands the health lock to another gateway
     await lifecycle.prepareShutdown();
   });
 
@@ -395,7 +500,16 @@ export async function createGateway(deps: GatewayDeps) {
       logger,
       metrics,
     });
-    registerHandlers(socket, { lifecycle, store, now, logger, rtcStats, moderation, metrics });
+    registerHandlers(socket, {
+      development: config.NODE_ENV === 'development',
+      lifecycle,
+      store,
+      now,
+      logger,
+      rtcStats,
+      moderation,
+      metrics,
+    });
 
     socket.on('disconnect', (reason) => {
       logger.debug({ visitorId, socketId: socket.id, reason }, 'socket disconnected');
@@ -458,6 +572,7 @@ export async function createGateway(deps: GatewayDeps) {
       logger.warn({ err: error }, 'presence cleanup failed');
     });
     await io.close(); // closes the HTTP server and the adapter
+    sfuRegistry.close();
     await Promise.allSettled([
       sessionLogQueue.close(),
       moderationQueue.close(),
@@ -479,6 +594,11 @@ export async function createGateway(deps: GatewayDeps) {
     moderationQueue,
     rtcStats,
     metrics,
+    sfu,
+    sfuRegistry,
+    healthLoop,
+    lifecycle,
+    store,
     listen(port: number, host?: string): Promise<number> {
       return new Promise((resolve, reject) => {
         httpServer.once('error', reject);

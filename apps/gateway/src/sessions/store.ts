@@ -20,6 +20,8 @@ import {
   langSchema,
   participantIdSchema,
   type SupportedLang,
+  TOPOLOGIES,
+  type Topology,
   type VisitorState,
 } from '@app/shared';
 import { LEAVE_REASONS, type LeaveReason } from '@app/shared/jobs';
@@ -64,6 +66,23 @@ declare module 'ioredis' {
       participantId: string,
       visitorId: string,
     ): Result<unknown, Context>;
+    gwSfuBegin(meta: string, nowMs: number): Result<unknown, Context>;
+    gwSfuAssign(
+      meta: string,
+      participants: string,
+      epoch: number,
+      nodeId: string,
+      roomId: number,
+      ...tokens: string[]
+    ): Result<unknown, Context>;
+    gwSfuReady(
+      meta: string,
+      participants: string,
+      participantId: string,
+      epoch: number,
+    ): Result<unknown, Context>;
+    gwSfuRollback(meta: string, epoch: number): Result<unknown, Context>;
+    gwSfuMove(meta: string, nodeId: string, roomId: number): Result<unknown, Context>;
     gwDelIfField(key: string, field: string, value: string): Result<unknown, Context>;
     gwSetIfField(
       key: string,
@@ -215,6 +234,109 @@ redis.call('HSET', KEYS[2], ARGV[1], cjson.encode(me))
 return {'resumed', was, disconnectedAt}
 `;
 
+// --- Topology (Part 11): mesh → sfu upgrades, failover moves --------------------------------
+// meta: topology mesh|sfu, topologyEpoch (+1 per change), topologyState stable|upgrading,
+// sfuNodeId/sfuRoomId (current room), upgradeStartedAt. Participant records: sfuToken (their
+// token in the room's allowed list), sfuReadyEpoch (confirmed `call:topologyReady`).
+
+/**
+ * KEYS: meta   ARGV: nowMs
+ * Starts a mesh → sfu upgrade: one at a time, video only, never twice.
+ * Returns {'started', epoch} | {'not_active'} | {'not_video'} | {'already'} | {'upgrading'}
+ */
+const SFU_BEGIN = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'mode', 'topology', 'topologyState', 'topologyEpoch')
+if m[1] ~= 'active' then return {'not_active'} end
+if m[2] ~= 'video' then return {'not_video'} end
+if m[3] == 'sfu' then return {'already'} end
+if m[4] == 'upgrading' then return {'upgrading'} end
+local epoch = tonumber(m[5] or '0') + 1
+redis.call('HSET', KEYS[1], 'topologyState', 'upgrading', 'topologyEpoch', epoch,
+  'upgradeStartedAt', ARGV[1])
+return {'started', epoch}
+`;
+
+/**
+ * KEYS: meta, participants   ARGV: epoch, nodeId, roomId, (participantId, token)...
+ * Records the room of `epoch` and each present participant's token, if `epoch` is still the
+ * current one. Returns 'ok' | 'stale'.
+ */
+const SFU_ASSIGN = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'topologyEpoch')
+if m[1] ~= 'active' or tonumber(m[2] or '0') ~= tonumber(ARGV[1]) then return 'stale' end
+redis.call('HSET', KEYS[1], 'sfuNodeId', ARGV[2], 'sfuRoomId', ARGV[3])
+for i = 4, #ARGV, 2 do
+  local raw = redis.call('HGET', KEYS[2], ARGV[i])
+  if raw then
+    local p = cjson.decode(raw)
+    if p.status ~= 'left' then
+      p.sfuToken = ARGV[i + 1]
+      p.sfuReadyEpoch = nil
+      redis.call('HSET', KEYS[2], ARGV[i], cjson.encode(p))
+    end
+  end
+end
+return 'ok'
+`;
+
+/**
+ * KEYS: meta, participants   ARGV: participantId, epoch
+ * The participant receives everyone through the topology of `epoch`. When every present
+ * participant has confirmed, an upgrade completes (topology=sfu, stable).
+ * Returns {'pending'} | {'complete', upgraded (1 = was an upgrade), upgradeStartedAt} |
+ *   {'stale'} | {'not_active'}
+ */
+const SFU_READY = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'topologyEpoch', 'topologyState', 'upgradeStartedAt')
+if m[1] ~= 'active' then return {'not_active'} end
+local epoch = tonumber(ARGV[2])
+if tonumber(m[2] or '0') ~= epoch then return {'stale'} end
+local raw = redis.call('HGET', KEYS[2], ARGV[1])
+if not raw then return {'stale'} end
+local me = cjson.decode(raw)
+if me.status == 'left' then return {'stale'} end
+me.sfuReadyEpoch = epoch
+redis.call('HSET', KEYS[2], ARGV[1], cjson.encode(me))
+local flat = redis.call('HGETALL', KEYS[2])
+for i = 1, #flat, 2 do
+  local p = cjson.decode(flat[i + 1])
+  if p.status ~= 'left' and p.sfuReadyEpoch ~= epoch then return {'pending'} end
+end
+if m[3] == 'upgrading' then
+  redis.call('HSET', KEYS[1], 'topology', 'sfu', 'topologyState', 'stable')
+  return {'complete', 1, m[4] or '0'}
+end
+return {'complete', 0, '0'}
+`;
+
+/**
+ * KEYS: meta   ARGV: epoch
+ * Rolls back a still-pending upgrade of `epoch` (the P2P call never stopped). Returns
+ * {'rolled_back', nodeId, roomId} (empty strings if no room was recorded yet) | {'stale'}
+ */
+const SFU_ROLLBACK = `
+local m = redis.call('HMGET', KEYS[1], 'topologyEpoch', 'topologyState', 'sfuNodeId', 'sfuRoomId')
+if tonumber(m[1] or '0') ~= tonumber(ARGV[1]) or m[2] ~= 'upgrading' then return {'stale'} end
+redis.call('HSET', KEYS[1], 'topologyState', 'stable')
+redis.call('HDEL', KEYS[1], 'sfuNodeId', 'sfuRoomId', 'upgradeStartedAt')
+return {'rolled_back', m[3] or '', m[4] or ''}
+`;
+
+/**
+ * KEYS: meta   ARGV: nodeId, roomId
+ * Failover: an SFU call whose room is (still) `nodeId`/`roomId` gets a new epoch for its new
+ * room. Returns {'moving', epoch} | {'stale'}
+ */
+const SFU_MOVE = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'topology', 'sfuNodeId', 'sfuRoomId', 'topologyEpoch')
+if m[1] ~= 'active' or m[2] ~= 'sfu' or m[3] ~= ARGV[1] or m[4] ~= ARGV[2] then
+  return {'stale'}
+end
+local epoch = tonumber(m[5] or '0') + 1
+redis.call('HSET', KEYS[1], 'topologyEpoch', epoch)
+return {'moving', epoch}
+`;
+
 /** KEYS: key   ARGV: field, value — deletes a JSON ref only if ref[field] == value. */
 const DEL_IF_FIELD = `
 local raw = redis.call('GET', KEYS[1])
@@ -286,6 +408,10 @@ const participantRecordSchema = z.object({
   frameIntervalMs: z.number().int().positive().nullable().optional(),
   maxFrames: z.number().int().positive().nullable().optional(),
   tier: z.enum(RISK_TIERS).optional(),
+  // Janus (Part 11): this participant's token in the room's allowed list, and the topology
+  // epoch they confirmed with `call:topologyReady`.
+  sfuToken: z.string().optional(),
+  sfuReadyEpoch: z.number().int().optional(),
 });
 export type ParticipantRecord = z.output<typeof participantRecordSchema>;
 
@@ -296,6 +422,8 @@ export interface NewParticipant {
   interests: string[];
   autoRequeue: boolean;
   frames: FrameSchedule;
+  /** Token in the room's allowed list when the session starts on Janus. */
+  sfuToken?: string;
 }
 
 export interface PresentParticipant {
@@ -312,6 +440,14 @@ export type LeaveOutcome =
       others: (PresentParticipant & { priorStatus: ParticipantStatus })[];
     };
 
+export type TopologyState = 'stable' | 'upgrading';
+
+/** The call's current Janus room (absent while the call is P2P only). */
+export interface SfuPlacement {
+  nodeId: string;
+  roomId: number;
+}
+
 export interface SessionContext {
   state: 'active' | 'ended';
   mode: ChatMode;
@@ -319,23 +455,38 @@ export interface SessionContext {
   startedAt: number;
   initiator: string;
   participants: Map<string, ParticipantRecord>;
+  topology: Topology;
+  topologyEpoch: number;
+  topologyState: TopologyState;
+  sfu: SfuPlacement | null;
 }
 
 export interface SessionMeta {
   mode: ChatMode;
+  /** Where the call ended up (a call that switched to Janus is logged as sfu). */
+  topology: Topology;
   startedAt: number;
   endedAt: number | null;
   maxParticipants: number;
   commonInterests: string[];
 }
 
-export type DeadlineKind = 'ack' | 'grace';
-
-export interface Deadline {
-  kind: DeadlineKind;
+/** Per-participant deadlines: match ack (D-047) and reconnect grace (D-046). */
+export interface ParticipantDeadline {
+  kind: 'ack' | 'grace';
   sessionId: string;
   participantId: string;
 }
+
+/** A mesh → SFU upgrade must be confirmed by everyone before this (Part 11). */
+export interface UpgradeDeadline {
+  kind: 'upgrade';
+  sessionId: string;
+  epoch: number;
+}
+
+export type Deadline = ParticipantDeadline | UpgradeDeadline;
+export type DeadlineKind = Deadline['kind'];
 
 /** Random, unguessable per-session id shown to other participants instead of visitor ids. */
 export function newParticipantId(): string {
@@ -354,7 +505,13 @@ const resumeResultSchema = z.union([
 const deadlineMemberSchema = z
   .string()
   .transform((member) => member.split('|'))
-  .pipe(z.tuple([z.enum(['ack', 'grace']), z.uuid(), participantIdSchema]));
+  .pipe(
+    z.union([
+      z.tuple([z.enum(['ack', 'grace']), z.uuid(), participantIdSchema]),
+      z.tuple([z.literal('upgrade'), z.uuid(), z.string().regex(/^\d{1,9}$/)]),
+    ]),
+  );
+const okListSchema = z.tuple([z.string()]).rest(z.union([z.string(), z.number()]));
 
 export function createSessionStore(redis: Redis, options: { deadlineShards: number }) {
   redis.defineCommand('gwSessionLeave', { numberOfKeys: 4, lua: SESSION_LEAVE });
@@ -362,12 +519,18 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
   redis.defineCommand('gwSessionAck', { numberOfKeys: 2, lua: SESSION_ACK });
   redis.defineCommand('gwSessionDisconnect', { numberOfKeys: 2, lua: SESSION_DISCONNECT });
   redis.defineCommand('gwSessionResume', { numberOfKeys: 2, lua: SESSION_RESUME });
+  redis.defineCommand('gwSfuBegin', { numberOfKeys: 1, lua: SFU_BEGIN });
+  redis.defineCommand('gwSfuAssign', { numberOfKeys: 2, lua: SFU_ASSIGN });
+  redis.defineCommand('gwSfuReady', { numberOfKeys: 2, lua: SFU_READY });
+  redis.defineCommand('gwSfuRollback', { numberOfKeys: 1, lua: SFU_ROLLBACK });
+  redis.defineCommand('gwSfuMove', { numberOfKeys: 1, lua: SFU_MOVE });
   redis.defineCommand('gwDelIfField', { numberOfKeys: 1, lua: DEL_IF_FIELD });
   redis.defineCommand('gwSetIfField', { numberOfKeys: 1, lua: SET_IF_FIELD });
 
   const deadlineKeyOf = (sessionId: string) =>
     sessionDeadlinesKey(deadlineShardOf(sessionId, options.deadlineShards));
-  const memberOf = (d: Deadline) => `${d.kind}|${d.sessionId}|${d.participantId}`;
+  const memberOf = (d: Deadline) =>
+    `${d.kind}|${d.sessionId}|${d.kind === 'upgrade' ? String(d.epoch) : d.participantId}`;
 
   async function getRef<T>(key: string, schema: z.ZodType<T>): Promise<T | null> {
     const raw = await redis.get(key);
@@ -436,12 +599,19 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
       initiator: string;
       participants: NewParticipant[];
       now: number;
+      /** Set when the call starts on Janus (epoch 1); P2P otherwise. */
+      sfu?: SfuPlacement;
     }): Promise<void> {
       const keys = sessionKeys(input.sessionId);
       const multi = redis.multi().hset(keys.meta, {
         mode: input.mode,
         lang: input.lang,
-        topology: 'mesh',
+        topology: input.sfu === undefined ? 'mesh' : 'sfu',
+        topologyEpoch: input.sfu === undefined ? '0' : '1',
+        topologyState: 'stable',
+        ...(input.sfu === undefined
+          ? {}
+          : { sfuNodeId: input.sfu.nodeId, sfuRoomId: String(input.sfu.roomId) }),
         maxParticipants: '2',
         startedAt: String(input.now),
         commonInterests: JSON.stringify(input.commonInterests),
@@ -459,6 +629,7 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           frameIntervalMs: p.frames.frameIntervalMs,
           maxFrames: p.frames.maxFrames,
           tier: p.frames.tier,
+          ...(p.sfuToken === undefined ? {} : { sfuToken: p.sfuToken }),
         };
         multi.hset(keys.participants, p.participantId, JSON.stringify(record));
       }
@@ -548,7 +719,19 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
       const keys = sessionKeys(sessionId);
       const results = await redis
         .pipeline()
-        .hmget(keys.meta, 'state', 'mode', 'lang', 'startedAt', 'initiator')
+        .hmget(
+          keys.meta,
+          'state',
+          'mode',
+          'lang',
+          'startedAt',
+          'initiator',
+          'topology',
+          'topologyEpoch',
+          'topologyState',
+          'sfuNodeId',
+          'sfuRoomId',
+        )
         .hgetall(keys.participants)
         .exec();
       const [metaResult, participantsResult] = results ?? [];
@@ -559,9 +742,15 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           langSchema.nullable(),
           z.string().nullable(),
           z.string().nullable(),
+          z.enum(TOPOLOGIES).nullable(),
+          z.string().nullable(),
+          z.enum(['stable', 'upgrading']).nullable(),
+          z.string().nullable(),
+          z.string().nullable(),
         ])
         .parse(metaResult?.[1]);
-      const [state, mode, lang, startedAt, initiator] = meta;
+      const [state, mode, lang, startedAt, initiator, topology, epoch, topologyState] = meta;
+      const [, , , , , , , , sfuNodeId, sfuRoomId] = meta;
       if (state === null || mode === null || lang === null) return null;
       const participants = new Map<string, ParticipantRecord>();
       const flat = z.record(z.string(), z.string()).parse(participantsResult?.[1]);
@@ -575,7 +764,97 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
         startedAt: Number(startedAt ?? '0'),
         initiator: initiator ?? '',
         participants,
+        topology: topology ?? 'mesh',
+        topologyEpoch: Number(epoch ?? '0'),
+        topologyState: topologyState ?? 'stable',
+        sfu:
+          sfuNodeId === null || sfuRoomId === null
+            ? null
+            : { nodeId: sfuNodeId, roomId: Number(sfuRoomId) },
       };
+    },
+
+    // --- Topology (Part 11) ---------------------------------------------------------------
+
+    /** Starts a mesh → sfu upgrade; returns its epoch, or why not. */
+    async beginUpgrade(
+      sessionId: string,
+      now: number,
+    ): Promise<
+      | { status: 'started'; epoch: number }
+      | { status: 'not_active' | 'not_video' | 'already' | 'upgrading' }
+    > {
+      const result = okListSchema.parse(await redis.gwSfuBegin(sessionKeys(sessionId).meta, now));
+      const status = z
+        .enum(['started', 'not_active', 'not_video', 'already', 'upgrading'])
+        .parse(result[0]);
+      return status === 'started' ? { status, epoch: Number(result[1]) } : { status };
+    },
+
+    /** Records the room of `epoch` and the participants' tokens; false if `epoch` is stale. */
+    async assignRoom(
+      sessionId: string,
+      epoch: number,
+      placement: SfuPlacement,
+      tokens: Map<string, string>,
+    ): Promise<boolean> {
+      const keys = sessionKeys(sessionId);
+      const result = await redis.gwSfuAssign(
+        keys.meta,
+        keys.participants,
+        epoch,
+        placement.nodeId,
+        placement.roomId,
+        ...[...tokens].flat(),
+      );
+      return result === 'ok';
+    },
+
+    async markTopologyReady(
+      sessionId: string,
+      participantId: string,
+      epoch: number,
+    ): Promise<
+      | { status: 'pending' | 'stale' | 'not_active' }
+      | { status: 'complete'; upgraded: boolean; upgradeStartedAt: number }
+    > {
+      const keys = sessionKeys(sessionId);
+      const result = okListSchema.parse(
+        await redis.gwSfuReady(keys.meta, keys.participants, participantId, epoch),
+      );
+      const status = z.enum(['pending', 'stale', 'not_active', 'complete']).parse(result[0]);
+      if (status !== 'complete') return { status };
+      return {
+        status,
+        upgraded: Number(result[1]) === 1,
+        upgradeStartedAt: Number(result[2] ?? 0),
+      };
+    },
+
+    /** Rolls a pending upgrade of `epoch` back; returns the room it had (if any) or null. */
+    async rollbackUpgrade(
+      sessionId: string,
+      epoch: number,
+    ): Promise<{ room: SfuPlacement | null } | null> {
+      const result = okListSchema.parse(
+        await redis.gwSfuRollback(sessionKeys(sessionId).meta, epoch),
+      );
+      if (result[0] !== 'rolled_back') return null;
+      const [, nodeId, roomId] = result;
+      return {
+        room:
+          typeof nodeId === 'string' && nodeId !== '' && roomId !== undefined && roomId !== ''
+            ? { nodeId, roomId: Number(roomId) }
+            : null,
+      };
+    },
+
+    /** Failover: a new epoch if the call still uses `from`; null if it moved on already. */
+    async beginMove(sessionId: string, from: SfuPlacement): Promise<number | null> {
+      const result = okListSchema.parse(
+        await redis.gwSfuMove(sessionKeys(sessionId).meta, from.nodeId, from.roomId),
+      );
+      return result[0] === 'moving' ? Number(result[1]) : null;
     },
 
     async meta(sessionId: string): Promise<SessionMeta | null> {
@@ -583,6 +862,7 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
       if (raw.mode === undefined) return null;
       return {
         mode: chatModeSchema.parse(raw.mode),
+        topology: z.enum(TOPOLOGIES).catch('mesh').parse(raw.topology),
         startedAt: Number(raw.startedAt),
         endedAt: raw.endedAt === undefined ? null : Number(raw.endedAt),
         maxParticipants: Number(raw.maxParticipants ?? '2'),
@@ -672,12 +952,14 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
       const claim = redis.pipeline();
       for (const { shard, member } of due) claim.zrem(sessionDeadlinesKey(shard), member);
       const claimed = (await claim.exec()) ?? [];
-      return due.flatMap(({ member }, index) => {
+      return due.flatMap(({ member }, index): Deadline[] => {
         if (claimed[index]?.[1] !== 1) return [];
         const parsed = deadlineMemberSchema.safeParse(member);
         if (!parsed.success) return [];
-        const [kind, sessionId, participantId] = parsed.data;
-        return [{ kind, sessionId, participantId }];
+        const [kind, sessionId, subject] = parsed.data;
+        return kind === 'upgrade'
+          ? [{ kind, sessionId, epoch: Number(subject) }]
+          : [{ kind, sessionId, participantId: subject }];
       });
     },
   };

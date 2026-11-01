@@ -10,7 +10,8 @@ const MAX_WAITING_AGE_MS = 30 * 60 * 1000;
 /**
  * Every `intervalMs`, one gateway (whoever wins `SET NX PX` on the lock) sweeps stale tickets
  * from every bucket of every matchmaking family. (Buckets beyond a lowered MM_BUCKETS are no
- * longer visited; their tickets age out of the visitors' 24 h refs.) Tickets of crashed nodes are detected via presence keys.
+ * longer visited; their tickets age out of the visitors' 24 h refs.) Tickets of crashed nodes are
+ * detected via presence keys. The same round sweeps orphaned Janus rooms.
  */
 export function startTicketSweeper(deps: {
   redis: Redis;
@@ -19,6 +20,8 @@ export function startTicketSweeper(deps: {
   intervalMs: number;
   buckets: BucketConfig;
   logger: Pick<Logger, 'debug' | 'warn'>;
+  /** Janus rooms whose call is over or that nobody booked (Part 11); same lock, same round. */
+  sweepRooms?: () => Promise<number>;
 }) {
   const { redis, matchmaker, nodeId, intervalMs, logger } = deps;
 
@@ -48,6 +51,13 @@ export function startTicketSweeper(deps: {
       });
     }
     if (dropped > 0) logger.debug({ dropped }, 'stale tickets swept');
+    if (deps.sweepRooms !== undefined) {
+      const rooms = await deps.sweepRooms().catch((error: unknown) => {
+        logger.warn({ err: error }, 'orphan room sweep failed');
+        return 0;
+      });
+      if (rooms > 0) logger.debug({ rooms }, 'orphan Janus rooms destroyed');
+    }
     return dropped;
   }
 

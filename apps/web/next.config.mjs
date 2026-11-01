@@ -15,6 +15,9 @@ for (const key of /** @type {const} */ ([
   process.env[key] = env[key];
 }
 process.env.NEXT_PUBLIC_FORCE_TURN_RELAY = String(env.NEXT_PUBLIC_FORCE_TURN_RELAY);
+// Developer tools in the page (`randomchat.upgradeToSfu()`): development deployments only.
+process.env.NEXT_PUBLIC_DEV_HOOKS = String(env.DEPLOY_ENV === 'development');
+// JANUS_NODES (validated above) is read by proxy.ts at request time for the CSP connect-src.
 
 // The CSP is set per request by proxy.ts (nonces); these headers are static.
 const production = process.env.NODE_ENV === 'production';

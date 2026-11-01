@@ -17,6 +17,7 @@ function setup(peers: PeerRole[]) {
   const onFailed = vi.fn();
   const call = new CallManager({
     sessionId: SESSION,
+    selfParticipantId: 'pSelf0000001',
     peers,
     localStream: localStream as unknown as MediaStream,
     iceServers: [],
@@ -134,6 +135,8 @@ describe('CallManager (mesh)', () => {
       participants: [
         { participantId: 'pAlpha000001', state: 'connected', quality: null, trackCount: 1 },
       ],
+      switching: false,
+      epoch: 0,
     });
     expect(JSON.parse(JSON.stringify(views.at(-1)))).toEqual(views.at(-1));
     pcs[0]!.setConnectionState('failed');

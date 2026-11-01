@@ -30,6 +30,7 @@ export type RtcIcePayload = z.input<typeof schemas.rtcIceSchema>;
 export type RtcSummaryPayload = z.input<typeof schemas.rtcSummarySchema>;
 export type ModerationSignalPayload = z.input<typeof schemas.moderationSignalSchema>;
 export type SessionResumePayload = z.input<typeof schemas.sessionResumeSchema>;
+export type CallEpochPayload = z.input<typeof schemas.callEpochSchema>;
 export type EmptyPayload = Record<string, never>;
 
 export type QueueWaiting = z.output<typeof schemas.queueWaitingSchema>;
@@ -46,6 +47,11 @@ export type SessionResumed = z.output<typeof schemas.sessionResumedSchema>;
 export type SystemNotice = z.output<typeof schemas.systemNoticeSchema>;
 export type FrameSchedulePayload = z.output<typeof schemas.frameScheduleSchema>;
 export type Pong = z.output<typeof schemas.pongSchema>;
+export type Topology = (typeof schemas.TOPOLOGIES)[number];
+export type SfuJoin = z.output<typeof schemas.sfuJoinSchema>;
+export type CallTopology = z.output<typeof schemas.callTopologySchema>;
+export type RollbackReason = (typeof schemas.ROLLBACK_REASONS)[number];
+export type SfuToken = z.output<typeof schemas.sfuTokenSchema>;
 /** Ack data for `chat:message`: the server-assigned id and timestamp of the stored message. */
 export type ChatMessageAck = z.output<typeof schemas.chatMessageAckSchema>;
 /** Normalized `queue:join` preferences, kept on the socket so `chat:next` can requeue. */
@@ -69,6 +75,9 @@ export interface ClientToServerEvents {
   'match:ack': (payload: SessionRefPayload, ack: AckCallback) => void;
   'session:resume': (payload: SessionResumePayload, ack: AckCallback<SessionResumed>) => void;
   ping: (payload: EmptyPayload, ack: AckCallback<Pong>) => void;
+  'call:topologyReady': (payload: CallEpochPayload, ack: AckCallback) => void;
+  'call:sfuToken': (payload: CallEpochPayload, ack: AckCallback<SfuToken>) => void;
+  'dev:upgradeToSfu': (payload: SessionRefPayload, ack: AckCallback) => void;
 }
 
 export interface ServerToClientEvents {
@@ -84,6 +93,7 @@ export interface ServerToClientEvents {
   'peer:resumed': (payload: PeerPresence) => void;
   'peer:left': (payload: PeerLeft) => void;
   'system:notice': (payload: SystemNotice) => void;
+  'call:topology': (payload: CallTopology) => void;
 }
 
 // Compile-time guard: the maps above and the name constants in events.ts must match exactly.

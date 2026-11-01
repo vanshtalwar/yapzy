@@ -58,6 +58,16 @@ jobs:
             pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data
           for i in $(seq 1 30); do curl -fsS http://localhost:9000/minio/health/live && break; sleep 2; done
 
+      # @app/sfu's integration tests talk to a real Janus (secrets from .env.example).
+      - name: Janus (VideoRoom SFU)
+        run: |
+          docker build -t randomchat-janus:1.4.3 infra/docker/janus
+          docker run -d --name janus -p 8188:8188 -p 7188:7188 -p 20000-20100:20000-20100/udp \
+            -e JANUS_ADMIN_SECRET=dev-only-janus-admin-secret-change-me \
+            -e JANUS_TOKEN_SECRET=dev-only-janus-token-secret-change-me \
+            randomchat-janus:1.4.3
+          for i in $(seq 1 30); do [ "$(docker inspect -f '{{.State.Health.Status}}' janus)" = healthy ] && break; sleep 2; done
+
       - name: Migrate the test database
         run: pnpm db:migrate:test
       - run: pnpm lint

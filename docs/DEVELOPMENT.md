@@ -45,12 +45,14 @@ MinIO console: <http://localhost:9001> (user `S3_ACCESS_KEY`, password `S3_SECRE
 | `pnpm test:e2e`                | Build, boot the stack, run the Playwright suite (see Testing)          |
 | `pnpm obs:up` / `obs:down`     | Prometheus (9090) + Grafana (3002) for the running services            |
 | `pnpm stack:up` / `stack:down` | Every app in a container (Compose profile `full`)                      |
+| `pnpm sfu:multi:up` / `down`   | Second Janus node `janus-2` (profile `sfu-multi`) for failover tests   |
 | `pnpm admin:create`            | Create or reset an admin (`ADMIN_EMAIL`/`ADMIN_PASSWORD`/`ADMIN_ROLE`) |
 | `pnpm bots -- …`               | Chat-flow correctness bots (see Load testing for the `load` mode)      |
 
 Quality gate before committing: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
-`@app/db`, `@app/redis`, `@app/matchmaking`, `@app/moderation`, `@app/storage`, `@app/api`,
-`@app/gateway` and `@app/worker` tests are integration tests: run `pnpm infra:up` first.
+`@app/db`, `@app/redis`, `@app/matchmaking`, `@app/moderation`, `@app/storage`, `@app/sfu`,
+`@app/api`, `@app/gateway` and `@app/worker` tests are integration tests: run `pnpm infra:up`
+first (`@app/sfu` talks to the Janus container with the secrets from `.env`).
 
 ## Run modes
 
@@ -102,6 +104,30 @@ video (a drawer on phones).
   socket reconnects.
 - Phones and other devices on the LAN: see [`docs/LAN_TESTING.md`](./LAN_TESTING.md)
   (the camera needs https or localhost).
+
+### Calls through Janus (SFU)
+
+`pnpm infra:up` builds and starts Janus 1.4.3 (`infra/docker/janus`, VideoRoom + WebSockets
+only; the first build takes ~5 minutes): Janus API on `ws://localhost:8188` for browsers, Admin
+API on `ws://localhost:7188` for the gateway (published on 127.0.0.1 only), media on UDP
+20000–20100. The gateway reads `JANUS_NODES`, `JANUS_ADMIN_SECRET` and `JANUS_TOKEN_SECRET`
+from `.env`; one gateway health-checks every node each 5 s (`sfu:nodes` in Redis).
+
+- **Every video call on Janus:** set `DEV_FORCE_SFU=true` in `.env` and restart the gateway
+  (development only). Two windows then talk through Janus; `chrome://webrtc-internals` shows
+  two connections per window (publisher, subscriber) whose remote port is in 20000–20100.
+- **Switch a running P2P call:** in a video chat, open the browser console and run
+  `randomchat.upgradeToSfu()` (development deployments only). The call keeps playing on P2P
+  until every participant receives everyone through Janus, then swaps (make-before-break) —
+  no visible freeze. If someone can't reach Janus within `SFU_UPGRADE_TIMEOUT_MS` (10 s), the
+  switch is rolled back and P2P simply continues.
+- **Failover:** `pnpm sfu:multi:up` starts `janus-2` (8189 / 7189 / UDP 20200–20300); add it to
+  `JANUS_NODES` (see `.env.example`) and restart the gateway and web app. Stop the node hosting a
+  call (`docker compose --env-file .env -f infra/docker/docker-compose.yml stop janus`): the
+  gateway marks it unhealthy after two failed checks, opens a room on the other node and the
+  clients rejoin; video resumes after a few seconds (8.7 s measured, headless). Automated as
+  `e2e/tests/sfu-failover.spec.ts` (skipped unless a second node is configured).
+- Group calls (Part 12) always run on Janus; 1:1 calls stay P2P unless forced or upgraded.
 
 ### Trust & safety
 
@@ -300,6 +326,14 @@ README ("Scaling").
   only `.env`; run that app directly instead (see above).
 - **Gateway `/health` is 503 `subscriber_stuck`:** its Socket.io adapter subscriber stopped
   answering Redis, so cross-node delivery fails; the process should be restarted (see D-101).
+- **Calls never switch to Janus / `SERVICE_UNAVAILABLE` from `randomchat.upgradeToSfu()`:** no
+  healthy node — check `docker compose … ps janus`, `docker logs randomchat-janus-1` and that the
+  gateway's `JANUS_ADMIN_SECRET` matches the container's (both from `.env`; recreate the
+  container after changing it: `pnpm infra:up`).
+- **Janus on macOS Docker Desktop:** candidates advertise `JANUS_PUBLIC_IP` (127.0.0.1) and the
+  UDP range is published 1:1, so browsers on the Mac reach `127.0.0.1:200xx`; Janus sees them
+  through Docker's NAT as peer-reflexive candidates (full ICE, not ICE-Lite). For phones set
+  `JANUS_PUBLIC_IP` to the LAN IP and `JANUS_BIND_IP=0.0.0.0` (`docs/LAN_TESTING.md`).
 
 ## Layout
 
