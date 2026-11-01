@@ -55,12 +55,16 @@ function getIceServers(): IceServerCache {
   return iceServers;
 }
 
-/** One chat store per tab. On the server (prerender) it only holds defaults. */
+/**
+ * One chat store per tab. It is created with the defaults, like the server prerender, and the
+ * saved preferences are applied right after: zustand serves the initial state during hydration,
+ * so the first client render matches the server HTML and React then re-renders with them.
+ */
 export function getChatStore(): ChatStore {
   if (store === null) {
-    const browser = typeof window !== 'undefined';
-    store = createChatStore(browser ? loadPreferences() : DEFAULT_PREFERENCES);
-    if (browser) {
+    store = createChatStore(DEFAULT_PREFERENCES);
+    if (typeof window !== 'undefined') {
+      store.getState().setPreferences(loadPreferences());
       store.subscribe((state, previous) => {
         if (state.preferences !== previous.preferences) savePreferences(state.preferences);
       });

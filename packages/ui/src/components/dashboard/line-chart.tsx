@@ -39,7 +39,8 @@ export function LineChart({
     points.length > 0
       ? `${line} L${x(points.length - 1).toFixed(1)},${String(height - pad.bottom)} L${String(pad.left)},${String(height - pad.bottom)} Z`
       : '';
-  const ticks = [0, Math.round(max / 2), max];
+  // Deduplicated: with max = 1 the middle tick rounds to 1 too (duplicate React keys).
+  const ticks = [...new Set([0, Math.round(max / 2), max])];
 
   return (
     <figure className={cn('w-full', className)}>
