@@ -204,6 +204,7 @@ export async function buildApp(deps: AppDeps) {
     trust,
     online,
     clock,
+    chatSessions: sessions,
     recordAction: (action) => {
       metrics.moderationActions.inc({ source: 'admin', action });
     },

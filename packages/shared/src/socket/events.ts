@@ -20,6 +20,10 @@ export const CLIENT_EVENTS = {
   CALL_SFU_TOKEN: 'call:sfuToken',
   /** Development only: switch a running P2P call to Janus. */
   DEV_UPGRADE_TO_SFU: 'dev:upgradeToSfu',
+  /** Ask everyone in the call to add another random person (Part 12). */
+  CALL_REQUEST_ADD: 'call:requestAdd',
+  /** Accept or decline (= cancel) the pending add request. */
+  CALL_RESPOND_ADD: 'call:respondAdd',
 } as const;
 
 export type ClientEventName = (typeof CLIENT_EVENTS)[keyof typeof CLIENT_EVENTS];
@@ -40,6 +44,12 @@ export const SERVER_EVENTS = {
   SYSTEM_NOTICE: 'system:notice',
   /** Switch to (or, on failover, move within) Janus — or roll a failed switch back (Part 11). */
   CALL_TOPOLOGY: 'call:topology',
+  /** Someone asked to add a person: everyone present answers (Part 12). */
+  CALL_ADD_REQUESTED: 'call:addRequested',
+  /** Everyone agreed: the call is looking for one more person. */
+  CALL_SEEKING: 'call:seeking',
+  /** The add request or the search ended without a new person (declined, expired, timeout…). */
+  CALL_SEEK_CANCELLED: 'call:seekCancelled',
 } as const;
 
 export type ServerEventName = (typeof SERVER_EVENTS)[keyof typeof SERVER_EVENTS];

@@ -31,6 +31,7 @@ export type RtcSummaryPayload = z.input<typeof schemas.rtcSummarySchema>;
 export type ModerationSignalPayload = z.input<typeof schemas.moderationSignalSchema>;
 export type SessionResumePayload = z.input<typeof schemas.sessionResumeSchema>;
 export type CallEpochPayload = z.input<typeof schemas.callEpochSchema>;
+export type CallRespondAddPayload = z.input<typeof schemas.callRespondAddSchema>;
 export type EmptyPayload = Record<string, never>;
 
 export type QueueWaiting = z.output<typeof schemas.queueWaitingSchema>;
@@ -52,6 +53,10 @@ export type SfuJoin = z.output<typeof schemas.sfuJoinSchema>;
 export type CallTopology = z.output<typeof schemas.callTopologySchema>;
 export type RollbackReason = (typeof schemas.ROLLBACK_REASONS)[number];
 export type SfuToken = z.output<typeof schemas.sfuTokenSchema>;
+export type CallAddRequested = z.output<typeof schemas.callAddRequestedSchema>;
+export type CallSeeking = z.output<typeof schemas.callSeekingSchema>;
+export type CallSeekCancelled = z.output<typeof schemas.callSeekCancelledSchema>;
+export type SeekCancelReason = (typeof schemas.SEEK_CANCEL_REASONS)[number];
 /** Ack data for `chat:message`: the server-assigned id and timestamp of the stored message. */
 export type ChatMessageAck = z.output<typeof schemas.chatMessageAckSchema>;
 /** Normalized `queue:join` preferences, kept on the socket so `chat:next` can requeue. */
@@ -78,6 +83,8 @@ export interface ClientToServerEvents {
   'call:topologyReady': (payload: CallEpochPayload, ack: AckCallback) => void;
   'call:sfuToken': (payload: CallEpochPayload, ack: AckCallback<SfuToken>) => void;
   'dev:upgradeToSfu': (payload: SessionRefPayload, ack: AckCallback) => void;
+  'call:requestAdd': (payload: SessionRefPayload, ack: AckCallback) => void;
+  'call:respondAdd': (payload: CallRespondAddPayload, ack: AckCallback) => void;
 }
 
 export interface ServerToClientEvents {
@@ -94,6 +101,9 @@ export interface ServerToClientEvents {
   'peer:left': (payload: PeerLeft) => void;
   'system:notice': (payload: SystemNotice) => void;
   'call:topology': (payload: CallTopology) => void;
+  'call:addRequested': (payload: CallAddRequested) => void;
+  'call:seeking': (payload: CallSeeking) => void;
+  'call:seekCancelled': (payload: CallSeekCancelled) => void;
 }
 
 // Compile-time guard: the maps above and the name constants in events.ts must match exactly.

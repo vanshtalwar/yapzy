@@ -2,8 +2,8 @@
 
 import { MessageBubble, MessageList, SystemMessage, TypingIndicator } from '@app/ui';
 
-import { getChatController } from '../../lib/chat.ts';
-import { type ChatEntry } from '../../lib/chat-store.ts';
+import { getChatController, useChat } from '../../lib/chat.ts';
+import { type ChatEntry, strangerName } from '../../lib/chat-store.ts';
 
 /** The conversation: system notes, the stranger's messages and ours (with send status). */
 export function ChatEntries({
@@ -15,6 +15,8 @@ export function ChatEntries({
   peerTyping: boolean;
   className?: string;
 }) {
+  // Group calls (Part 12): name the author of each stranger message.
+  const names = useChat((state) => (state.groupCall ? state : null));
   return (
     <MessageList
       revision={`${String(entries.length)}-${String(peerTyping)}`}
@@ -34,7 +36,14 @@ export function ChatEntries({
             }}
           />
         ) : (
-          <MessageBubble key={entry.id} from="stranger" text={entry.text} />
+          <MessageBubble
+            key={entry.id}
+            from="stranger"
+            text={entry.text}
+            {...(names === null || entry.from === undefined
+              ? {}
+              : { author: strangerName(names, entry.from) })}
+          />
         ),
       )}
       {peerTyping && <TypingIndicator />}

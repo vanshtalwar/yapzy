@@ -22,13 +22,15 @@ const LOG_DIR = path.join(ROOT, 'e2e/test-results/stack');
 /**
  * Overrides for the Node services (the rest comes from the root .env): no session/handshake
  * rate limits (every test visitor shares 127.0.0.1; honoured only with NODE_ENV=development),
- * one queue bucket (deterministic matching) and a short match-ack timeout (ghost test).
+ * one queue bucket (deterministic matching), a short match-ack timeout (ghost test) and group
+ * calls open to new visitors (trust 50).
  */
 const SERVICE_ENV: Record<string, string> = {
   RATE_LIMIT_DISABLED: 'true',
   HANDSHAKE_LIMIT_PER_IP: '1000000',
   MM_BUCKETS: '1',
   MATCH_ACK_TIMEOUT_MS: '3000',
+  GROUP_MIN_TRUST: '50',
   LOG_LEVEL: 'warn',
 };
 

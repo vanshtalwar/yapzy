@@ -171,6 +171,37 @@ export function createGatewayMetrics(registry: Registry) {
       labelNames: ['outcome'] as const,
       registers: [registry],
     }),
+    // --- Group calls (Part 12) ---
+    groupAddRequests: new Counter({
+      name: 'group_add_requests_total',
+      help: 'Add-a-person rounds by outcome (requested, accepted, declined, expired, left, not_eligible) — consent rate = accepted / requested',
+      labelNames: ['outcome'] as const,
+      registers: [registry],
+    }),
+    groupSeeks: new Counter({
+      name: 'group_seeks_total',
+      help: 'Searches for one more person by outcome (joined, timeout, left, unavailable; turned_away = a matched joiner that could not be added) — success rate = joined / all but turned_away',
+      labelNames: ['outcome'] as const,
+      registers: [registry],
+    }),
+    groupTimeToJoin: new Histogram({
+      name: 'group_time_to_join_seconds',
+      help: 'Start of a search until the new person was added',
+      buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60],
+      registers: [registry],
+    }),
+    groupJoins: new Counter({
+      name: 'group_joins_total',
+      help: 'People added to group calls, by the resulting call size (3 or 4)',
+      labelNames: ['size'] as const,
+      registers: [registry],
+    }),
+    groupSessionDuration: new Histogram({
+      name: 'group_session_duration_seconds',
+      help: 'Start to end of sessions that had 3 or more participants',
+      buckets: [30, 60, 120, 300, 600, 1_200, 1_800, 3_600],
+      registers: [registry],
+    }),
     sfuAdminLatency: new Histogram({
       name: 'sfu_admin_request_duration_seconds',
       help: 'Janus Admin API requests by request and outcome',

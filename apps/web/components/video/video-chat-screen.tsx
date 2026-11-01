@@ -1,5 +1,6 @@
 'use client';
 
+import { MAX_GROUP_PARTICIPANTS } from '@app/shared';
 import {
   Button,
   CallControlButton,
@@ -24,6 +25,7 @@ import {
   PlayIcon,
   SettingsIcon,
   SkipForwardIcon,
+  UserPlusIcon,
   VideoIcon,
   VideoOffIcon,
   WifiOffIcon,
@@ -39,7 +41,7 @@ import {
   useChat,
   useLocalMedia,
 } from '../../lib/chat.ts';
-import { type ChatState } from '../../lib/chat-store.ts';
+import { type AddRequestState, type ChatState, strangerName } from '../../lib/chat-store.ts';
 import { type RemoteParticipantView } from '../../lib/rtc/types.ts';
 import { getSession } from '../../lib/session-token.ts';
 import { AgeGate } from '../age-gate.tsx';
@@ -57,6 +59,80 @@ function connectionOf(participant: RemoteParticipantView | undefined) {
   if (participant === undefined || participant.state === 'new') return 'connecting';
   if (participant.state === 'connected') return 'connected';
   return participant.state === 'connecting' ? 'connecting' : 'reconnecting';
+}
+
+/** Seconds left until `until` (ISO), refreshed every second; mount it when the countdown starts. */
+function useSecondsLeft(until: string): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1_000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+  return Math.max(0, Math.ceil((Date.parse(until) - now) / 1_000));
+}
+
+/** Accept/decline for everyone asked, a cancel for whoever already agreed (Part 12). */
+function AddRequestBanner({ state, request }: { state: ChatState; request: AddRequestState }) {
+  const secondsLeft = useSecondsLeft(request.expiresAt);
+  const asker = request.by === state.selfParticipantId ? 'You' : strangerName(state, request.by);
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center justify-center gap-2 rounded-full bg-stage/80 px-4 py-2 text-sm text-stage-foreground shadow-lg"
+    >
+      <UserPlusIcon className="size-4" aria-hidden />
+      <span>
+        {request.answered
+          ? `Waiting for everyone to agree… (${String(secondsLeft)} s)`
+          : `${asker} wants to add someone — ${String(secondsLeft)} s`}
+      </span>
+      {!request.answered && (
+        <Button
+          size="sm"
+          onClick={() => {
+            void controller().respondAdd(true);
+          }}
+        >
+          Accept
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => {
+          void controller().respondAdd(false);
+        }}
+      >
+        {request.answered ? 'Cancel' : 'Decline'}
+      </Button>
+    </div>
+  );
+}
+
+/** "Add a person" round, then "Looking for another person…" while the call seeks (Part 12). */
+function GroupBanner({ state }: { state: ChatState }) {
+  if (state.addRequest !== null) {
+    // Keyed by round: the countdown starts when this request arrives, not when the call did.
+    return (
+      <AddRequestBanner key={state.addRequest.requestId} state={state} request={state.addRequest} />
+    );
+  }
+  if (state.seekingUntil !== null) {
+    return (
+      <div
+        role="status"
+        className="flex items-center gap-2 rounded-full bg-stage/80 px-4 py-2 text-sm text-stage-foreground shadow-lg"
+      >
+        <Spinner label="Searching" />
+        <span>Looking for another person…</span>
+      </div>
+    );
+  }
+  return null;
 }
 
 /** Centered message over the stage (searching, ended, paused, errors). */
@@ -137,6 +213,8 @@ export function VideoChatScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  /** Group calls: whose tile the report is about (null = the only/first stranger). */
+  const [reportTarget, setReportTarget] = useState<string | null>(null);
   const [seen, setSeen] = useState({ sessionId: null as string | null, count: 0 });
 
   // The camera starts with the pre-join check and stays on across matches; leaving the page
@@ -215,6 +293,17 @@ export function VideoChatScreen() {
 
   const peer = participants[0];
   const chat = <ChatPanel className="min-h-0" />;
+  const group = state.groupCall;
+  const openReport = (participantId: string | null) => {
+    setReportTarget(participantId);
+    setReportOpen(true);
+  };
+  // Part 12: anyone in a video call can ask to add someone, up to 4 people, one round at a time.
+  const canAddPerson =
+    matched &&
+    participants.length + 1 < MAX_GROUP_PARTICIPANTS &&
+    state.addRequest === null &&
+    state.seekingUntil === null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-2 sm:p-4 md:flex-row">
@@ -225,65 +314,89 @@ export function VideoChatScreen() {
           // P2P or Janus (Part 11), for tests and support tooling.
           data-topology={matched ? (state.call?.topology ?? 'mesh') : undefined}
           data-switching={state.call?.switching === true ? 'true' : undefined}
+          data-participants={matched ? participants.length + 1 : undefined}
         >
           {matched && participants.length > 0 ? (
             <VideoGrid count={participants.length} className="p-0">
-              {participants.map((participant) => (
-                <VideoTile
-                  key={participant.participantId}
-                  // WebRTC connection state of this peer, for tests and support tooling.
-                  data-rtc-state={participant.state}
-                  // Client NSFW check flagged this video: keep it blurred (D-054 / Part 8).
-                  className={cn('rounded-none', state.remoteFlagged && '[&_video]:blur-2xl')}
-                  placeholder={
-                    state.remoteFlagged ? (
+              {participants.map((participant) => {
+                const name = strangerName(state, participant.participantId);
+                const flagged = state.remoteFlagged.includes(participant.participantId);
+                return (
+                  <VideoTile
+                    key={participant.participantId}
+                    {...(group ? { label: name } : {})}
+                    // WebRTC connection state of this peer, for tests and support tooling.
+                    data-rtc-state={participant.state}
+                    // Client NSFW check flagged this video: keep it blurred (D-054 / Part 8);
+                    // Janus says they're talking: highlight the tile (group calls).
+                    className={cn(
+                      'rounded-none',
+                      flagged && '[&_video]:blur-2xl',
+                      participant.speaking === true && 'ring-4 ring-primary ring-inset',
+                    )}
+                    placeholder={
+                      flagged ? (
+                        <>
+                          <EyeOffIcon className="size-6" aria-hidden />
+                          <p className="max-w-xs font-medium">
+                            This video may show explicit content, so we blurred it.
+                          </p>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="secondary" onClick={next.press}>
+                              <SkipForwardIcon aria-hidden /> {next.armed ? 'Really skip?' : 'Next'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => {
+                                openReport(participant.participantId);
+                              }}
+                            >
+                              <FlagIcon aria-hidden /> Report
+                            </Button>
+                          </div>
+                        </>
+                      ) : participant.trackCount === 0 ? (
+                        <>
+                          <Spinner label="Connecting" />
+                          <span>Connecting video…</span>
+                        </>
+                      ) : undefined
+                    }
+                    overlay={
                       <>
-                        <EyeOffIcon className="size-6" aria-hidden />
-                        <p className="max-w-xs font-medium">
-                          This video may show explicit content, so we blurred it.
-                        </p>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="secondary" onClick={next.press}>
-                            <SkipForwardIcon aria-hidden /> {next.armed ? 'Really skip?' : 'Next'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                              setReportOpen(true);
-                            }}
-                          >
-                            <FlagIcon aria-hidden /> Report
-                          </Button>
-                        </div>
+                        {group && (
+                          <QualityBadge
+                            className="absolute top-3 left-3"
+                            connection={connectionOf(participant)}
+                            quality={participant.quality}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          aria-label={group ? `Report ${name}` : 'Report'}
+                          className={cn(
+                            'absolute top-3 right-3 rounded-full bg-stage/60 p-2 text-stage-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            !group && 'sm:hidden',
+                          )}
+                          onClick={() => {
+                            openReport(participant.participantId);
+                          }}
+                        >
+                          <FlagIcon className="size-4" aria-hidden />
+                        </button>
                       </>
-                    ) : participant.trackCount === 0 ? (
-                      <>
-                        <Spinner label="Connecting" />
-                        <span>Connecting video…</span>
-                      </>
-                    ) : undefined
-                  }
-                  overlay={
-                    <button
-                      type="button"
-                      aria-label="Report"
-                      className="absolute top-3 right-3 rounded-full bg-stage/60 p-2 text-stage-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden"
-                      onClick={() => {
-                        setReportOpen(true);
-                      }}
-                    >
-                      <FlagIcon className="size-4" aria-hidden />
-                    </button>
-                  }
-                >
-                  <RemoteVideo
-                    participantId={participant.participantId}
-                    trackCount={participant.trackCount}
-                    revision={state.call?.epoch ?? 0}
-                  />
-                </VideoTile>
-              ))}
+                    }
+                  >
+                    <RemoteVideo
+                      participantId={participant.participantId}
+                      trackCount={participant.trackCount}
+                      revision={state.call?.epoch ?? 0}
+                      label={`${name}’s camera`}
+                    />
+                  </VideoTile>
+                );
+              })}
             </VideoGrid>
           ) : (
             <div className="size-full opacity-60">
@@ -301,8 +414,14 @@ export function VideoChatScreen() {
             </VideoTile>
           )}
 
+          {matched && (
+            <div className="absolute inset-x-3 top-14 z-10 flex justify-center sm:top-3">
+              <GroupBanner state={state} />
+            </div>
+          )}
+
           <div className="absolute top-3 left-3 flex flex-col items-start gap-2">
-            {matched && (
+            {matched && !group && (
               <QualityBadge connection={connectionOf(peer)} quality={peer?.quality ?? null} />
             )}
             {state.connectionLost && (
@@ -318,7 +437,7 @@ export function VideoChatScreen() {
                 role="status"
                 className="rounded-full bg-stage/60 px-2.5 py-1 text-xs text-stage-foreground"
               >
-                Stranger’s connection is unstable…
+                {group ? 'A connection is unstable…' : 'Stranger’s connection is unstable…'}
               </span>
             )}
           </div>
@@ -366,9 +485,17 @@ export function VideoChatScreen() {
             icon={<FlagIcon />}
             label="Report"
             disabled={!matched}
-            className="hidden sm:flex"
+            className={group ? 'hidden' : 'hidden sm:flex'}
             onClick={() => {
-              setReportOpen(true);
+              openReport(null);
+            }}
+          />
+          <CallControlButton
+            icon={<UserPlusIcon />}
+            label="Add a person"
+            disabled={!canAddPerson}
+            onClick={() => {
+              void controller().requestAdd();
             }}
           />
           {matched ? (
@@ -435,7 +562,14 @@ export function VideoChatScreen() {
       </Sheet>
 
       <DeviceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <ReportDialog open={reportOpen} onOpenChange={setReportOpen} video />
+      <ReportDialog
+        open={reportOpen}
+        onOpenChange={setReportOpen}
+        video
+        {...(reportTarget === null
+          ? {}
+          : { participantId: reportTarget, name: strangerName(state, reportTarget) })}
+      />
       {gate}
     </div>
   );

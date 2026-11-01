@@ -1,7 +1,7 @@
 import { type ChatMessageOut, type MatchFound } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 
-import { createChatStore } from './chat-store.ts';
+import { createChatStore, strangerName } from './chat-store.ts';
 
 const SESSION = '0199a3b2-7c4d-7e5f-8a9b-0c1d2e3f4a5b';
 const OTHER = '0199a3b2-7c4d-7e5f-8a9b-000000000000';
@@ -173,5 +173,68 @@ describe('chat state machine', () => {
     const matched = matchedStore();
     matched.getState().sessionExpired();
     expect(matched.getState()).toMatchObject({ status: 'ended', endReason: 'expired' });
+  });
+});
+
+describe('group calls (Part 12)', () => {
+  const SESSION_ID = '0199a3b2-7c4d-7e5f-8a9b-0c1d2e3f4a5b';
+  it('numbers strangers stably, frees numbers on leave and names authors', () => {
+    const store = createChatStore();
+    store.getState().startSearch();
+    store.getState().matchFound(match(SESSION_ID));
+    expect(strangerName(store.getState(), 'pPeer0000001')).toBe('Stranger'); // 1:1
+    store.getState().peerJoined({ sessionId: SESSION_ID, participantId: 'pJoin0000001' });
+    store.getState().peerJoined({ sessionId: SESSION_ID, participantId: 'pJoin0000002' });
+    expect(store.getState().peerLabels).toEqual({
+      pPeer0000001: 1,
+      pJoin0000001: 2,
+      pJoin0000002: 3,
+    });
+    expect(strangerName(store.getState(), 'pJoin0000001')).toBe('Stranger 2');
+    store.getState().peerLeft({
+      sessionId: SESSION_ID,
+      participantId: 'pPeer0000001',
+      reason: 'left',
+      sessionEnded: false,
+    });
+    expect(store.getState().status).toBe('matched'); // the others stay
+    store.getState().peerJoined({ sessionId: SESSION_ID, participantId: 'pJoin0000003' });
+    expect(store.getState().peerLabels.pJoin0000003).toBe(1); // the freed number
+    store.getState().receiveMessage({
+      sessionId: SESSION_ID,
+      from: 'pJoin0000002',
+      id: 'm1',
+      text: 'hello',
+      at: new Date().toISOString(),
+    });
+    expect(store.getState().entries.at(-1)).toMatchObject({
+      kind: 'stranger',
+      from: 'pJoin0000002',
+    });
+  });
+
+  it('tracks the add-a-person round and the search', () => {
+    const store = createChatStore();
+    store.getState().startSearch();
+    store.getState().matchFound(match(SESSION_ID));
+    const expiresAt = new Date(Date.now() + 15_000).toISOString();
+    store
+      .getState()
+      .addRequested(
+        { sessionId: SESSION_ID, requestId: 'rRound000001', by: 'pSelf0000001', expiresAt },
+        'pSelf0000001',
+      );
+    expect(store.getState().addRequest).toMatchObject({ answered: true }); // we asked
+    expect(store.getState().seekCancelled({ sessionId: SESSION_ID, reason: 'declined' })).toBe(
+      'declined',
+    );
+    expect(store.getState().addRequest).toBeNull();
+    expect(
+      store.getState().seekCancelled({ sessionId: SESSION_ID, reason: 'declined' }),
+    ).toBeNull();
+    store.getState().seekStarted({ sessionId: SESSION_ID, until: expiresAt });
+    expect(store.getState().seekingUntil).toBe(expiresAt);
+    store.getState().peerJoined({ sessionId: SESSION_ID, participantId: 'pJoin0000001' });
+    expect(store.getState().seekingUntil).toBeNull();
   });
 });

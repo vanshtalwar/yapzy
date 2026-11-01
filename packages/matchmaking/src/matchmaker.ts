@@ -4,13 +4,23 @@ import { matchmakingKeys, type QueueBucket, type QueueFamily, type Redis } from 
 import { type Result } from 'ioredis';
 import { z } from 'zod';
 
-import { CANCEL_TICKET, DROP_TICKETS_IF_UNCHANGED, ENQUEUE_OR_MATCH } from './lua.ts';
-import { type NewTicket, type Ticket, ticketSchema } from './ticket.ts';
+import {
+  CANCEL_SEEK,
+  CANCEL_TICKET,
+  DROP_TICKETS_IF_UNCHANGED,
+  ENQUEUE_OR_MATCH,
+  FINISH_SEEK,
+  SEEK_OR_MATCH,
+} from './lua.ts';
+import { type NewTicket, type Seek, seekSchema, type Ticket, ticketSchema } from './ticket.ts';
 
 declare module 'ioredis' {
   // Custom commands registered with defineCommand (ioredis' documented typing pattern).
   interface RedisCommander<Context> {
     mmEnqueueOrMatch(numKeys: number, ...args: (string | number)[]): Result<unknown, Context>;
+    mmSeekOrMatch(...args: (string | number)[]): Result<unknown, Context>;
+    mmCancelSeek(seeksKey: string, seekQueue: string, sessionId: string, seekId: string): Result<unknown, Context>;
+    mmFinishSeek(seeksKey: string, sessionId: string, seekId: string): Result<unknown, Context>;
     mmCancelTicket(ticketsKey: string, ticketId: string): Result<unknown, Context>;
     mmDropTickets(ticketsKey: string, ...args: string[]): Result<unknown, Context>;
   }
@@ -21,7 +31,16 @@ export type Phase = 'interest' | 'any';
 export type EnqueueResult =
   | { status: 'waiting' }
   | { status: 'not_waiting' }
-  | { status: 'matched'; peer: Ticket; commonInterests: string[] };
+  | { status: 'matched'; peer: Ticket; commonInterests: string[] }
+  /** A group ticket joined a seeking session (Part 12); the ticket is matched to it. */
+  | { status: 'joined'; seek: Seek };
+
+export type SeekResult = { status: 'seeking' } | { status: 'joined'; joiner: Ticket };
+
+export type CancelSeekResult =
+  { status: 'cancelled' | 'not_found' } | { status: 'filled'; joinerVisitorId: string };
+
+export type NewSeek = Pick<Seek, 'sessionId' | 'seekId' | 'visitorIds' | 'createdAt'>;
 
 export type CancelResult =
   { status: 'cancelled' } | { status: 'not_found' } | { status: 'matched'; sessionId: string };
@@ -43,7 +62,16 @@ export interface EnqueueOptions {
 
 const rawEnqueueResult = z.union([
   z.tuple([z.enum(['waiting', 'duplicate', 'not_waiting'])]),
+  z.tuple([z.literal('joined'), z.string()]),
   z.tuple([z.literal('matched'), z.string()]).rest(z.string()),
+]);
+const rawSeekResult = z.union([
+  z.tuple([z.literal('seeking')]),
+  z.tuple([z.literal('joined'), z.string()]),
+]);
+const rawCancelSeekResult = z.union([
+  z.tuple([z.enum(['cancelled', 'not_found'])]),
+  z.tuple([z.literal('filled'), z.string()]),
 ]);
 const rawCancelResult = z.union([
   z.tuple([z.enum(['cancelled', 'not_found'])]),
@@ -55,6 +83,9 @@ const registered = new WeakSet<Redis>();
 function ensureCommands(redis: Redis): void {
   if (registered.has(redis)) return;
   redis.defineCommand('mmEnqueueOrMatch', { lua: ENQUEUE_OR_MATCH });
+  redis.defineCommand('mmSeekOrMatch', { numberOfKeys: 5, lua: SEEK_OR_MATCH });
+  redis.defineCommand('mmCancelSeek', { numberOfKeys: 2, lua: CANCEL_SEEK });
+  redis.defineCommand('mmFinishSeek', { numberOfKeys: 1, lua: FINISH_SEEK });
   redis.defineCommand('mmCancelTicket', { numberOfKeys: 1, lua: CANCEL_TICKET });
   redis.defineCommand('mmDropTickets', { numberOfKeys: 1, lua: DROP_TICKETS_IF_UNCHANGED });
   registered.add(redis);
@@ -100,10 +131,12 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
       ticketSchema.parse({ ...ticket, status: 'waiting', phase, sessionId: undefined }),
     );
     const raw = await redis.mmEnqueueOrMatch(
-      3 + interestQueues.length,
+      5 + interestQueues.length,
       keys.tickets,
       keys.recent,
       keys.queueAny,
+      keys.queueSeek,
+      keys.seeks,
       ...interestQueues,
       ticketJson,
       ticket.ticketId,
@@ -117,6 +150,9 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
       priority ? '1' : '0',
     );
     const result = rawEnqueueResult.parse(raw);
+    if (result[0] === 'joined') {
+      return { status: 'joined', seek: seekSchema.parse(JSON.parse(result[1])) };
+    }
     if (result[0] === 'matched') {
       const [, peerJson, ...commonInterests] = result;
       return { status: 'matched', peer: parseTicket(peerJson), commonInterests };
@@ -181,6 +217,57 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
     chooseBucket,
     getTicket,
     cancelTicket,
+
+    /**
+     * A session starts seeking one more person in bucket `dims` (Part 12): a waiting group
+     * ticket in `q:any` joins at once, else the seek waits in `q:seek` for the next one.
+     */
+    async seekOrMatch(
+      dims: QueueBucket,
+      seek: NewSeek,
+      { now = Date.now() }: { now?: number } = {},
+    ): Promise<SeekResult> {
+      const keys = matchmakingKeys(dims);
+      const seekJson = JSON.stringify(seekSchema.parse({ ...seek, status: 'seeking' }));
+      const result = rawSeekResult.parse(
+        await redis.mmSeekOrMatch(
+          keys.tickets,
+          keys.recent,
+          keys.queueAny,
+          keys.queueSeek,
+          keys.seeks,
+          seekJson,
+          seek.sessionId,
+          now,
+          options.recentPairTtlMs,
+          maxScan,
+        ),
+      );
+      return result[0] === 'joined'
+        ? { status: 'joined', joiner: parseTicket(result[1]) }
+        : { status: 'seeking' };
+    },
+
+    /** Ends a seek round; a filled one is reported, not removed (its joiner is being added). */
+    async cancelSeek(dims: QueueBucket, sessionId: string, seekId: string): Promise<CancelSeekResult> {
+      const keys = matchmakingKeys(dims);
+      const result = rawCancelSeekResult.parse(
+        await redis.mmCancelSeek(keys.seeks, keys.queueSeek, sessionId, seekId),
+      );
+      return result[0] === 'filled'
+        ? { status: 'filled', joinerVisitorId: result[1] }
+        : { status: result[0] };
+    },
+
+    /** Deletes a filled seek after its joiner was added (or turned away). */
+    async finishSeek(dims: QueueBucket, sessionId: string, seekId: string): Promise<void> {
+      await redis.mmFinishSeek(matchmakingKeys(dims).seeks, sessionId, seekId);
+    },
+
+    async getSeek(dims: QueueBucket, sessionId: string): Promise<Seek | null> {
+      const raw = await redis.hget(matchmakingKeys(dims).seeks, sessionId);
+      return raw === null ? null : seekSchema.parse(JSON.parse(raw));
+    },
 
     /**
      * Atomically matches the ticket against waiting tickets of its bucket (interest queues for
@@ -296,6 +383,14 @@ export function createMatchmaker(redis: Redis, options: MatchmakerOptions) {
           dropped += z.number().parse(await redis.mmDropTickets(keys.tickets, ...doomed));
         }
       } while (cursor !== '0');
+
+      // Seeks (Part 12) left behind by a crashed node: older than the waiting limit.
+      for (const [sessionId, raw] of Object.entries(await redis.hgetall(keys.seeks))) {
+        const parsed = seekSchema.safeParse(JSON.parse(raw));
+        if (parsed.success && now - parsed.data.createdAt <= opts.maxWaitingAgeMs) continue;
+        await redis.multi().hdel(keys.seeks, sessionId).lrem(keys.queueSeek, 0, sessionId).exec();
+        dropped += 1;
+      }
 
       return dropped;
     },

@@ -127,7 +127,35 @@ from `.env`; one gateway health-checks every node each 5 s (`sfu:nodes` in Redis
   gateway marks it unhealthy after two failed checks, opens a room on the other node and the
   clients rejoin; video resumes after a few seconds (8.7 s measured, headless). Automated as
   `e2e/tests/sfu-failover.spec.ts` (skipped unless a second node is configured).
-- Group calls (Part 12) always run on Janus; 1:1 calls stay P2P unless forced or upgraded.
+- Group calls (below) always run on Janus; 1:1 calls stay P2P unless forced or upgraded.
+
+### Group video calls (3–4 people)
+
+Any video call can grow to four people, one at a time, and only with everyone's consent:
+
+1. **Opt in to be added:** on the landing page pick **Video chat** and turn on **Let video calls
+   of 3–4 people add me** (saved as `allowGroup` in `localStorage['rc.preferences']`). Only
+   visitors searching with this on are ever added to someone else's call.
+2. **Ask:** in a call, anyone presses **Add a person**. Everyone else sees "Stranger wants to add
+   someone" with **Accept** / **Decline** and a 15 s countdown; one decline, the timeout or
+   someone leaving ends the round, and whoever already agreed can still **Cancel**. One round at a
+   time; the button is disabled at four people.
+3. **Search:** once everyone agreed, a P2P call first switches to Janus (as above), then shows
+   "Looking for another person…" and takes the next opted-in visitor of the same language —
+   people already waiting first — for up to `SEEK_PARTICIPANT_TIMEOUT_MS` (30 s).
+4. **In the call:** a 2×2 grid on desktop (stacked on phones) with tiles labelled Stranger 1, 2, 3,
+   each with its own **Report** button and connection badge; whoever is talking gets a highlighted
+   tile. Someone leaving (or being banned) leaves alone; the others carry on.
+
+To try it, use four browser profiles that don't share storage (each visitor is one device id in
+`localStorage`), e.g. normal and private windows of two browsers. Start a 1:1 video chat in two,
+opt in and start searching in a third, then press **Add a person** and accept; repeat for the
+fourth. Who can be added: video mode, same language, not shadow-banned, and a trust score of at
+least `GROUP_MIN_TRUST` for everyone in the call and the newcomer (production default 60;
+`.env.example` sets 50, the starting score, so new visitors can try it). Otherwise **Add a
+person** answers "Adding people isn’t available in this chat". Reports from a group call name the
+reported participant; the admin report page lists everyone in the chat and which of them sent
+each message.
 
 ### Trust & safety
 
@@ -264,7 +292,9 @@ To compare queue bucketing, start the gateways with `MM_BUCKETS=1` and then `MM_
   from the builds on the usual ports (stop `pnpm dev` first), creates an e2e admin and runs
   `e2e/tests/*.spec.ts` in Chromium with fake camera/microphone: text chat, video (connected
   per `data-rtc-state` and remote frames), a gateway restart mid-call, a tab that never acks,
-  Next with three strangers, reporting, a banned visitor and a moderator banning a live user.
+  Next with three strangers, reporting, a banned visitor, a moderator banning a live user, calls
+  through Janus and a four-person group call (`group.spec.ts`: two strangers add a third and a
+  fourth with everyone's consent, all four see each other, one leaves and the rest continue).
   Needs `pnpm infra:up` and internet (Cloudflare Turnstile test key). Browser: run
   `pnpm --filter @app/e2e exec playwright install chromium` once, or use an installed Chrome
   with `E2E_BROWSER_CHANNEL=chrome pnpm test:e2e`. `E2E_REUSE_STACK=1` tests whatever is already
@@ -330,6 +360,10 @@ README ("Scaling").
   healthy node — check `docker compose … ps janus`, `docker logs randomchat-janus-1` and that the
   gateway's `JANUS_ADMIN_SECRET` matches the container's (both from `.env`; recreate the
   container after changing it: `pnpm infra:up`).
+- **"Add a person" says adding people isn't available:** someone in the call has a trust score
+  below `GROUP_MIN_TRUST` or is shadow-banned (the message doesn't say who). **The search stops
+  at once:** no healthy Janus node (see above). **"Looking for another person…" times out:**
+  nobody of the same language is searching with "Let video calls of 3–4 people add me" on.
 - **Janus on macOS Docker Desktop:** candidates advertise `JANUS_PUBLIC_IP` (127.0.0.1) and the
   UDP range is published 1:1, so browsers on the Mac reach `127.0.0.1:200xx`; Janus sees them
   through Docker's NAT as peer-reflexive candidates (full ICE, not ICE-Lite). For phones set

@@ -9,6 +9,7 @@ export const DEFAULT_PREFERENCES: QueuePreferences = {
   lang: 'en',
   interests: [],
   autoRequeue: true,
+  allowGroup: false,
 };
 
 /** Last used mode/language/interests/auto-requeue, validated like a `queue:join` payload. */

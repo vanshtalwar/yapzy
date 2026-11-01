@@ -125,9 +125,9 @@ describe('client NSFW check', () => {
     const self = { videoWidth: 640 } as HTMLVideoElement;
     const seen: string[] = [];
     const watcher = createNsfwWatcher({
-      remote: () => remote,
+      remotes: () => [{ participantId: 'pAlice000001', video: remote }],
       self: () => self,
-      onRemote: (verdict) => seen.push(`remote:${String(verdict.flagged)}`),
+      onRemote: (_participantId, verdict) => seen.push(`remote:${String(verdict.flagged)}`),
       onSelf: (verdict) => seen.push(`self:${String(verdict.flagged)}`),
       load: () =>
         Promise.resolve({
@@ -138,6 +138,22 @@ describe('client NSFW check', () => {
     await vi.advanceTimersByTimeAsync(10_100);
     expect(seen.filter((s) => s.startsWith('remote'))).toEqual(Array(5).fill('remote:true'));
     expect(seen.filter((s) => s.startsWith('self'))).toEqual(['self:false', 'self:false']);
+    watcher.stop();
+  });
+
+  it('takes the strangers of a group call in turns (one inference per 2 s)', async () => {
+    const videos = [0, 1, 2].map(() => ({ videoWidth: 640 }) as HTMLVideoElement);
+    const seen: string[] = [];
+    const watcher = createNsfwWatcher({
+      remotes: () =>
+        videos.map((video, index) => ({ participantId: `pPeer00000${String(index)}`, video })),
+      self: () => null,
+      onRemote: (participantId) => seen.push(participantId),
+      onSelf: () => undefined,
+      load: () => Promise.resolve({ classify: () => Promise.resolve([]) }),
+    });
+    await vi.advanceTimersByTimeAsync(6_100);
+    expect(seen).toEqual(['pPeer000000', 'pPeer000001', 'pPeer000002']);
     watcher.stop();
   });
 });

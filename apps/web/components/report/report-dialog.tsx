@@ -39,10 +39,16 @@ export function ReportDialog({
   open,
   onOpenChange,
   video,
+  participantId,
+  name = 'the stranger',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   video: boolean;
+  /** Group calls: the participant whose tile was reported (default: the only stranger). */
+  participantId?: string;
+  /** Shown in the title, e.g. "Stranger 2". */
+  name?: string;
 }) {
   const [reason, setReason] = useState<ReportReason | null>(null);
   const [details, setDetails] = useState('');
@@ -55,7 +61,11 @@ export function ReportDialog({
     setPending(true);
     setError(null);
     try {
-      await getChatController().report({ reason, details });
+      await getChatController().report({
+        reason,
+        details,
+        ...(participantId === undefined ? {} : { participantId }),
+      });
       setReason(null);
       setDetails('');
       onOpenChange(false);
@@ -74,7 +84,9 @@ export function ReportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Report this stranger</DialogTitle>
+          <DialogTitle>
+            {name === 'the stranger' ? 'Report this stranger' : `Report ${name}`}
+          </DialogTitle>
           <DialogDescription>
             They won’t know you reported them. This chat ends, and our moderators get the recent
             messages{video ? ' and a few frames of their video' : ''}.

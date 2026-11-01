@@ -8,18 +8,30 @@ export type MessageStatus = 'sending' | 'sent' | 'failed' | 'blocked';
 
 export interface MessageBubbleProps {
   from: 'self' | 'stranger';
+  /** Who wrote it, shown above the bubble in group chats (e.g. "Stranger 2"). */
+  author?: string;
   /** Plain text. Rendered as a text node — never parsed as HTML, never auto-linked. */
   text: string;
   status?: MessageStatus;
   onRetry?: () => void;
 }
 
-export function MessageBubble({ from, text, status = 'sent', onRetry }: MessageBubbleProps) {
+export function MessageBubble({
+  from,
+  author,
+  text,
+  status = 'sent',
+  onRetry,
+}: MessageBubbleProps) {
   const self = from === 'self';
   return (
     <div className={cn('flex w-full', self ? 'justify-end' : 'justify-start')}>
       <div className={cn('flex max-w-[85%] flex-col gap-1 sm:max-w-[75%]', self && 'items-end')}>
-        <p className="sr-only">{self ? 'You:' : 'Stranger:'}</p>
+        {author === undefined ? (
+          <p className="sr-only">{self ? 'You:' : 'Stranger:'}</p>
+        ) : (
+          <p className="px-1 text-xs font-medium text-muted-foreground">{author}</p>
+        )}
         <div
           className={cn(
             'rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap',

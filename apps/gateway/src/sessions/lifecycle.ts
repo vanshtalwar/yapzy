@@ -26,6 +26,7 @@ import { SocketError } from '../errors.ts';
 import { type GatewayMetrics } from '../metrics.ts';
 import { type GatewayModeration, NO_FRAMES } from '../moderation.ts';
 import { type GatewayServer, type GatewaySocket } from '../types.ts';
+import { createGroupCalls, type JoiningTicket } from './group.ts';
 import { type SfuOrchestrator } from './sfu.ts';
 import {
   type Deadline,
@@ -62,6 +63,10 @@ export interface LifecycleConfig {
   statsShards: number;
   /** Development only (DEV_FORCE_SFU): every video call starts on Janus. */
   forceSfu: boolean;
+  /** Group calls (Part 12): trust every participant/joiner needs, and the search timeout. */
+  groupMinTrust: number;
+  seekTimeoutMs: number;
+  addRequestTtlMs: number;
 }
 
 export interface LifecycleDeps {
@@ -81,7 +86,17 @@ export interface LifecycleDeps {
   logger: Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
   metrics: Pick<
     GatewayMetrics,
-    'matches' | 'timeToMatch' | 'bucketHops' | 'sessionsEnded' | 'sessionDuration' | 'resumes'
+    | 'matches'
+    | 'timeToMatch'
+    | 'bucketHops'
+    | 'sessionsEnded'
+    | 'sessionDuration'
+    | 'resumes'
+    | 'groupAddRequests'
+    | 'groupSeeks'
+    | 'groupTimeToJoin'
+    | 'groupJoins'
+    | 'groupSessionDuration'
   >;
   now: () => Date;
 }
@@ -101,7 +116,7 @@ export interface InSession {
 
 type MatchedTicket = Pick<
   Ticket,
-  'ticketId' | 'visitorId' | 'interests' | 'autoRequeue' | 'createdAt'
+  'ticketId' | 'visitorId' | 'interests' | 'autoRequeue' | 'createdAt' | 'group'
 >;
 
 export function createLifecycle(deps: LifecycleDeps) {
@@ -186,6 +201,9 @@ export function createLifecycle(deps: LifecycleDeps) {
         { mode: meta.mode },
         ((meta.endedAt ?? clock()) - meta.startedAt) / 1_000,
       );
+      if (context.participants.size >= 3) {
+        metrics.groupSessionDuration.observe(((meta.endedAt ?? clock()) - meta.startedAt) / 1_000);
+      }
       const iso = (ms: number) => new Date(ms).toISOString();
       const job = sessionLogJobSchema.parse({
         sessionId,
@@ -248,6 +266,7 @@ export function createLifecycle(deps: LifecycleDeps) {
           pool: family.pool,
           interests: ticket.interests,
           autoRequeue: ticket.autoRequeue,
+          allowGroup: ticket.group,
           // Risk-based frame sampling per participant (D-054); never blocks the match. SFU
           // calls are sampled at the `high` tier.
           frames: await deps.moderation
@@ -327,6 +346,11 @@ export function createLifecycle(deps: LifecycleDeps) {
     self: MatchedTicket,
     result: EnqueueResult,
   ): Promise<boolean> {
+    if (result.status === 'joined') {
+      // A group ticket joined a seeking session (Part 12).
+      await group.joinGroup({ ...family, bucket }, self, result.seek);
+      return true;
+    }
     if (result.status !== 'matched') return false;
     await createMatch({
       family,
@@ -358,6 +382,7 @@ export function createLifecycle(deps: LifecycleDeps) {
       interests: preferences.interests,
       autoRequeue: preferences.autoRequeue,
       createdAt: now,
+      group: await groupEligible(searcher),
     };
 
     await store.setTicketRef(visitorId, { ...family, bucket, ticketId });
@@ -372,6 +397,16 @@ export function createLifecycle(deps: LifecycleDeps) {
 
     emitTo(visitorId, 'queue:waiting', { since: new Date(now).toISOString() });
     scheduleWait(visitorId, nextWaitDelay(buckets, phase, 0));
+  }
+
+  /**
+   * May this search join group calls (Part 12)? Opted in, video, normal pool, enough trust and
+   * a media server to run group calls on.
+   */
+  async function groupEligible({ visitorId, pool, preferences }: Searcher): Promise<boolean> {
+    if (!preferences.allowGroup || preferences.mode !== 'video' || pool !== 'normal') return false;
+    if (!deps.sfu.enabled) return false;
+    return (await deps.moderation.trustOf(visitorId).catch(() => 0)) >= config.groupMinTrust;
   }
 
   /** Interest fallback and bucket hopping for a still-waiting ticket (D-052). */
@@ -440,6 +475,7 @@ export function createLifecycle(deps: LifecycleDeps) {
             lang: context.lang,
             interests: record.interests,
             autoRequeue: true,
+            allowGroup: record.allowGroup ?? false,
           },
         },
         { priority: true },
@@ -488,6 +524,10 @@ export function createLifecycle(deps: LifecycleDeps) {
       });
     }
     afterLeaveSfu(sessionId, participantId, outcome.ended);
+    // A running add-a-person round or search ends: a new person needs everyone's consent.
+    group.afterLeave(sessionId).catch((error: unknown) => {
+      logger.warn({ err: error, sessionId }, 'ending the group round after a leave failed');
+    });
     if (outcome.ended) await enqueueLog(sessionId, reason);
     logger.debug({ sessionId, visitorId, reason, ended: outcome.ended }, 'left');
     return outcome;
@@ -591,6 +631,12 @@ export function createLifecycle(deps: LifecycleDeps) {
       await deps.sfu.upgradeExpired(deadline.sessionId, deadline.epoch);
       return;
     }
+    if (deadline.kind === 'consent' || deadline.kind === 'seek') {
+      await (deadline.kind === 'consent'
+        ? group.consentExpired(deadline.sessionId, deadline.roundId)
+        : group.seekExpired(deadline.sessionId, deadline.roundId));
+      return;
+    }
     const context = await store.context(deadline.sessionId);
     const record = context?.participants.get(deadline.participantId);
     if (record === undefined) return;
@@ -625,6 +671,81 @@ export function createLifecycle(deps: LifecycleDeps) {
     }
     return { ref, context, self };
   }
+
+  /**
+   * A report or client NSFW signal in this session (or a group call forming): every present
+   * participant whose video is sampled less often than the `high` tier is raised to it
+   * immediately (D-054).
+   */
+  async function raiseRisk(sessionId: string): Promise<number> {
+    const context = await store.context(sessionId);
+    if (context?.state !== 'active' || context.mode !== 'video') return 0;
+    const high = await deps.moderation.highRisk();
+    let raised = 0;
+    for (const [participantId, record] of context.participants) {
+      if (record.status === 'left') continue;
+      const current = record.frameIntervalMs ?? null;
+      const sparser =
+        current === null ||
+        record.maxFrames != null ||
+        (high.frameIntervalMs !== null && current > high.frameIntervalMs);
+      if (!sparser || !(await store.setSchedule(sessionId, participantId, high))) continue;
+      raised += 1;
+      emitTo(record.visitorId, 'system:notice', {
+        code: 'FRAME_SCHEDULE',
+        message: 'Frame sampling changed',
+        sessionId,
+        moderation: { frameIntervalMs: high.frameIntervalMs, maxFrames: high.maxFrames },
+      });
+    }
+    return raised;
+  }
+
+  const group = createGroupCalls({
+    store,
+    matchmaker,
+    sfu: deps.sfu,
+    moderation: deps.moderation,
+    config: {
+      region: config.region,
+      minTrust: config.groupMinTrust,
+      seekTimeoutMs: config.seekTimeoutMs,
+      addRequestTtlMs: config.addRequestTtlMs,
+      matchAckTimeoutMs: config.matchAckTimeoutMs,
+      bucketCount,
+    },
+    emitTo,
+    // A joiner that couldn't be added goes back to the head of the queue — later, under its
+    // own lock (this may run inside it).
+    requeueJoiner: (ticket: JoiningTicket, lang) => {
+      void withVisitorLock(ticket.visitorId, async () => {
+        const ref = await store.getTicketRef(ticket.visitorId);
+        if (ref?.ticketId !== ticket.ticketId) return; // moved on meanwhile
+        await startSearching(
+          {
+            visitorId: ticket.visitorId,
+            pool: 'normal',
+            preferences: {
+              mode: 'video',
+              lang,
+              interests: ticket.interests,
+              autoRequeue: ticket.autoRequeue,
+              allowGroup: true,
+            },
+          },
+          { priority: true },
+        );
+      }).catch((error: unknown) => {
+        logger.warn({ err: error, visitorId: ticket.visitorId }, 'requeueing a joiner failed');
+      });
+      return Promise.resolve();
+    },
+    clearWait,
+    raiseRisk,
+    logger,
+    metrics,
+    clock,
+  });
 
   /** Cancel a waiting ticket and keep (but mark) any session: used for lost connections. */
   async function suspend(visitorId: string): Promise<void> {
@@ -764,6 +885,7 @@ export function createLifecycle(deps: LifecycleDeps) {
           lang: context.lang,
           interests: self.interests,
           autoRequeue: self.autoRequeue,
+          allowGroup: self.allowGroup ?? false,
         };
 
         const others = [...context.participants].filter(
@@ -821,33 +943,7 @@ export function createLifecycle(deps: LifecycleDeps) {
       }
     },
 
-    /**
-     * A report or client NSFW signal in this session: every present participant whose video
-     * is sampled less often than the `high` tier is raised to it immediately (D-054).
-     */
-    async raiseRisk(sessionId: string): Promise<number> {
-      const context = await store.context(sessionId);
-      if (context?.state !== 'active' || context.mode !== 'video') return 0;
-      const high = await deps.moderation.highRisk();
-      let raised = 0;
-      for (const [participantId, record] of context.participants) {
-        if (record.status === 'left') continue;
-        const current = record.frameIntervalMs ?? null;
-        const sparser =
-          current === null ||
-          record.maxFrames != null ||
-          (high.frameIntervalMs !== null && current > high.frameIntervalMs);
-        if (!sparser || !(await store.setSchedule(sessionId, participantId, high))) continue;
-        raised += 1;
-        emitTo(record.visitorId, 'system:notice', {
-          code: 'FRAME_SCHEDULE',
-          message: 'Frame sampling changed',
-          sessionId,
-          moderation: { frameIntervalMs: high.frameIntervalMs, maxFrames: high.maxFrames },
-        });
-      }
-      return raised;
-    },
+    raiseRisk,
 
     /**
      * `ban_applied` for a connected visitor. HARD: end the chat, notify, disconnect. SHADOW:
@@ -913,6 +1009,30 @@ export function createLifecycle(deps: LifecycleDeps) {
         throw new SocketError(ErrorCode.INVALID_STATE, 'No media server room for this call');
       }
       return { token: deps.sfu.newToken() };
+    },
+
+    // --- Group calls (Part 12) -------------------------------------------------------------
+
+    /** `call:requestAdd`: ask everyone present to add a random person. */
+    async requestAdd(socket: GatewaySocket, sessionId: string): Promise<void> {
+      const { ref, context } = await inSession(socket, sessionId);
+      await group.requestAdd(context, sessionId, ref.participantId);
+    },
+
+    /** `call:respondAdd`: accept, or decline (= cancel) the pending round. */
+    async respondAdd(
+      socket: GatewaySocket,
+      sessionId: string,
+      requestId: string,
+      accept: boolean,
+    ): Promise<void> {
+      const { ref } = await inSession(socket, sessionId);
+      await group.respondAdd(sessionId, ref.participantId, requestId, accept);
+    },
+
+    /** The orchestrator finished (or rolled back) a switch to Janus. */
+    onUpgradeSettled(sessionId: string, upgraded: boolean): Promise<void> {
+      return group.upgradeSettled(sessionId, upgraded);
     },
 
     /** `dev:upgradeToSfu` (development only): switch a running P2P call to Janus. */

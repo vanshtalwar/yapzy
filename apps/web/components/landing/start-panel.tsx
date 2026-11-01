@@ -35,6 +35,7 @@ export function StartPanel() {
   const [blockedUntil, setBlockedUntil] = useState<string | null | undefined>(undefined);
   const languageId = useId();
   const autoRequeueId = useId();
+  const allowGroupId = useId();
   const update = (change: Partial<typeof preferences>) => {
     getChatStore().getState().setPreferences(change);
   };
@@ -127,6 +128,21 @@ export function StartPanel() {
             }}
           />
         </div>
+
+        {preferences.mode === 'video' && (
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor={allowGroupId} className="font-normal text-muted-foreground">
+              Let video calls of 3–4 people add me
+            </Label>
+            <Switch
+              id={allowGroupId}
+              checked={preferences.allowGroup}
+              onCheckedChange={(allowGroup) => {
+                update({ allowGroup });
+              }}
+            />
+          </div>
+        )}
 
         <Button
           size="lg"

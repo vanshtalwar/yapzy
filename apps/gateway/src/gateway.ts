@@ -21,7 +21,7 @@ import {
   startSfuHealthLoop,
   sweepOrphanRooms,
 } from '@app/sfu';
-import { NOTICE_CODES, type ServerToClientEvents } from '@app/shared';
+import { ADD_REQUEST_TTL_MS, NOTICE_CODES, type ServerToClientEvents } from '@app/shared';
 import {
   BULLMQ_PREFIX,
   type ModerationEventJob,
@@ -79,6 +79,8 @@ export interface GatewayOptions {
   /** Tests: a fake Janus Admin API (`@app/sfu/testing`) instead of real WebSockets. */
   sfuSocketFactory?: (url: string, protocol: string) => AdminSocket;
   sfuHealthIntervalMs?: number;
+  /** Defaults to ADD_REQUEST_TTL_MS (15 s); tests shorten it. */
+  addRequestTtlMs?: number;
 }
 
 export interface GatewayDeps {
@@ -312,6 +314,8 @@ export async function createGateway(deps: GatewayDeps) {
     ...(options.sfuSocketFactory === undefined ? {} : { createSocket: options.sfuSocketFactory }),
   });
   const roomBook = createRoomBook(redis);
+  /** Set once the lifecycle exists (group calls seek after a switch to Janus, Part 12). */
+  const sfuHooks: { upgradeSettled?: (sessionId: string, upgraded: boolean) => void } = {};
   const sfu = createSfuOrchestrator({
     store,
     registry: sfuRegistry,
@@ -326,6 +330,9 @@ export async function createGateway(deps: GatewayDeps) {
     logger,
     metrics,
     clock: () => now().getTime(),
+    onUpgradeSettled: (sessionId, upgraded) => {
+      sfuHooks.upgradeSettled?.(sessionId, upgraded);
+    },
   });
   if (config.DEV_FORCE_SFU && config.NODE_ENV !== 'development') {
     logger.warn('DEV_FORCE_SFU ignored outside NODE_ENV=development');
@@ -356,6 +363,9 @@ export async function createGateway(deps: GatewayDeps) {
       earlyFailureWindowMs: config.EARLY_FAILURE_WINDOW_MS,
       statsShards: config.STATS_COUNTER_SHARDS,
       forceSfu: config.DEV_FORCE_SFU && config.NODE_ENV === 'development',
+      groupMinTrust: config.GROUP_MIN_TRUST,
+      seekTimeoutMs: config.SEEK_PARTICIPANT_TIMEOUT_MS,
+      addRequestTtlMs: options.addRequestTtlMs ?? ADD_REQUEST_TTL_MS,
     },
     // jobId = sessionId: a duplicate enqueue for the same session is ignored by BullMQ.
     enqueueSessionLog: async (job) => {
@@ -373,6 +383,11 @@ export async function createGateway(deps: GatewayDeps) {
     metrics,
     now,
   });
+  sfuHooks.upgradeSettled = (sessionId, upgraded) => {
+    lifecycle.onUpgradeSettled(sessionId, upgraded).catch((error: unknown) => {
+      logger.warn({ err: error, sessionId }, 'group search after the switch to Janus failed');
+    });
+  };
   metrics.sources.sockets = () => io.of('/').sockets.size;
   metrics.sources.waiting = () => lifecycle.waitingCount();
   metrics.sources.subscriberPending = () => subscriber.pendingCount();

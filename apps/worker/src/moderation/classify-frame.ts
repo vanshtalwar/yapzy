@@ -20,12 +20,21 @@ const AUTO_REPORT_BOOST = 20;
 /** Known-CSAM matches go to the very top of the queue. */
 const HASH_MATCH_PRIORITY = 1_000;
 
-async function transcriptOf(deps: ModerationDeps, sessionId: string) {
+/** The chat's transcript, each line by role and sender (like user reports, Part 12). */
+async function transcriptOf(deps: ModerationDeps, sessionId: string, reportedId: string) {
   const raw = await deps.redis.lrange(sessionKeys(sessionId).log, 0, -1);
   return raw.flatMap((json) => {
     try {
       const entry = JSON.parse(json) as { id?: string; at?: string; from?: string; text?: string };
-      return [{ id: entry.id, at: entry.at, from: entry.from, text: entry.text }];
+      return [
+        {
+          id: entry.id,
+          at: entry.at,
+          from: entry.from === reportedId ? 'reported' : 'other',
+          participantId: entry.from,
+          text: entry.text,
+        },
+      ];
     } catch {
       return [];
     }
@@ -97,7 +106,7 @@ export async function classifyFrame(
       priority: hash.matched
         ? HASH_MATCH_PRIORITY
         : reportPriority(reason, recent) + AUTO_REPORT_BOOST,
-      transcript: await transcriptOf(deps, job.sessionId),
+      transcript: await transcriptOf(deps, job.sessionId, job.participantId),
     },
     select: { id: true },
   });

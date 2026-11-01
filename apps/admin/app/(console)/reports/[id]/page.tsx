@@ -24,8 +24,9 @@ import { type BanChoice, BanFields } from '../../../../components/ban-fields.tsx
 import { EvidenceImage } from '../../../../components/evidence-image.tsx';
 import { VisitorSummary } from '../../../../components/visitor-summary.tsx';
 import { api, ApiError } from '../../../../lib/api.ts';
-import { formatTime } from '../../../../lib/labels.ts';
+import { formatTime, shortId } from '../../../../lib/labels.ts';
 import { useSession } from '../../../../lib/session.tsx';
+import { authorOf } from '../../../../lib/transcript.ts';
 import { useApi } from '../../../../lib/use-api.ts';
 
 type Pending = 'ban' | 'dismiss' | null;
@@ -119,20 +120,21 @@ export default function ReportDetailPage() {
               ) : (
                 <ol className="grid gap-2" aria-label="Transcript">
                   {report.transcript.map((line, index) => {
-                    const reported =
-                      line.from === 'reported' || line.from === report.reportedParticipantId;
+                    const author = authorOf(line, report);
                     return (
                       <li
                         key={line.id ?? index}
-                        className={reported ? 'justify-self-start' : 'justify-self-end'}
+                        className={
+                          author.role === 'reporter' ? 'justify-self-end' : 'justify-self-start'
+                        }
                       >
                         <p
-                          className={`max-w-md rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${reported ? 'bg-destructive/10' : 'bg-muted'}`}
+                          className={`max-w-md rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${author.role === 'reported' ? 'bg-destructive/10' : 'bg-muted'}`}
                         >
                           {line.text}
                         </p>
                         <span className="text-[10px] text-muted-foreground">
-                          {reported ? 'Reported' : line.from === 'reporter' ? 'Reporter' : 'Other'}
+                          {author.label}
                           {line.at !== undefined && ` · ${formatTime(line.at)}`}
                         </span>
                       </li>
@@ -223,6 +225,44 @@ export default function ReportDetailPage() {
               </div>
             </CardContent>
           </Card>
+          {report.participants.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">People in this chat</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="grid gap-2 text-sm" aria-label="Participants">
+                  {report.participants.map((participant) => (
+                    <li key={participant.participantId} className="grid gap-0.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={
+                            participant.role === 'reported' ? 'font-medium text-destructive' : ''
+                          }
+                        >
+                          {participant.label}
+                        </span>
+                        <Link
+                          href={`/visitors/${participant.visitorId}`}
+                          className="font-mono text-xs text-primary hover:underline"
+                        >
+                          {shortId(participant.visitorId)}
+                        </Link>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {participant.joinedAt === null
+                          ? 'joined —'
+                          : `joined ${formatTime(participant.joinedAt)}`}
+                        {participant.leftAt !== null && ` · left ${formatTime(participant.leftAt)}`}
+                        {participant.leaveReason !== null &&
+                          ` (${participant.leaveReason.toLowerCase().replaceAll('_', ' ')})`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
           <VisitorSummary title="Reported visitor" profile={report.reported} />
           {report.reporter !== null && (
             <VisitorSummary title="Reporter" profile={report.reporter} />
@@ -245,7 +285,7 @@ export default function ReportDetailPage() {
         description={
           confirm === 'dismiss'
             ? 'No action is taken against the reported visitor.'
-            : `${ban.type === 'HARD' ? 'They are disconnected immediately and blocked' : 'Their current chat ends and they are only matched with other shadow-banned users'} ${ban.durationHours === null ? 'permanently' : `for ${String(ban.durationHours / 24)} day(s)`}.`
+            : `${ban.type === 'HARD' ? 'They are disconnected immediately and blocked' : 'They leave their current chat (in a group call the others stay) and are only matched with other shadow-banned users'} ${ban.durationHours === null ? 'permanently' : `for ${String(ban.durationHours / 24)} day(s)`}.`
         }
         confirmLabel={confirm === 'dismiss' ? 'Dismiss' : 'Confirm ban'}
         destructive={confirm === 'ban'}

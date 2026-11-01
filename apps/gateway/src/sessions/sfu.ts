@@ -176,6 +176,15 @@ export function createSfuOrchestrator(deps: SfuOrchestratorDeps) {
     joinInfo,
     newToken,
 
+    /** A joiner's token goes on the room's allowed list (Part 12). */
+    async allowToken(room: SfuPlacement, token: string): Promise<void> {
+      await registry.admin(room.nodeId).allowTokens(room.roomId, secretOf(room), 'add', [token]);
+    },
+
+    async revokeToken(room: SfuPlacement, token: string): Promise<void> {
+      await registry.admin(room.nodeId).allowTokens(room.roomId, secretOf(room), 'remove', [token]);
+    },
+
     /**
      * Starts the mesh → sfu switch (make-before-break): room with a token per participant,
      * `call:topology` to everyone, and a deadline: if not everyone confirms with

@@ -258,9 +258,9 @@ describe('POST /v1/reports', () => {
       priority: reportPriority('MINOR_SAFETY', 0),
     });
     expect(row.transcript).toEqual([
-      expect.objectContaining({ from: 'reporter', text: 'hi' }),
-      expect.objectContaining({ from: 'reported', text: 'send pics' }),
-      expect.objectContaining({ from: 'reporter', text: 'no' }),
+      expect.objectContaining({ from: 'reporter', participantId: PA, text: 'hi' }),
+      expect.objectContaining({ from: 'reported', participantId: PB, text: 'send pics' }),
+      expect.objectContaining({ from: 'reporter', participantId: PA, text: 'no' }),
     ]);
     expect(row.evidence).toHaveLength(2);
     for (const evidence of row.evidence) {
@@ -299,6 +299,44 @@ describe('POST /v1/reports', () => {
     });
     expect(secondRow.priority).toBe(reportPriority('HARASSMENT', 1));
     expect(secondRow.priority).toBeGreaterThan(reportPriority('HARASSMENT', 0));
+  });
+
+  it('group calls: targets one of the others; transcript lines name their sender', async () => {
+    const [a, b, c] = [await visitor(), await visitor(), await visitor()];
+    const sessionId = await session(a, b);
+    const PC = 'pJoiner00001';
+    const keys = sessionKeys(sessionId);
+    await redis.hset(
+      keys.participants,
+      PC,
+      JSON.stringify({ visitorId: c.id, status: 'active', joinedAt: 1, pool: 'normal' }),
+    );
+    await redis.rpush(
+      keys.log,
+      JSON.stringify({
+        sessionId,
+        from: PC,
+        id: randomUUID(),
+        text: 'slurs',
+        at: clock.now().toISOString(),
+      }),
+    );
+
+    const response = await report(a, { sessionId, reportedParticipantId: PC, reason: 'HATE' });
+    expect(response.statusCode).toBe(201);
+    const row = await prisma.report.findUniqueOrThrow({
+      where: { id: response.json<{ reportId: string }>().reportId },
+    });
+    expect(row).toMatchObject({ reportedId: c.id, reportedParticipantId: PC });
+    expect(row.transcript).toEqual([
+      expect.objectContaining({ from: 'reporter', participantId: PA }),
+      expect.objectContaining({ from: 'other', participantId: PB, text: 'send pics' }),
+      expect.objectContaining({ from: 'reporter', participantId: PA }),
+      expect.objectContaining({ from: 'reported', participantId: PC, text: 'slurs' }),
+    ]);
+    // B, who was reported by nobody, can report C too — a separate report.
+    const fromB = await report(b, { sessionId, reportedParticipantId: PC, reason: 'HATE' });
+    expect(fromB.statusCode).toBe(201);
   });
 });
 

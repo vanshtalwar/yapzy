@@ -83,6 +83,32 @@ declare module 'ioredis' {
     ): Result<unknown, Context>;
     gwSfuRollback(meta: string, epoch: number): Result<unknown, Context>;
     gwSfuMove(meta: string, nodeId: string, roomId: number): Result<unknown, Context>;
+    gwGroupRequest(
+      meta: string,
+      participants: string,
+      participantId: string,
+      requestJson: string,
+      maxParticipants: number,
+    ): Result<unknown, Context>;
+    gwGroupRespond(
+      meta: string,
+      participants: string,
+      participantId: string,
+      requestId: string,
+      accept: string,
+      maxParticipants: number,
+    ): Result<unknown, Context>;
+    gwGroupExpire(meta: string, requestId: string): Result<unknown, Context>;
+    gwGroupSeek(meta: string, seekId: string, bucket: number, nowMs: number): Result<unknown, Context>;
+    gwGroupEnd(meta: string, seekId: string): Result<unknown, Context>;
+    gwGroupAdd(
+      meta: string,
+      participants: string,
+      participantId: string,
+      recordJson: string,
+      seekId: string,
+      maxParticipants: number,
+    ): Result<unknown, Context>;
     gwDelIfField(key: string, field: string, value: string): Result<unknown, Context>;
     gwSetIfField(
       key: string,
@@ -337,6 +363,130 @@ redis.call('HSET', KEYS[1], 'topologyEpoch', epoch)
 return {'moving', epoch}
 `;
 
+// --- Group calls (Part 12): consent rounds and seeking ------------------------------------
+// meta: addRequest (JSON { requestId, by, accepted[], expiresAt }), seekState pending|seeking
+// (pending = everyone agreed, waiting for the switch to Janus), seekId, seekBucket,
+// seekStartedAt, maxParticipants. Only one round at a time; a new person = a new round.
+
+/**
+ * KEYS: meta, participants   ARGV: participantId, requestJson, maxParticipants
+ * Opens an add-a-person round: video, active session, no round/seek running, room for one
+ * more, everyone present has acked. Returns 'ok' | 'not_active' | 'not_video' | 'busy' |
+ * 'full' | 'not_ready'
+ */
+const GROUP_REQUEST = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'mode', 'addRequest', 'seekState')
+if m[1] ~= 'active' then return 'not_active' end
+if m[2] ~= 'video' then return 'not_video' end
+if m[3] or m[4] then return 'busy' end
+local present = 0
+local flat = redis.call('HGETALL', KEYS[2])
+for i = 1, #flat, 2 do
+  local p = cjson.decode(flat[i + 1])
+  if p.status ~= 'left' then
+    present = present + 1
+    if p.status == 'pending' then return 'not_ready' end
+    if flat[i] == ARGV[1] and p.status ~= 'active' then return 'not_ready' end
+  end
+end
+if present >= tonumber(ARGV[3]) then return 'full' end
+redis.call('HSET', KEYS[1], 'addRequest', ARGV[2])
+return 'ok'
+`;
+
+/**
+ * KEYS: meta, participants   ARGV: participantId, requestId, accept ('1'|'0'), maxParticipants
+ * One answer. A decline (also the requester's) ends the round. When everyone present has
+ * accepted: the round ends with seekState=pending and maxParticipants raised.
+ * Returns 'stale' | 'declined' | 'pending' | 'agreed'
+ */
+const GROUP_RESPOND = `
+local raw = redis.call('HGET', KEYS[1], 'addRequest')
+if not raw then return 'stale' end
+local request = cjson.decode(raw)
+if request.requestId ~= ARGV[2] then return 'stale' end
+local me = redis.call('HGET', KEYS[2], ARGV[1])
+if not me or cjson.decode(me).status == 'left' then return 'stale' end
+if ARGV[3] ~= '1' then
+  redis.call('HDEL', KEYS[1], 'addRequest')
+  return 'declined'
+end
+local accepted = {}
+for _, pid in ipairs(request.accepted) do accepted[pid] = true end
+if not accepted[ARGV[1]] then
+  accepted[ARGV[1]] = true
+  request.accepted[#request.accepted + 1] = ARGV[1]
+end
+local flat = redis.call('HGETALL', KEYS[2])
+for i = 1, #flat, 2 do
+  if cjson.decode(flat[i + 1]).status ~= 'left' and not accepted[flat[i]] then
+    redis.call('HSET', KEYS[1], 'addRequest', cjson.encode(request))
+    return 'pending'
+  end
+end
+redis.call('HDEL', KEYS[1], 'addRequest')
+redis.call('HSET', KEYS[1], 'seekState', 'pending', 'maxParticipants', ARGV[4])
+return 'agreed'
+`;
+
+/** KEYS: meta   ARGV: requestId — the round's deadline: still open → closed. 'expired'|'stale' */
+const GROUP_EXPIRE = `
+local raw = redis.call('HGET', KEYS[1], 'addRequest')
+if not raw or cjson.decode(raw).requestId ~= ARGV[1] then return 'stale' end
+redis.call('HDEL', KEYS[1], 'addRequest')
+return 'expired'
+`;
+
+/** KEYS: meta   ARGV: seekId, bucket, nowMs — pending → seeking (in that bucket). 'ok'|'stale' */
+const GROUP_SEEK = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'seekState')
+if m[1] ~= 'active' or m[2] ~= 'pending' then return 'stale' end
+redis.call('HSET', KEYS[1], 'seekState', 'seeking', 'seekId', ARGV[1], 'seekBucket', ARGV[2],
+  'seekStartedAt', ARGV[3])
+return 'ok'
+`;
+
+/**
+ * KEYS: meta   ARGV: seekId ('' = whatever runs)
+ * Ends the running round or seek (decline, expiry, timeout, someone left, no Janus).
+ * Returns {'ended', hadRequest ('1'|'0'), seekState, seekId, seekBucket} | {'stale'}
+ */
+const GROUP_END = `
+local m = redis.call('HMGET', KEYS[1], 'addRequest', 'seekState', 'seekId', 'seekBucket')
+if not m[1] and not m[2] then return {'stale'} end
+if ARGV[1] ~= '' and m[3] ~= ARGV[1] then return {'stale'} end
+redis.call('HDEL', KEYS[1], 'addRequest', 'seekState', 'seekId', 'seekBucket', 'seekStartedAt')
+return {'ended', m[1] and '1' or '0', m[2] or '', m[3] or '', m[4] or ''}
+`;
+
+/**
+ * KEYS: meta, participants   ARGV: participantId, recordJson, seekId, maxParticipants
+ * The joiner of seek `seekId` becomes a participant — only if the session is still active,
+ * still seeking in that round and has a free slot. Ends the seek.
+ * Returns {'added', seekStartedAt, pid, visitorId, ...} (the others present) |
+ *   {'ended'} | {'not_seeking'} | {'full'}
+ */
+const GROUP_ADD = `
+local m = redis.call('HMGET', KEYS[1], 'state', 'seekState', 'seekId', 'seekStartedAt')
+if m[1] ~= 'active' then return {'ended'} end
+if m[2] ~= 'seeking' or m[3] ~= ARGV[3] then return {'not_seeking'} end
+local others = {}
+local flat = redis.call('HGETALL', KEYS[2])
+for i = 1, #flat, 2 do
+  local p = cjson.decode(flat[i + 1])
+  if p.status ~= 'left' then
+    others[#others + 1] = flat[i]
+    others[#others + 1] = p.visitorId
+  end
+end
+if #others / 2 >= tonumber(ARGV[4]) then return {'full'} end
+redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
+redis.call('HDEL', KEYS[1], 'seekState', 'seekId', 'seekBucket', 'seekStartedAt')
+local result = {'added', m[4] or '0'}
+for _, value in ipairs(others) do result[#result + 1] = value end
+return result
+`;
+
 /** KEYS: key   ARGV: field, value — deletes a JSON ref only if ref[field] == value. */
 const DEL_IF_FIELD = `
 local raw = redis.call('GET', KEYS[1])
@@ -412,6 +562,8 @@ const participantRecordSchema = z.object({
   // epoch they confirmed with `call:topologyReady`.
   sfuToken: z.string().optional(),
   sfuReadyEpoch: z.number().int().optional(),
+  /** Opted in to group calls (Part 12): kept for requeues after an early failure. */
+  allowGroup: z.boolean().optional(),
 });
 export type ParticipantRecord = z.output<typeof participantRecordSchema>;
 
@@ -424,6 +576,7 @@ export interface NewParticipant {
   frames: FrameSchedule;
   /** Token in the room's allowed list when the session starts on Janus. */
   sfuToken?: string;
+  allowGroup?: boolean;
 }
 
 export interface PresentParticipant {
@@ -442,6 +595,23 @@ export type LeaveOutcome =
 
 export type TopologyState = 'stable' | 'upgrading';
 
+/** An open "add a person" round (Part 12). */
+export const addRequestSchema = z.object({
+  requestId: z.string().min(1),
+  by: participantIdSchema,
+  accepted: stringList,
+  expiresAt: z.number().int(),
+});
+export type AddRequest = z.output<typeof addRequestSchema>;
+
+/** Everyone agreed and the call looks (pending: about to look) for one more person. */
+export interface SeekInfo {
+  state: 'pending' | 'seeking';
+  seekId: string | null;
+  bucket: number | null;
+  startedAt: number | null;
+}
+
 /** The call's current Janus room (absent while the call is P2P only). */
 export interface SfuPlacement {
   nodeId: string;
@@ -459,6 +629,9 @@ export interface SessionContext {
   topologyEpoch: number;
   topologyState: TopologyState;
   sfu: SfuPlacement | null;
+  maxParticipants: number;
+  addRequest: AddRequest | null;
+  seek: SeekInfo | null;
 }
 
 export interface SessionMeta {
@@ -485,7 +658,16 @@ export interface UpgradeDeadline {
   epoch: number;
 }
 
-export type Deadline = ParticipantDeadline | UpgradeDeadline;
+/** An add-a-person round must be answered (Part 12) / a seek is given up (timeout). */
+interface GroupDeadlineOf<K extends 'consent' | 'seek'> {
+  kind: K;
+  sessionId: string;
+  /** requestId (consent) or seekId (seek). */
+  roundId: string;
+}
+export type GroupDeadline = GroupDeadlineOf<'consent'> | GroupDeadlineOf<'seek'>;
+
+export type Deadline = ParticipantDeadline | UpgradeDeadline | GroupDeadline;
 export type DeadlineKind = Deadline['kind'];
 
 /** Random, unguessable per-session id shown to other participants instead of visitor ids. */
@@ -509,6 +691,7 @@ const deadlineMemberSchema = z
     z.union([
       z.tuple([z.enum(['ack', 'grace']), z.uuid(), participantIdSchema]),
       z.tuple([z.literal('upgrade'), z.uuid(), z.string().regex(/^\d{1,9}$/)]),
+      z.tuple([z.enum(['consent', 'seek']), z.uuid(), z.string().regex(/^[A-Za-z0-9_-]{8,32}$/)]),
     ]),
   );
 const okListSchema = z.tuple([z.string()]).rest(z.union([z.string(), z.number()]));
@@ -524,13 +707,28 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
   redis.defineCommand('gwSfuReady', { numberOfKeys: 2, lua: SFU_READY });
   redis.defineCommand('gwSfuRollback', { numberOfKeys: 1, lua: SFU_ROLLBACK });
   redis.defineCommand('gwSfuMove', { numberOfKeys: 1, lua: SFU_MOVE });
+  redis.defineCommand('gwGroupRequest', { numberOfKeys: 2, lua: GROUP_REQUEST });
+  redis.defineCommand('gwGroupRespond', { numberOfKeys: 2, lua: GROUP_RESPOND });
+  redis.defineCommand('gwGroupExpire', { numberOfKeys: 1, lua: GROUP_EXPIRE });
+  redis.defineCommand('gwGroupSeek', { numberOfKeys: 1, lua: GROUP_SEEK });
+  redis.defineCommand('gwGroupEnd', { numberOfKeys: 1, lua: GROUP_END });
+  redis.defineCommand('gwGroupAdd', { numberOfKeys: 2, lua: GROUP_ADD });
   redis.defineCommand('gwDelIfField', { numberOfKeys: 1, lua: DEL_IF_FIELD });
   redis.defineCommand('gwSetIfField', { numberOfKeys: 1, lua: SET_IF_FIELD });
 
   const deadlineKeyOf = (sessionId: string) =>
     sessionDeadlinesKey(deadlineShardOf(sessionId, options.deadlineShards));
-  const memberOf = (d: Deadline) =>
-    `${d.kind}|${d.sessionId}|${d.kind === 'upgrade' ? String(d.epoch) : d.participantId}`;
+  function memberOf(d: Deadline): string {
+    switch (d.kind) {
+      case 'upgrade':
+        return `upgrade|${d.sessionId}|${String(d.epoch)}`;
+      case 'consent':
+      case 'seek':
+        return `${d.kind}|${d.sessionId}|${d.roundId}`;
+      default:
+        return `${d.kind}|${d.sessionId}|${d.participantId}`;
+    }
+  }
 
   async function getRef<T>(key: string, schema: z.ZodType<T>): Promise<T | null> {
     const raw = await redis.get(key);
@@ -630,6 +828,7 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           maxFrames: p.frames.maxFrames,
           tier: p.frames.tier,
           ...(p.sfuToken === undefined ? {} : { sfuToken: p.sfuToken }),
+          ...(p.allowGroup === true ? { allowGroup: true } : {}),
         };
         multi.hset(keys.participants, p.participantId, JSON.stringify(record));
       }
@@ -731,6 +930,12 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           'topologyState',
           'sfuNodeId',
           'sfuRoomId',
+          'maxParticipants',
+          'addRequest',
+          'seekState',
+          'seekId',
+          'seekBucket',
+          'seekStartedAt',
         )
         .hgetall(keys.participants)
         .exec();
@@ -747,10 +952,17 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           z.enum(['stable', 'upgrading']).nullable(),
           z.string().nullable(),
           z.string().nullable(),
+          z.string().nullable(),
+          z.string().nullable(),
+          z.enum(['pending', 'seeking']).nullable(),
+          z.string().nullable(),
+          z.string().nullable(),
+          z.string().nullable(),
         ])
         .parse(metaResult?.[1]);
       const [state, mode, lang, startedAt, initiator, topology, epoch, topologyState] = meta;
-      const [, , , , , , , , sfuNodeId, sfuRoomId] = meta;
+      const [, , , , , , , , sfuNodeId, sfuRoomId, maxParticipants, addRequest, seekState] = meta;
+      const [, , , , , , , , , , , , , seekId, seekBucket, seekStartedAt] = meta;
       if (state === null || mode === null || lang === null) return null;
       const participants = new Map<string, ParticipantRecord>();
       const flat = z.record(z.string(), z.string()).parse(participantsResult?.[1]);
@@ -771,7 +983,127 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
           sfuNodeId === null || sfuRoomId === null
             ? null
             : { nodeId: sfuNodeId, roomId: Number(sfuRoomId) },
+        maxParticipants: Number(maxParticipants ?? '2'),
+        addRequest:
+          addRequest === null ? null : addRequestSchema.parse(JSON.parse(addRequest)),
+        seek:
+          seekState === null
+            ? null
+            : {
+                state: seekState,
+                seekId,
+                bucket: seekBucket === null ? null : Number(seekBucket),
+                startedAt: seekStartedAt === null ? null : Number(seekStartedAt),
+              },
       };
+    },
+
+    // --- Group calls (Part 12) ------------------------------------------------------------
+
+    async requestAdd(
+      sessionId: string,
+      participantId: string,
+      request: AddRequest,
+      maxParticipants: number,
+    ) {
+      const keys = sessionKeys(sessionId);
+      return z
+        .enum(['ok', 'not_active', 'not_video', 'busy', 'full', 'not_ready'])
+        .parse(
+          await redis.gwGroupRequest(
+            keys.meta,
+            keys.participants,
+            participantId,
+            JSON.stringify(request),
+            maxParticipants,
+          ),
+        );
+    },
+
+    async respondAdd(
+      sessionId: string,
+      participantId: string,
+      requestId: string,
+      accept: boolean,
+      maxParticipants: number,
+    ) {
+      const keys = sessionKeys(sessionId);
+      return z
+        .enum(['stale', 'declined', 'pending', 'agreed'])
+        .parse(
+          await redis.gwGroupRespond(
+            keys.meta,
+            keys.participants,
+            participantId,
+            requestId,
+            accept ? '1' : '0',
+            maxParticipants,
+          ),
+        );
+    },
+
+    async expireAdd(sessionId: string, requestId: string): Promise<boolean> {
+      return (await redis.gwGroupExpire(sessionKeys(sessionId).meta, requestId)) === 'expired';
+    },
+
+    async beginSeek(sessionId: string, seekId: string, bucket: number, now: number) {
+      return (await redis.gwGroupSeek(sessionKeys(sessionId).meta, seekId, bucket, now)) === 'ok';
+    },
+
+    /** Ends the running round/seek (`seekId` = only that seek); null if nothing ran. */
+    async endGroupRound(
+      sessionId: string,
+      seekId = '',
+    ): Promise<{ hadRequest: boolean; seekState: string; seekId: string; seekBucket: number | null } | null> {
+      const result = okListSchema.parse(await redis.gwGroupEnd(sessionKeys(sessionId).meta, seekId));
+      if (result[0] !== 'ended') return null;
+      const [, hadRequest, state, endedSeekId, bucket] = result;
+      return {
+        hadRequest: hadRequest === '1',
+        seekState: String(state ?? ''),
+        seekId: String(endedSeekId ?? ''),
+        seekBucket: bucket === undefined || bucket === '' ? null : Number(bucket),
+      };
+    },
+
+    /** The joiner of `seekId` becomes a participant (if still seeking and not full). */
+    async addParticipant(
+      sessionId: string,
+      participantId: string,
+      record: ParticipantRecord,
+      seekId: string,
+      maxParticipants: number,
+    ): Promise<
+      | { status: 'ended' | 'not_seeking' | 'full' }
+      | { status: 'added'; seekStartedAt: number; others: PresentParticipant[] }
+    > {
+      const keys = sessionKeys(sessionId);
+      const result = okListSchema.parse(
+        await redis.gwGroupAdd(
+          keys.meta,
+          keys.participants,
+          participantId,
+          JSON.stringify(participantRecordSchema.parse(record)),
+          seekId,
+          maxParticipants,
+        ),
+      );
+      const status = z.enum(['added', 'ended', 'not_seeking', 'full']).parse(result[0]);
+      if (status !== 'added') return { status };
+      const [, startedAt, ...flat] = result;
+      return {
+        status,
+        seekStartedAt: Number(startedAt ?? 0),
+        others: pairs(flat.map(String), 2).map(([pid = '', visitorId = '']) => ({
+          participantId: pid,
+          visitorId,
+        })),
+      };
+    },
+
+    /** The joiner's `visitor:<id>:session` ref (after `addParticipant`). */
+    async setSessionRef(visitorId: string, ref: SessionRef): Promise<void> {
+      await redis.set(visitorSessionKey(visitorId), JSON.stringify(ref), 'EX', LIVE_TTL_SECONDS);
     },
 
     // --- Topology (Part 11) ---------------------------------------------------------------
@@ -957,9 +1289,10 @@ export function createSessionStore(redis: Redis, options: { deadlineShards: numb
         const parsed = deadlineMemberSchema.safeParse(member);
         if (!parsed.success) return [];
         const [kind, sessionId, subject] = parsed.data;
-        return kind === 'upgrade'
-          ? [{ kind, sessionId, epoch: Number(subject) }]
-          : [{ kind, sessionId, participantId: subject }];
+        if (kind === 'upgrade') return [{ kind, sessionId, epoch: Number(subject) }];
+        if (kind === 'consent') return [{ kind, sessionId, roundId: subject }];
+        if (kind === 'seek') return [{ kind, sessionId, roundId: subject }];
+        return [{ kind, sessionId, participantId: subject }];
       });
     },
   };

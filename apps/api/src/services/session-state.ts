@@ -15,6 +15,9 @@ import { z } from 'zod';
 const participantSchema = z.looseObject({
   visitorId: z.string().min(1),
   status: z.enum(['pending', 'active', 'reconnecting', 'left']),
+  joinedAt: z.number().optional(),
+  leftAt: z.number().optional(),
+  leaveReason: z.string().optional(),
   frameIntervalMs: z.number().int().positive().nullable().optional(),
   maxFrames: z.number().int().positive().nullable().optional(),
 });

@@ -136,9 +136,26 @@ export const reportQuerySchema = z.object({
 export const transcriptLineSchema = z.object({
   id: z.string().optional(),
   at: z.string().optional(),
+  /** `reporter` | `reported` | `other` (automatic reports before Part 12: a participant id). */
   from: z.string().optional(),
+  /** Who sent it, so group-call lines map onto `participants` (missing before Part 12). */
+  participantId: z.string().optional(),
   text: z.string().optional(),
 });
+
+export const REPORT_PARTICIPANT_ROLES = ['reporter', 'reported', 'other'] as const;
+/** Someone in the reported chat (group calls: up to four), in join order. */
+export const reportParticipantSchema = z.object({
+  participantId: z.string(),
+  visitorId: z.string(),
+  role: z.enum(REPORT_PARTICIPANT_ROLES),
+  /** "Reporter", "Reported", then "Other 1", "Other 2"… */
+  label: z.string(),
+  joinedAt: iso.nullable(),
+  leftAt: iso.nullable(),
+  leaveReason: z.string().nullable(),
+});
+export type ReportParticipant = z.output<typeof reportParticipantSchema>;
 
 export const evidenceViewSchema = z.object({
   id,
@@ -154,6 +171,7 @@ export const reportDetailSchema = reportListItemSchema.extend({
   reportedParticipantId: z.string(),
   details: z.string().nullable(),
   transcript: z.array(transcriptLineSchema),
+  participants: z.array(reportParticipantSchema),
   evidence: z.array(evidenceViewSchema),
   resolutionNote: z.string().nullable(),
   resolvedAt: iso.nullable(),

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  callAddRequestedSchema,
+  callRespondAddSchema,
+  callSeekCancelledSchema,
   chatMessageSchema,
   CLIENT_EVENTS,
   MAX_ICE_CANDIDATE_LENGTH,
@@ -29,11 +32,31 @@ describe('socket contract', () => {
       lang: 'en',
       interests: [],
       autoRequeue: false,
+      allowGroup: false, // older clients never get added to group calls
     });
     expect(
       queueJoinSchema.parse({ mode: 'text', lang: 'de', interests: [' Music', 'music'] }).interests,
     ).toEqual(['music']);
+    expect(queueJoinSchema.parse({ mode: 'video', lang: 'en', allowGroup: true }).allowGroup).toBe(
+      true,
+    );
     expect(queueJoinSchema.safeParse({ mode: 'audio', lang: 'en' }).success).toBe(false);
+  });
+
+  it('group calls: answers name their round; reasons and timestamps are checked', () => {
+    const requestId = 'rRound000001';
+    expect(callRespondAddSchema.safeParse({ sessionId, requestId, accept: true }).success).toBe(
+      true,
+    );
+    expect(callRespondAddSchema.safeParse({ sessionId, accept: true }).success).toBe(false);
+    expect(callRespondAddSchema.safeParse({ sessionId, requestId, accept: 'yes' }).success).toBe(
+      false,
+    );
+    expect(
+      callAddRequestedSchema.safeParse({ sessionId, requestId, by: to, expiresAt: 'soon' }).success,
+    ).toBe(false);
+    expect(callSeekCancelledSchema.safeParse({ sessionId, reason: 'timeout' }).success).toBe(true);
+    expect(callSeekCancelledSchema.safeParse({ sessionId, reason: 'bored' }).success).toBe(false);
   });
 
   it('accepts an empty/missing payload for ping', () => {

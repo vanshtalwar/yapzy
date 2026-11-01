@@ -27,6 +27,8 @@ export const queueJoinSchema = z.object({
    * came back), requeue them automatically at the head of the queue (D-048).
    */
   autoRequeue: z.boolean().default(false),
+  /** Opt in to joining group calls of 3–4 people (Part 12, landing-page toggle, off by default). */
+  allowGroup: z.boolean().default(false),
 });
 
 export const queueLeaveSchema = emptyPayload;
@@ -158,7 +160,52 @@ export const matchFoundSchema = z.object({
   commonInterests: z.array(z.string()),
 });
 
-export const participantJoinedSchema = peerRoleSchema.extend({ sessionId: sessionIdSchema });
+/** A new participant joined the group call (Part 12); they publish to the Janus room. */
+export const participantJoinedSchema = z.object({
+  sessionId: sessionIdSchema,
+  participantId: participantIdSchema,
+});
+
+/** Id of one "add a person" round. */
+export const addRequestIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,32}$/);
+
+export const callRespondAddSchema = z.object({
+  sessionId: sessionIdSchema,
+  requestId: addRequestIdSchema,
+  accept: z.boolean(),
+});
+
+/** `call:addRequested`: `by` asked; everyone present (incl. `by`) must accept before `expiresAt`. */
+export const callAddRequestedSchema = z.object({
+  sessionId: sessionIdSchema,
+  requestId: addRequestIdSchema,
+  by: participantIdSchema,
+  expiresAt: z.iso.datetime(),
+});
+
+/** `call:seeking`: everyone agreed; the call looks for one more person until `until`. */
+export const callSeekingSchema = z.object({
+  sessionId: sessionIdSchema,
+  until: z.iso.datetime(),
+});
+
+export const SEEK_CANCEL_REASONS = [
+  /** Someone declined (or the requester withdrew). */
+  'declined',
+  /** Not everyone answered within ADD_REQUEST_TTL_MS. */
+  'expired',
+  /** Nobody joined within SEEK_PARTICIPANT_TIMEOUT_MS. */
+  'timeout',
+  /** Someone left during the round: a new person needs a fresh round. */
+  'left',
+  /** No media server for the group call. */
+  'unavailable',
+] as const;
+
+export const callSeekCancelledSchema = z.object({
+  sessionId: sessionIdSchema,
+  reason: z.enum(SEEK_CANCEL_REASONS),
+});
 
 /** `call:topologyReady` / `call:sfuToken`: about the topology of this epoch. */
 export const callEpochSchema = z.object({

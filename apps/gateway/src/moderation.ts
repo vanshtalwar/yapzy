@@ -70,6 +70,7 @@ export function createGatewayModeration(deps: {
 
   return {
     filterText: textFilter,
+    trustOf,
 
     async poolFor(visitorId: string, banType: 'HARD' | 'SHADOW' | null): Promise<MatchPool> {
       return poolFor({ banType, trust: await trustOf(visitorId) }, thresholds);

@@ -179,7 +179,7 @@ export const sfuEnv = z.object({
   /** Every participant of a group call, and every joiner, needs at least this trust score. */
   GROUP_MIN_TRUST: z.coerce.number().int().min(0).max(100).default(60),
   /** A call looking for one more person gives up after this long. */
-  SEEK_PARTICIPANT_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(30_000),
+  SEEK_PARTICIPANT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
 });
 
 /** Integration tests against the dev Janus container (packages/sfu). */

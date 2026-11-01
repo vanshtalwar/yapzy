@@ -120,7 +120,9 @@ describe('classify-frame', () => {
       status: 'OPEN',
     });
     expect(report.priority).toBeGreaterThan(80);
-    expect(report.transcript).toEqual([expect.objectContaining({ text: 'hey' })]);
+    expect(report.transcript).toEqual([
+      expect.objectContaining({ from: 'reported', participantId: 'pFlagged0001', text: 'hey' }),
+    ]);
     expect(report.evidence).toEqual([
       expect.objectContaining({
         type: 'AUTO_FLAG_FRAME',

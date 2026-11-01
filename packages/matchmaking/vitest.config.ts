@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // matchmaker.test.ts and group.test.ts share Redis DB 11 and flush it before each test.
+    fileParallelism: false,
     // Coverage target (Part 10): ≥ 90 % of lines (`pnpm test:coverage`).
     coverage: {
       provider: 'v8',

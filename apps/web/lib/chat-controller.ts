@@ -1,5 +1,8 @@
 import {
   type AckResponse,
+  callAddRequestedSchema,
+  callSeekCancelledSchema,
+  callSeekingSchema,
   callTopologySchema,
   chatMessageAckSchema,
   chatMessageOutSchema,
@@ -10,6 +13,7 @@ import {
   matchFoundSchema,
   type NextReason,
   NOTICE_CODES,
+  participantJoinedSchema,
   peerLeftSchema,
   peerPresenceSchema,
   type ReportFields,
@@ -224,6 +228,11 @@ export function createChatController(deps: ChatControllerDeps) {
       },
       onChange: (view) => {
         store.getState().setCall(view);
+        // Janus forwards a high simulcast layer to a large tile, a low one to grid tiles.
+        const level = view.participants.length <= 1 ? 'high' : 'low';
+        for (const participant of view.participants) {
+          call?.setVideoQuality(participant.participantId, level);
+        }
       },
       onFailed: (participantId) => {
         const current = state();
@@ -258,24 +267,23 @@ export function createChatController(deps: ChatControllerDeps) {
     call = (video.createCall ?? ((o: CallManagerOptions) => new CallManager(o)))(options);
     store.getState().setCall(call.view());
 
-    const peer = match.peers[0]?.participantId;
     callModeration =
       video.moderation?.create({
         sessionId,
         localStream: () => video.localMedia.getStream(),
-        remoteStream: () => (peer === undefined ? null : (call?.remoteStream(peer) ?? null)),
+        remoteStream: (participantId) => call?.remoteStream(participantId) ?? null,
+        remotes: match.peers.map((peer) => peer.participantId),
         schedule: match.moderation,
-        signal: (verdict) => {
-          if (peer === undefined) return;
+        signal: (participantId, verdict) => {
           send('moderation:signal', {
             sessionId,
-            about: peer,
+            about: participantId,
             kind: verdict.kind,
             score: Math.min(1, verdict.score),
           });
         },
-        onRemoteFlagged: () => {
-          store.getState().setRemoteFlagged(sessionId);
+        onRemoteFlagged: (participantId) => {
+          store.getState().setRemoteFlagged(sessionId, participantId);
         },
         onSelfFlagged: () => {
           notify('Heads up: your camera may be showing something that isn’t allowed here.');
@@ -583,6 +591,29 @@ export function createChatController(deps: ChatControllerDeps) {
         call.rollback(change.epoch);
       }
     });
+    // --- Group calls (Part 12) ---
+    socket.on('participant:joined', (raw) => {
+      const event = valid(participantJoinedSchema, raw);
+      if (event?.sessionId !== state().sessionId) return;
+      store.getState().peerJoined(event);
+      if (call?.sessionId === event.sessionId) {
+        // Through Janus: roles don't matter, the newcomer publishes to the room.
+        call.addPeer({ participantId: event.participantId, initiator: false, polite: true });
+        callModeration?.addRemote(event.participantId);
+      }
+    });
+    socket.on('call:addRequested', (raw) => {
+      const event = valid(callAddRequestedSchema, raw);
+      if (event !== null) store.getState().addRequested(event, state().selfParticipantId);
+    });
+    socket.on('call:seeking', (raw) => {
+      const event = valid(callSeekingSchema, raw);
+      if (event !== null) store.getState().seekStarted(event);
+    });
+    socket.on('call:seekCancelled', (raw) => {
+      const event = valid(callSeekCancelledSchema, raw);
+      if (event !== null) store.getState().seekCancelled(event);
+    });
     socket.on('peer:reconnecting', (raw) => {
       const event = valid(peerPresenceSchema, raw);
       if (event !== null) store.getState().peerReconnecting(event);
@@ -597,6 +628,7 @@ export function createChatController(deps: ChatControllerDeps) {
       if (call?.sessionId === event.sessionId && !event.sessionEnded) {
         const summary = call.removePeer(event.participantId);
         if (summary !== null) reportSummaries(event.sessionId, [summary]);
+        callModeration?.removeRemote(event.participantId);
       }
       store.getState().peerLeft(event);
       if (event.sessionEnded) maybeRequeue();
@@ -695,15 +727,20 @@ export function createChatController(deps: ChatControllerDeps) {
     },
 
     /**
-     * Reports the stranger (with their last frames if this is a video call) and moves on:
-     * reporting always ends the chat for the reporter. Throws if the API refused it.
+     * Reports a stranger (in a group call: the one whose tile was reported) with their last
+     * frames if this is a video call, and moves on: reporting always ends the chat for the
+     * reporter. Throws if the API refused it.
      */
-    async report(input: { reason: ReportFields['reason']; details?: string }): Promise<void> {
+    async report(input: {
+      reason: ReportFields['reason'];
+      details?: string;
+      participantId?: string;
+    }): Promise<void> {
       const { status, sessionId, peerIds } = state();
-      const peer = peerIds[0];
+      const peer = input.participantId ?? peerIds[0];
       if (deps.reports === undefined || sessionId === null || peer === undefined) return;
       if (status !== 'matched' && status !== 'ended') return;
-      const frames = callModeration?.evidence() ?? []; // before the call is closed
+      const frames = callModeration?.evidence(peer) ?? []; // before the call is closed
       const details = input.details?.trim();
       await deps.reports.submit(
         {
@@ -716,6 +753,22 @@ export function createChatController(deps: ChatControllerDeps) {
       );
       notify('Thanks for reporting — our team will review it.');
       if (state().status === 'matched' && state().sessionId === sessionId) await skip();
+    },
+
+    /** Ask everyone in the video call to add a random person (Part 12). */
+    async requestAdd(): Promise<void> {
+      const { status, sessionId } = state();
+      if (status !== 'matched' || sessionId === null) return;
+      const response = await emit('call:requestAdd', { sessionId });
+      if (!response.ok) notify(response.error.message);
+    },
+
+    /** Answer the pending "add a person?" round: a decline cancels it for everyone. */
+    async respondAdd(accept: boolean): Promise<void> {
+      const { sessionId, addRequest } = state();
+      if (sessionId === null || addRequest === null) return;
+      store.getState().addAnswered(addRequest.requestId);
+      await emit('call:respondAdd', { sessionId, requestId: addRequest.requestId, accept });
     },
 
     /**

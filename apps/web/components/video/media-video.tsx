@@ -43,11 +43,14 @@ export function RemoteVideo({
   participantId,
   trackCount,
   revision,
+  label = 'Stranger’s camera',
 }: {
   participantId: string;
   trackCount: number;
   /** Changes when the call's media path changes (P2P → Janus, failover): re-attach. */
   revision: number;
+  /** Accessible name, e.g. "Stranger 2’s camera" in group calls. */
+  label?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [needsTap, setNeedsTap] = useState(false);
@@ -71,7 +74,7 @@ export function RemoteVideo({
 
   return (
     <>
-      <video ref={ref} autoPlay playsInline aria-label="Stranger’s camera" />
+      <video ref={ref} autoPlay playsInline aria-label={label} />
       {needsTap && (
         <button
           type="button"

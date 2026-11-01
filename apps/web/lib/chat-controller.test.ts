@@ -81,6 +81,7 @@ function setup() {
     lang: 'en',
     interests: ['music'],
     autoRequeue: false,
+    allowGroup: false,
   });
   const doc = Object.assign(new EventTarget(), { hidden: false }) as unknown as Document;
   const controller = createChatController({
@@ -107,7 +108,7 @@ describe('chat controller', () => {
     controller.start();
     await flush();
     expect(socket.sent('queue:join')).toEqual([
-      { mode: 'text', lang: 'en', interests: ['music'], autoRequeue: false },
+      { mode: 'text', lang: 'en', interests: ['music'], autoRequeue: false, allowGroup: false },
     ]);
     expect(store.getState().status).toBe('waiting');
 
@@ -318,13 +319,20 @@ interface FakeCall {
   closed: number;
   recovered: number;
   removed: string[];
+  added: string[];
   iceServers: RTCIceServer[][];
   tracks: unknown[];
 }
 
 function setupVideo(opts: { stream?: boolean } = {}) {
   const socket = new FakeSocket();
-  const store = createChatStore({ mode: 'video', lang: 'en', interests: [], autoRequeue: true });
+  const store = createChatStore({
+    mode: 'video',
+    lang: 'en',
+    interests: [],
+    autoRequeue: true,
+    allowGroup: false,
+  });
   const calls: FakeCall[] = [];
   const order: string[] = [];
   const trackListeners: ((track: MediaStreamTrack) => void)[] = [];
@@ -369,6 +377,8 @@ function setupVideo(opts: { stream?: boolean } = {}) {
           moderation.created.push(options);
           return {
             setSchedule: (schedule) => moderation.schedules.push(schedule),
+            addRemote: () => undefined,
+            removeRemote: () => undefined,
             evidence: () => moderation.evidence,
             stop: () => (moderation.stopped += 1),
           };
@@ -383,6 +393,7 @@ function setupVideo(opts: { stream?: boolean } = {}) {
           closed: 0,
           recovered: 0,
           removed: [],
+          added: [],
           iceServers: [],
           tracks: [],
         };
@@ -394,6 +405,8 @@ function setupVideo(opts: { stream?: boolean } = {}) {
             fake.removed.push(participantId);
             return null;
           },
+          addPeer: (peer: { participantId: string }) => fake.added.push(peer.participantId),
+          setVideoQuality: () => undefined,
           remoteStream: () => null,
           view: () => ({
             sessionId: options.sessionId,
@@ -468,7 +481,7 @@ describe('chat controller — video', () => {
     controller.start();
     await flush();
     expect(socket.sent('queue:join')).toEqual([
-      { mode: 'video', lang: 'en', interests: [], autoRequeue: true },
+      { mode: 'video', lang: 'en', interests: [], autoRequeue: true, allowGroup: false },
     ]);
     socket.server('match:found', videoMatch());
     await flush();
@@ -608,7 +621,7 @@ describe('chat controller — video', () => {
     });
     expect(moderation.schedules).toEqual([{ frameIntervalMs: 20_000, maxFrames: null }]);
     // A client NSFW verdict becomes a moderation:signal about the stranger.
-    moderation.created[0]?.signal({ flagged: true, kind: 'porn', score: 0.97 });
+    moderation.created[0]?.signal('pPeer0000001', { flagged: true, kind: 'porn', score: 0.97 });
     expect(socket.sent('moderation:signal')).toEqual([
       { sessionId: SESSION, about: 'pPeer0000001', kind: 'porn', score: 0.97 },
     ]);
@@ -647,5 +660,55 @@ describe('chat controller — video', () => {
       message: 'Links aren’t allowed in chat.',
     });
     expect(notices).toEqual(['Links aren’t allowed in chat.']);
+  });
+
+  it('group calls: a newcomer joins the call; add-a-person rounds go to the server', async () => {
+    const { socket, controller, calls, store } = setupVideo();
+    controller.start();
+    await flush();
+    socket.server('match:found', videoMatch());
+    await flush();
+    socket.server('participant:joined', { sessionId: SESSION, participantId: 'pJoiner00001' });
+    expect(calls[0]?.added).toEqual(['pJoiner00001']);
+    expect(store.getState()).toMatchObject({
+      peerIds: ['pPeer0000001', 'pJoiner00001'],
+      groupCall: true,
+      peerLabels: { pPeer0000001: 1, pJoiner00001: 2 },
+    });
+    socket.server('participant:joined', {
+      sessionId: 'not-this-session',
+      participantId: 'pX0000000001',
+    });
+    expect(calls[0]?.added).toEqual(['pJoiner00001']);
+
+    await controller.requestAdd();
+    expect(socket.sent('call:requestAdd')).toEqual([{ sessionId: SESSION }]);
+    socket.server('call:addRequested', {
+      sessionId: SESSION,
+      requestId: 'rRound000001',
+      by: 'pPeer0000001',
+      expiresAt: new Date(Date.now() + 15_000).toISOString(),
+    });
+    expect(store.getState().addRequest).toMatchObject({ by: 'pPeer0000001', answered: false });
+    await controller.respondAdd(true);
+    expect(socket.sent('call:respondAdd')).toEqual([
+      { sessionId: SESSION, requestId: 'rRound000001', accept: true },
+    ]);
+    expect(store.getState().addRequest?.answered).toBe(true);
+    socket.server('call:seeking', { sessionId: SESSION, until: new Date().toISOString() });
+    expect(store.getState()).toMatchObject({ addRequest: null });
+    expect(store.getState().seekingUntil).not.toBeNull();
+    socket.server('call:seekCancelled', { sessionId: SESSION, reason: 'timeout' });
+    expect(store.getState().seekingUntil).toBeNull();
+
+    // Reports target the participant whose tile was reported.
+    socket.server('peer:left', {
+      sessionId: SESSION,
+      participantId: 'pPeer0000001',
+      reason: 'left',
+      sessionEnded: false,
+    });
+    expect(calls[0]?.removed).toEqual(['pPeer0000001']);
+    expect(store.getState().peerIds).toEqual(['pJoiner00001']);
   });
 });

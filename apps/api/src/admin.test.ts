@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import { type GwControlMessage, rateLimitKey, subscribeControl } from '@app/redis';
+import { type GwControlMessage, rateLimitKey, sessionKeys, subscribeControl } from '@app/redis';
 import { createTestRedis } from '@app/redis/testing';
 import { hmacHash } from '@app/shared/crypto';
 import { createMemoryObjectStore } from '@app/storage';
@@ -29,6 +29,7 @@ let app: App;
 const PASSWORD = 'correct horse battery staple';
 const adminIds: string[] = [];
 const visitorIds: string[] = [];
+const sessionLogIds: string[] = [];
 
 interface AdminSession {
   cookie: string;
@@ -135,6 +136,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await prisma.chatSessionLog.deleteMany({ where: { id: { in: sessionLogIds } } });
   await prisma.auditLog.deleteMany({ where: { adminId: { in: adminIds } } });
   await prisma.ban.deleteMany({ where: { visitorId: { in: visitorIds } } });
   await prisma.report.deleteMany({ where: { reportedId: { in: visitorIds } } });
@@ -314,6 +316,92 @@ describe('reports & audit', () => {
     expect(body.evidence[0]?.url).toMatch(/^memory:\/\/evidence\/reports%2Fr1-.*expires=300$/);
     expect(body.transcript).toEqual([expect.objectContaining({ text: 'rude words' })]);
     expect(body.reported.reportsReceived).toBe(2);
+  });
+
+  it('lists everyone in a group chat in join order, from the log or the live session', async () => {
+    const session = await signIn((await createAdmin('MODERATOR')).email);
+    const [early, reporter, reported, late] = [
+      await visitor(),
+      await visitor(),
+      await visitor(),
+      await visitor(),
+    ];
+    const at = (minute: number) => new Date(Date.UTC(2026, 10, 1, 12, minute));
+    const fileReport = async (sessionId: string) =>
+      (
+        await prisma.report.create({
+          data: {
+            sessionId,
+            reporterId: reporter,
+            reportedId: reported,
+            reportedParticipantId: 'pReported001',
+            reason: 'HARASSMENT',
+            transcript: [
+              { from: 'other', participantId: 'pEarly000001', text: 'hey all' },
+              { from: 'reported', participantId: 'pReported001', text: 'rude words' },
+            ],
+          },
+        })
+      ).id;
+    const expected = [
+      { participantId: 'pEarly000001', visitorId: early, role: 'other', label: 'Other 1' },
+      { participantId: 'pReporter001', visitorId: reporter, role: 'reporter', label: 'Reporter' },
+      { participantId: 'pReported001', visitorId: reported, role: 'reported', label: 'Reported' },
+      { participantId: 'pLate0000001', visitorId: late, role: 'other', label: 'Other 2' },
+    ];
+    const members = [
+      ['pReported001', reported, 2],
+      ['pLate0000001', late, 3],
+      ['pEarly000001', early, 0],
+      ['pReporter001', reporter, 1],
+    ] as const;
+
+    // A chat that ended: the session log has everyone.
+    const ended = randomUUID();
+    sessionLogIds.push(ended);
+    await prisma.chatSessionLog.create({
+      data: {
+        id: ended,
+        mode: 'VIDEO',
+        topology: 'SFU',
+        maxParticipants: 4,
+        startedAt: at(0),
+        endedAt: at(9),
+        participants: {
+          create: members.map(([participantId, visitorId, minute]) => ({
+            participantId,
+            visitorId,
+            joinedAt: at(minute),
+            ...(participantId === 'pReported001'
+              ? { leftAt: at(5), leaveReason: 'BANNED' as const }
+              : {}),
+          })),
+        },
+      },
+    });
+    const logged = await call(session, 'GET', `/reports/${await fileReport(ended)}`);
+    expect(logged.statusCode).toBe(200);
+    const body = logged.json<{ participants: unknown[]; transcript: unknown[] }>();
+    expect(body.participants).toEqual(expected.map((p): unknown => expect.objectContaining(p)));
+    expect(body.participants[2]).toMatchObject({
+      leftAt: at(5).toISOString(),
+      leaveReason: 'BANNED',
+    });
+    expect(body.transcript[0]).toMatchObject({ participantId: 'pEarly000001' });
+
+    // A chat still running: its participants come from Redis.
+    const live = randomUUID();
+    for (const [participantId, visitorId, minute] of members) {
+      await redis.hset(
+        sessionKeys(live).participants,
+        participantId,
+        JSON.stringify({ visitorId, status: 'active', joinedAt: at(minute).getTime() }),
+      );
+    }
+    const running = await call(session, 'GET', `/reports/${await fileReport(live)}`);
+    expect(running.json<{ participants: unknown[] }>().participants).toEqual(
+      expected.map((p): unknown => expect.objectContaining({ ...p, leftAt: null })),
+    );
   });
 
   it('a ban action resolves the report, publishes ban_applied and is audited', async () => {

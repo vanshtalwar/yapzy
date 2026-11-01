@@ -140,6 +140,7 @@ export const reportRoutes: FastifyPluginAsyncZod<ReportDeps> = async (app, deps)
         id: entry.id,
         at: entry.at,
         from: roleOf(entry.from),
+        participantId: entry.from, // group calls: which of the others said it
         text: entry.text,
       }));
 

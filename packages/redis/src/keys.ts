@@ -88,6 +88,10 @@ export interface MatchmakingKeys {
   tickets: string;
   /** ZSET: "minVisitorId|maxVisitorId" → matched-at ms; prevents immediate rematches. */
   recent: string;
+  /** LIST: sessions of this bucket looking for one more person (Part 12, FIFO). */
+  queueSeek: string;
+  /** HASH: sessionId → seek JSON { sessionId, seekId, visitorIds, createdAt, status, joiner? }. */
+  seeks: string;
 }
 
 export function matchmakingKeys(dims: QueueBucket): MatchmakingKeys {
@@ -98,6 +102,8 @@ export function matchmakingKeys(dims: QueueBucket): MatchmakingKeys {
     queueInterest: (interest) => `${tag}:q:int:${assertInterest(interest)}`,
     tickets: `${tag}:tickets`,
     recent: `${tag}:recent`,
+    queueSeek: `${tag}:q:seek`,
+    seeks: `${tag}:seeks`,
   };
 }
 

@@ -1,16 +1,17 @@
 # RandomChat
 
-Anonymous random 1:1 text and video chat. Visitors pass an age and bot check, get paired with a
-random stranger in milliseconds, and can skip to the next one at any time. Video is peer-to-peer
-WebRTC; matchmaking, text relay and signalling run on a horizontally scalable Socket.io gateway
-backed by Redis. Trust & safety (text filtering, risk-based video sampling, reports with evidence,
+Anonymous random text and video chat. Visitors pass an age and bot check, get paired with a
+random stranger in milliseconds, and can skip to the next one at any time; a video call can grow
+to four strangers when everyone agrees. 1:1 video is peer-to-peer WebRTC, group calls run through
+a Janus SFU; matchmaking, text relay and signalling run on a horizontally scalable Socket.io
+gateway backed by Redis. Trust & safety (text filtering, risk-based video sampling, reports with evidence,
 shadow and hard bans) and a moderator dashboard are built in.
 
-|            |                                                                                                                                                                                               |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status** | Feature-complete development build (Parts 1–11): calls can run through a Janus SFU and switch to it mid-call. Adding a 3rd and 4th person (Part 12) is in progress. **Not yet launched:** see [Production readiness](#production-readiness). |
-| **Tested** | 347 unit/integration tests, 11 Playwright end-to-end tests (+ a Janus failover drill), load tests with 5,000 concurrent clients, crash drills for gateway, Redis and worker                    |
-| **Docs**   | [Developer guide](docs/DEVELOPMENT.md) · [LAN testing](docs/LAN_TESTING.md)                                                                                                                   |
+|            |                                                                                                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status** | Feature-complete development build (Parts 1–12): 1:1 text and video chat, and video calls of up to four people through a Janus SFU. **Not yet launched:** see [Production readiness](#production-readiness). |
+| **Tested** | 372 unit/integration tests, 12 Playwright end-to-end tests (incl. a four-person call, + a Janus failover drill), load tests with 5,000 concurrent clients, crash drills for gateway, Redis and worker        |
+| **Docs**   | [Developer guide](docs/DEVELOPMENT.md) · [LAN testing](docs/LAN_TESTING.md)                                                                                                                                  |
 
 ## Contents
 
@@ -36,6 +37,10 @@ shadow and hard bans) and a moderator dashboard are built in.
   to any gateway and resume the same chat, including missed messages.
 - Video: pre-join camera/microphone check, device pickers, peer-to-peer WebRTC with TURN fallback,
   optional relay-only mode that hides each user's IP address from the stranger.
+- **Group video of up to four:** anyone in a video call can ask to add a person; only if everyone
+  agrees does the call look for one more stranger, and only visitors who opted in are ever
+  added. 2×2 grid (stacked on phones) with a report button and connection badge per person and a
+  highlight on whoever is speaking; someone leaving doesn't end the call for the others.
 
 **Trust & safety**
 
@@ -46,11 +51,15 @@ shadow and hard bans) and a moderator dashboard are built in.
   low-trust users more often), capped by a global budget.
 - Reports with evidence (recent messages, the stranger's last few frames), trust scores, automatic
   shadow bans (offenders are only matched with each other) and hard bans that take effect live.
+  In group calls a report names one person, and a ban removes only them from the call.
+- Group calls are limited to trusted visitors (trust score threshold for everyone in the call and
+  the newcomer) and sampled at the highest moderation tier.
 
 **Admin dashboard**
 
 - Live stats, prioritised report queue with keyboard triage, evidence blurred until clicked, ban
   and trust decisions, visitor history, audit log, admin accounts with roles and mandatory TOTP.
+- Reports from group calls list everyone who was in the chat and which of them sent each message.
 
 ## Architecture
 
@@ -130,15 +139,15 @@ staging environment, but launching to real users needs the work listed there.
 
 ### 1. Services to run
 
-| Service | Image                                   | Port                              | Health              | Scale                                                                  |
-| ------- | --------------------------------------- | --------------------------------- | ------------------- | ---------------------------------------------------------------------- |
-| web     | `apps/web/Dockerfile`                   | 3000                              | `GET /`             | Stateless, behind a CDN                                                |
-| admin   | `apps/admin/Dockerfile`                 | 3001                              | `GET /login`        | 1–2 replicas, behind an access proxy/VPN                               |
-| api     | `apps/api/Dockerfile`                   | 4000                              | `/health`, `/ready` | Stateless, scale on CPU                                                |
-| gateway | `apps/gateway/Dockerfile`               | 4001                              | `/health`, `/ready` | Stateless, scale on socket count (~2,500 sockets per process measured) |
-| worker  | `apps/worker/Dockerfile`                | 4002 (`/health`, `/metrics` only) | `/health`           | Scale on job backlog                                                   |
-| migrate | `apps/api/Dockerfile`, target `migrate` | —                                 | exits 0             | Run once per release, before the apps                                  |
-| janus   | `infra/docker/janus/Dockerfile`         | 8188 (Janus API, wss), 7188 (Admin API, private), RTP UDP range | TCP on 8188/7188; the gateway checks the Admin API | One per media host; the gateway fails calls over between nodes |
+| Service | Image                                   | Port                                                            | Health                                             | Scale                                                                  |
+| ------- | --------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------- |
+| web     | `apps/web/Dockerfile`                   | 3000                                                            | `GET /`                                            | Stateless, behind a CDN                                                |
+| admin   | `apps/admin/Dockerfile`                 | 3001                                                            | `GET /login`                                       | 1–2 replicas, behind an access proxy/VPN                               |
+| api     | `apps/api/Dockerfile`                   | 4000                                                            | `/health`, `/ready`                                | Stateless, scale on CPU                                                |
+| gateway | `apps/gateway/Dockerfile`               | 4001                                                            | `/health`, `/ready`                                | Stateless, scale on socket count (~2,500 sockets per process measured) |
+| worker  | `apps/worker/Dockerfile`                | 4002 (`/health`, `/metrics` only)                               | `/health`                                          | Scale on job backlog                                                   |
+| migrate | `apps/api/Dockerfile`, target `migrate` | —                                                               | exits 0                                            | Run once per release, before the apps                                  |
+| janus   | `infra/docker/janus/Dockerfile`         | 8188 (Janus API, wss), 7188 (Admin API, private), RTP UDP range | TCP on 8188/7188; the gateway checks the Admin API | One per media host; the gateway fails calls over between nodes         |
 
 Infrastructure: PostgreSQL (managed, HA, with PgBouncer), Redis with replicas and failover (split
 the BullMQ Redis with AOF from the ephemeral one), S3-compatible object storage, coturn on hosts
@@ -178,16 +187,16 @@ Every variable and its development default is listed in [`.env.example`](.env.ex
 `.env`). With `DEPLOY_ENV=production` the services **refuse to start** with placeholder secrets,
 Turnstile test keys or `NODE_ENV` other than `production`.
 
-| Group         | Variables                                                                                                                                                                            |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Environment   | `NODE_ENV=production`, `DEPLOY_ENV=production` (`staging` in staging), `LOG_LEVEL=info`                                                                                              |
-| Secrets       | `JWT_SECRET`, `IP_HASH_PEPPER`, `DEVICE_HASH_PEPPER`, `TURN_SECRET`, `ADMIN_TOTP_ENC_KEY`, `TURNSTILE_SECRET_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `METRICS_TOKEN`                 |
-| Data stores   | `DATABASE_URL` (via PgBouncer; migrations use a direct URL), `REDIS_URL` (`rediss://`), `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET_EVIDENCE`, `S3_BUCKET_FRAMES`   |
-| Network       | `CORS_ORIGINS` (web origins, also the WebSocket allowlist), `ADMIN_ORIGINS`, `TRUST_PROXY` (exact hop count or CIDRs of your CDN/load balancer, never `true`), `TURNSTILE_HOSTNAMES` |
-| Media         | `TURN_HOST`, `TURN_PORT`, `TURN_TLS_PORT=443`, `STUN_URLS`, `TURN_CREDENTIAL_TTL_SECONDS`                                                                                            |
-| Group video   | `JANUS_NODES` (gateway and web: `wsUrl` for browsers, `adminUrl` private), `JANUS_ADMIN_SECRET`, `JANUS_TOKEN_SECRET` (also given to each Janus node), `JANUS_PUBLIC_IP` (per node), `SFU_PUBLISHER_BITRATE`, `SFU_UPGRADE_TIMEOUT_MS` |
-| Capacity      | `MM_REGION`, `MM_BUCKETS`, `MM_BUCKETS_BY_QUEUE`, `DEADLINE_SHARDS=64`, `STATS_COUNTER_SHARDS`, `WORKER_CONCURRENCY`, `MOD_FRAME_BUDGET_PER_SEC`, `HANDSHAKE_LIMIT_PER_IP`           |
-| Must stay off | `RATE_LIMIT_DISABLED`, `DEV_FORCE_FLAG_VISITOR_IDS`, `DEV_FORCE_SFU` (all ignored outside development)                                                                                |
+| Group         | Variables                                                                                                                                                                                                                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Environment   | `NODE_ENV=production`, `DEPLOY_ENV=production` (`staging` in staging), `LOG_LEVEL=info`                                                                                                                                                                                                               |
+| Secrets       | `JWT_SECRET`, `IP_HASH_PEPPER`, `DEVICE_HASH_PEPPER`, `TURN_SECRET`, `ADMIN_TOTP_ENC_KEY`, `TURNSTILE_SECRET_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `METRICS_TOKEN`                                                                                                                                  |
+| Data stores   | `DATABASE_URL` (via PgBouncer; migrations use a direct URL), `REDIS_URL` (`rediss://`), `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET_EVIDENCE`, `S3_BUCKET_FRAMES`                                                                                                                    |
+| Network       | `CORS_ORIGINS` (web origins, also the WebSocket allowlist), `ADMIN_ORIGINS`, `TRUST_PROXY` (exact hop count or CIDRs of your CDN/load balancer, never `true`), `TURNSTILE_HOSTNAMES`                                                                                                                  |
+| Media         | `TURN_HOST`, `TURN_PORT`, `TURN_TLS_PORT=443`, `STUN_URLS`, `TURN_CREDENTIAL_TTL_SECONDS`                                                                                                                                                                                                             |
+| Group video   | `JANUS_NODES` (gateway and web: `wsUrl` for browsers, `adminUrl` private), `JANUS_ADMIN_SECRET`, `JANUS_TOKEN_SECRET` (also given to each Janus node), `JANUS_PUBLIC_IP` (per node), `SFU_PUBLISHER_BITRATE`, `SFU_UPGRADE_TIMEOUT_MS`, `GROUP_MIN_TRUST` (default 60), `SEEK_PARTICIPANT_TIMEOUT_MS` |
+| Capacity      | `MM_REGION`, `MM_BUCKETS`, `MM_BUCKETS_BY_QUEUE`, `DEADLINE_SHARDS=64`, `STATS_COUNTER_SHARDS`, `WORKER_CONCURRENCY`, `MOD_FRAME_BUDGET_PER_SEC`, `HANDSHAKE_LIMIT_PER_IP`                                                                                                                            |
+| Must stay off | `RATE_LIMIT_DISABLED`, `DEV_FORCE_FLAG_VISITOR_IDS`, `DEV_FORCE_SFU` (all ignored outside development)                                                                                                                                                                                                |
 
 Bucket and shard counts can only be **raised** on a live fleet; lowering them orphans waiting
 tickets or deadlines.
@@ -230,8 +239,8 @@ Import [`infra/docker/grafana/dashboards/randomchat.json`](infra/docker/grafana/
 Alert at least on: `gateway_adapter_subscriber_oldest_pending_seconds` > 15 (cross-node delivery
 failing; the gateway's `/health` also turns 503 so the pod is replaced), drops in
 `gateway_sockets_connected`, time-to-match p99, error rates, Redis latency and memory, BullMQ
-backlog and failures, TURN relay share, `sfu_node_healthy` = 0, `sfu_failovers_total` and
-`sfu_upgrades_total{outcome="rolled_back"}`.
+backlog and failures, TURN relay share, `sfu_node_healthy` = 0, `sfu_failovers_total`,
+`sfu_upgrades_total{outcome="rolled_back"}` and `group_seeks_total{outcome="unavailable"}`.
 
 ## Scaling
 
@@ -272,8 +281,8 @@ issue.
 
 ## Production readiness
 
-The software side is complete for 1:1 chat. What remains before real users is mostly
-infrastructure, legal and operational work. The launch blockers include:
+The software side is complete for 1:1 chat and group video calls. What remains before real users
+is mostly infrastructure, legal and operational work. The launch blockers include:
 
 - **Legal:** launch countries decided with counsel; reviewed Terms, Privacy Policy and Community
   Guidelines (the current pages are placeholders); NCMEC registration (US); GDPR, DSA, UK Online
@@ -289,7 +298,7 @@ infrastructure, legal and operational work. The launch blockers include:
 ```bash
 pnpm lint && pnpm typecheck && pnpm test && pnpm build   # quality gate (needs `pnpm infra:up`)
 pnpm test:coverage                                       # with coverage thresholds
-pnpm test:e2e                                            # Playwright: text, video, restart, reports, bans
+pnpm test:e2e                                            # Playwright: text, video, restart, reports, bans, Janus, group calls
 ```
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, typecheck,

@@ -69,6 +69,7 @@ export function startGateway(
     logger?: Logger;
     /** Fake Janus Admin API (`@app/sfu/testing`) for configs with JANUS_NODES. */
     sfuSocketFactory?: (url: string, protocol: string) => AdminSocket;
+    addRequestTtlMs?: number;
   } = {},
 ) {
   return (async (): Promise<{ gateway: Gateway; port: number; url: string }> => {
@@ -86,6 +87,7 @@ export function startGateway(
         interestFallbackMs: options.interestFallbackMs ?? 300,
         deadlineIntervalMs: 100,
         sfuHealthIntervalMs: 100,
+        ...(options.addRequestTtlMs === undefined ? {} : { addRequestTtlMs: options.addRequestTtlMs }),
         ...(options.sfuSocketFactory === undefined
           ? {}
           : { sfuSocketFactory: options.sfuSocketFactory }),

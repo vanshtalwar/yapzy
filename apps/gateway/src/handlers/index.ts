@@ -1,6 +1,7 @@
 import { TRANSCRIPT_MAX_MESSAGES } from '@app/redis';
 import {
   callEpochSchema,
+  callRespondAddSchema,
   chatEndSchema,
   type ChatMessageAck,
   chatMessageSchema,
@@ -55,6 +56,8 @@ export const EVENT_COSTS = {
   'call:topologyReady': 1,
   'call:sfuToken': 1,
   'dev:upgradeToSfu': 2,
+  'call:requestAdd': 2,
+  'call:respondAdd': 1,
 } as const satisfies Record<ClientEventName, number>;
 
 /** Typing indicators are relayed on change, and repeats at most every 2 s. */
@@ -299,6 +302,24 @@ export function registerHandlers(socket: GatewaySocket, deps: HandlerDeps): void
     callEpochSchema,
     ({ sessionId, epoch }): Promise<SfuToken> => lifecycle.sfuToken(socket, sessionId, epoch),
     { cost: EVENT_COSTS['call:sfuToken'] },
+  );
+
+  // --- Group calls (Part 12) ----------------------------------------------------------------
+
+  registerHandler(
+    socket,
+    'call:requestAdd',
+    sessionRefSchema,
+    ({ sessionId }) => lifecycle.requestAdd(socket, sessionId),
+    { cost: EVENT_COSTS['call:requestAdd'] },
+  );
+
+  registerHandler(
+    socket,
+    'call:respondAdd',
+    callRespondAddSchema,
+    ({ sessionId, requestId, accept }) => lifecycle.respondAdd(socket, sessionId, requestId, accept),
+    { cost: EVENT_COSTS['call:respondAdd'] },
   );
 
   // Development only: elsewhere the event stays unknown (acked "Unknown event" + a strike).

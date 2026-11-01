@@ -1,9 +1,13 @@
 import {
+  type CallAddRequested,
+  type CallSeekCancelled,
+  type CallSeeking,
   type ChatMessageAck,
   type ChatMessageOut,
   type ChatTypingOut,
   ErrorCode,
   type MatchFound,
+  type ParticipantJoined,
   type PeerLeft,
   type PeerPresence,
   type QueuePreferences,
@@ -37,7 +41,14 @@ export type OutgoingStatus = 'sending' | 'sent' | 'failed' | 'blocked';
 
 export type ChatEntry =
   | { kind: 'system'; id: string; text: string }
-  | { kind: 'stranger'; id: string; text: string; at: string }
+  | {
+      kind: 'stranger';
+      id: string;
+      text: string;
+      at: string;
+      /** participantId of the author (group calls show "Stranger N"). */
+      from?: string;
+    }
   | {
       kind: 'self';
       /** Server id once acknowledged, the client id until then. */
@@ -48,12 +59,32 @@ export type ChatEntry =
       status: OutgoingStatus;
     };
 
+/** An "add a person" round of the current call (Part 12). */
+export interface AddRequestState {
+  requestId: string;
+  by: string;
+  expiresAt: string;
+  /** We answered (or asked): only wait for the others now. */
+  answered: boolean;
+}
+
 export interface ChatData {
   status: ChatStatus;
   preferences: QueuePreferences;
   sessionId: string | null;
   selfParticipantId: string | null;
+  /** Other participants present now (join order). */
   peerIds: string[];
+  /**
+   * "Stranger N" number per present participant: the lowest free number when they join,
+   * kept while they stay (Part 12 group calls; 1:1 calls just say "Stranger").
+   */
+  peerLabels: Record<string, number>;
+  /** More than one stranger has been in this call: messages show their author. */
+  groupCall: boolean;
+  addRequest: AddRequestState | null;
+  /** Everyone agreed: looking for one more person until this time. */
+  seekingUntil: string | null;
   commonInterests: string[];
   entries: ChatEntry[];
   peerTyping: boolean;
@@ -75,8 +106,8 @@ export interface ChatData {
   errorMessage: string | null;
   /** Video call of the current session: plain values only, media stays in the CallManager. */
   call: CallView | null;
-  /** The client NSFW check flagged the stranger's video: show it blurred. */
-  remoteFlagged: boolean;
+  /** Participants whose video the client NSFW check flagged: shown blurred. */
+  remoteFlagged: string[];
 }
 
 export interface ChatActions {
@@ -106,7 +137,14 @@ export interface ChatActions {
   setError(kind: ErrorKind, message: string): void;
   /** Ignored unless it belongs to the current matched session (or clears the call). */
   setCall(view: CallView | null): void;
-  setRemoteFlagged(sessionId: string): void;
+  setRemoteFlagged(sessionId: string, participantId: string): void;
+  /** Group calls (Part 12). */
+  peerJoined(event: ParticipantJoined): void;
+  addRequested(event: CallAddRequested, selfParticipantId: string | null): void;
+  addAnswered(requestId: string): void;
+  seekStarted(event: CallSeeking): void;
+  /** Returns the reason if this cancelled the current round (for a notice). */
+  seekCancelled(event: CallSeekCancelled): CallSeekCancelled['reason'] | null;
   reset(): void;
 }
 
@@ -116,6 +154,10 @@ const freshSession = {
   sessionId: null,
   selfParticipantId: null,
   peerIds: [],
+  peerLabels: {},
+  groupCall: false,
+  addRequest: null,
+  seekingUntil: null,
   commonInterests: [],
   entries: [],
   peerTyping: false,
@@ -124,8 +166,34 @@ const freshSession = {
   lastReceivedId: null,
   resumeCursor: null,
   call: null,
-  remoteFlagged: false,
+  remoteFlagged: [],
 } satisfies Partial<ChatData>;
+
+/** Numbers 1, 2, 3 … for the given participants, keeping known ones and filling gaps. */
+function labelsFor(peerIds: string[], previous: Record<string, number>): Record<string, number> {
+  const labels: Record<string, number> = {};
+  for (const id of peerIds) {
+    const known = previous[id];
+    if (known !== undefined) labels[id] = known;
+  }
+  for (const id of peerIds) {
+    if (labels[id] !== undefined) continue;
+    const used = new Set(Object.values(labels));
+    let next = 1;
+    while (used.has(next)) next += 1;
+    labels[id] = next;
+  }
+  return labels;
+}
+
+/** "Stranger" in a 1:1 call, "Stranger N" once more people are (or were) in it. */
+export function strangerName(
+  state: Pick<ChatData, 'peerLabels' | 'groupCall'>,
+  participantId: string,
+) {
+  const label = state.peerLabels[participantId];
+  return state.groupCall && label !== undefined ? `Stranger ${String(label)}` : 'Stranger';
+}
 
 let systemCounter = 0;
 function system(text: string): ChatEntry {
@@ -195,12 +263,21 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
         if (match.commonInterests.length > 0) {
           entries.push(system(`You both like: ${match.commonInterests.join(', ')}.`));
         }
+        const peerIds = match.peers.map((peer) => peer.participantId);
+        const group = peerIds.length > 1;
+        if (group) {
+          entries[0] = system(
+            `You joined a group call with ${String(peerIds.length)} strangers. Say hi!`,
+          );
+        }
         set({
           ...freshSession,
           status: 'matched',
           sessionId: match.sessionId,
           selfParticipantId: match.selfParticipantId,
-          peerIds: match.peers.map((peer) => peer.participantId),
+          peerIds,
+          peerLabels: labelsFor(peerIds, {}),
+          groupCall: group,
           commonInterests: match.commonInterests,
           entries,
         });
@@ -214,7 +291,13 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
         set((state) => ({
           entries: [
             ...state.entries,
-            { kind: 'stranger', id: message.id, text: message.text, at: message.at },
+            {
+              kind: 'stranger',
+              id: message.id,
+              text: message.text,
+              at: message.at,
+              from: message.from,
+            },
           ],
           peerTyping: false,
           lastReceivedId: message.id,
@@ -236,7 +319,19 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
       peerLeft: (event) => {
         if (!current(event.sessionId)) return;
         if (!event.sessionEnded) {
-          set((state) => ({ entries: [...state.entries, system('A participant left the chat.')] }));
+          // Group call: the others stay; free the stranger's number.
+          set((state) => {
+            const peerIds = state.peerIds.filter((id) => id !== event.participantId);
+            return {
+              peerIds,
+              peerLabels: labelsFor(peerIds, state.peerLabels),
+              remoteFlagged: state.remoteFlagged.filter((id) => id !== event.participantId),
+              entries: [
+                ...state.entries,
+                system(`${strangerName(state, event.participantId)} left the call.`),
+              ],
+            };
+          });
           return;
         }
         const disconnected = event.reason === 'disconnected';
@@ -337,9 +432,15 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
               id: message.id,
               text: message.text,
               at: message.at,
+              from: message.from,
             })),
           ],
           peerIds: result.peers.map((peer) => peer.participantId),
+          peerLabels: labelsFor(
+            result.peers.map((peer) => peer.participantId),
+            get().peerLabels,
+          ),
+          groupCall: get().groupCall || result.peers.length > 1,
           ...(last === undefined ? {} : { lastReceivedId: last.id }),
           connectionLost: false,
         });
@@ -383,8 +484,80 @@ export function createChatStore(preferences: QueuePreferences = DEFAULT_PREFEREN
         if (view === null || current(view.sessionId)) set({ call: view });
       },
 
-      setRemoteFlagged: (sessionId) => {
-        if (current(sessionId)) set({ remoteFlagged: true });
+      setRemoteFlagged: (sessionId, participantId) => {
+        if (!current(sessionId) || get().remoteFlagged.includes(participantId)) return;
+        set((state) => ({ remoteFlagged: [...state.remoteFlagged, participantId] }));
+      },
+
+      peerJoined: (event) => {
+        if (!current(event.sessionId) || get().peerIds.includes(event.participantId)) return;
+        set((state) => {
+          const peerIds = [...state.peerIds, event.participantId];
+          const peerLabels = labelsFor(peerIds, state.peerLabels);
+          const next = { ...state, peerLabels, groupCall: true };
+          return {
+            peerIds,
+            peerLabels,
+            groupCall: true,
+            seekingUntil: null,
+            entries: [
+              ...state.entries,
+              system(`${strangerName(next, event.participantId)} joined the call.`),
+            ],
+          };
+        });
+      },
+
+      addRequested: (event, selfParticipantId) => {
+        if (!current(event.sessionId)) return;
+        set((state) => ({
+          addRequest: {
+            requestId: event.requestId,
+            by: event.by,
+            expiresAt: event.expiresAt,
+            answered: event.by === selfParticipantId,
+          },
+          entries: [
+            ...state.entries,
+            system(
+              event.by === selfParticipantId
+                ? 'You asked to add someone. Waiting for everyone to agree…'
+                : `${strangerName(state, event.by)} wants to add someone to the call.`,
+            ),
+          ],
+        }));
+      },
+
+      addAnswered: (requestId) => {
+        const request = get().addRequest;
+        if (request?.requestId === requestId) set({ addRequest: { ...request, answered: true } });
+      },
+
+      seekStarted: (event) => {
+        if (!current(event.sessionId)) return;
+        set((state) => ({
+          addRequest: null,
+          seekingUntil: event.until,
+          entries: [...state.entries, system('Everyone agreed. Looking for another person…')],
+        }));
+      },
+
+      seekCancelled: (event) => {
+        if (!current(event.sessionId)) return null;
+        if (get().addRequest === null && get().seekingUntil === null) return null;
+        const text = {
+          declined: 'Someone declined, so nobody is added.',
+          expired: 'Not everyone answered in time.',
+          timeout: 'Nobody new was found this time.',
+          left: 'Someone left, so the search stopped.',
+          unavailable: 'Group calls aren’t available right now.',
+        }[event.reason];
+        set((state) => ({
+          addRequest: null,
+          seekingUntil: null,
+          entries: [...state.entries, system(text)],
+        }));
+        return event.reason;
       },
 
       reset: () => {

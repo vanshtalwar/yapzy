@@ -1,27 +1,32 @@
 import { type FrameSchedulePayload } from '@app/shared';
 
-import { createFrameRingBuffer } from './frame-buffer.ts';
-import { createFrameGrabber } from './frame-grabber.ts';
+import { createFrameRingBuffer, type FrameRingBuffer } from './frame-buffer.ts';
+import { createFrameGrabber, type FrameGrabber } from './frame-grabber.ts';
 import { createFrameSampler, type UploadResult } from './frame-sampler.ts';
 import { createNsfwWatcher, type NsfwVerdict } from './nsfw.ts';
 
 export interface CallModerationOptions {
   sessionId: string;
   localStream: () => MediaStream | null;
-  remoteStream: () => MediaStream | null;
+  /** A remote participant's media (group calls have up to three). */
+  remoteStream: (participantId: string) => MediaStream | null;
+  /** Remote participants at the start; `addRemote`/`removeRemote` follow joins and leaves. */
+  remotes: string[];
   schedule: FrameSchedulePayload;
-  /** `moderation:signal` about the stranger (rate-limited here to one per 5 s). */
-  signal: (verdict: NsfwVerdict) => void;
-  /** Blur the stranger's video. */
-  onRemoteFlagged: () => void;
+  /** `moderation:signal` about that participant (rate-limited here to one per 5 s each). */
+  signal: (participantId: string, verdict: NsfwVerdict) => void;
+  /** Blur that participant's video. */
+  onRemoteFlagged: (participantId: string) => void;
   /** Warn the user about their own camera (at most every 30 s). */
   onSelfFlagged: () => void;
 }
 
 export interface CallModeration {
   setSchedule(schedule: FrameSchedulePayload | null): void;
-  /** The stranger's last frames (in memory), attached to a report. */
-  evidence(): Blob[];
+  addRemote(participantId: string): void;
+  removeRemote(participantId: string): void;
+  /** That participant's last frames (in memory), attached to a report about them. */
+  evidence(participantId: string): Blob[];
   stop(): void;
 }
 
@@ -32,7 +37,18 @@ const EVIDENCE_FRAME = { maxSize: 640, quality: 0.85 } as const;
 const SIGNAL_EVERY_MS = 5_000;
 const SELF_WARNING_EVERY_MS = 30_000;
 
-/** Everything trust & safety does during one video call (Part 8). */
+interface Remote {
+  grabber: FrameGrabber;
+  buffer: FrameRingBuffer;
+  flagged: boolean;
+  lastSignal: number;
+}
+
+/**
+ * Everything trust & safety does during one video call (Part 8), per remote participant in
+ * group calls (Part 12): own frames for server-side checks (one sampler per call), and for
+ * every stranger an in-memory evidence buffer and the client NSFW check.
+ */
 export function createCallModeration(
   options: CallModerationOptions,
   deps: {
@@ -42,31 +58,45 @@ export function createCallModeration(
   },
 ): CallModeration {
   const local = createFrameGrabber(options.localStream);
-  const remote = createFrameGrabber(options.remoteStream);
   const sampler = createFrameSampler({
     grab: () => local.grab(OWN_FRAME),
     upload: (frame) => deps.uploadFrame(options.sessionId, frame),
   });
   sampler.setSchedule(options.schedule);
-  const buffer = createFrameRingBuffer({ grab: () => remote.grab(EVIDENCE_FRAME) });
 
-  let remoteFlagged = false;
-  let lastSignal = Number.NEGATIVE_INFINITY;
+  const remotes = new Map<string, Remote>();
+  function addRemote(participantId: string): void {
+    if (remotes.has(participantId)) return;
+    const grabber = createFrameGrabber(() => options.remoteStream(participantId));
+    remotes.set(participantId, {
+      grabber,
+      buffer: createFrameRingBuffer({ grab: () => grabber.grab(EVIDENCE_FRAME) }),
+      flagged: false,
+      lastSignal: Number.NEGATIVE_INFINITY,
+    });
+  }
+  for (const participantId of options.remotes) addRemote(participantId);
+
   let lastWarning = Number.NEGATIVE_INFINITY;
   const watcher = deps.nsfw
     ? createNsfwWatcher({
-        remote: () => remote.element(),
+        remotes: () =>
+          [...remotes].map(([participantId, remote]) => ({
+            participantId,
+            video: remote.grabber.element(),
+          })),
         self: () => local.element(),
-        onRemote: (verdict) => {
-          if (!verdict.flagged) return;
-          if (!remoteFlagged) {
-            remoteFlagged = true;
-            options.onRemoteFlagged();
+        onRemote: (participantId, verdict) => {
+          const remote = remotes.get(participantId);
+          if (remote === undefined || !verdict.flagged) return;
+          if (!remote.flagged) {
+            remote.flagged = true;
+            options.onRemoteFlagged(participantId);
           }
           const now = performance.now();
-          if (now - lastSignal >= SIGNAL_EVERY_MS) {
-            lastSignal = now;
-            options.signal(verdict);
+          if (now - remote.lastSignal >= SIGNAL_EVERY_MS) {
+            remote.lastSignal = now;
+            options.signal(participantId, verdict);
           }
         },
         onSelf: (verdict) => {
@@ -83,13 +113,24 @@ export function createCallModeration(
     setSchedule: (schedule) => {
       sampler.setSchedule(schedule);
     },
-    evidence: () => buffer.snapshot(),
+    addRemote,
+    removeRemote(participantId) {
+      const remote = remotes.get(participantId);
+      if (remote === undefined) return;
+      remotes.delete(participantId);
+      remote.buffer.stop();
+      remote.grabber.stop();
+    },
+    evidence: (participantId) => remotes.get(participantId)?.buffer.snapshot() ?? [],
     stop() {
       sampler.stop();
-      buffer.stop();
       watcher?.stop();
       local.stop();
-      remote.stop();
+      for (const remote of remotes.values()) {
+        remote.buffer.stop();
+        remote.grabber.stop();
+      }
+      remotes.clear();
     },
   };
 }

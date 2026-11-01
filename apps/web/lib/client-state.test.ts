@@ -97,6 +97,7 @@ describe('preferences & consent', () => {
       lang: 'de' as const,
       interests: ['jazz'],
       autoRequeue: false,
+      allowGroup: true,
     };
     savePreferences(preferences);
     expect(loadPreferences()).toEqual(preferences);

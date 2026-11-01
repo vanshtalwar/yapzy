@@ -8,6 +8,7 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 
 import { type Clock } from '../deps.ts';
 import { type OnlineCounter } from '../services/online.ts';
+import { type SessionState } from '../services/session-state.ts';
 import { createAdminGuard } from './guard.ts';
 import { adminAuthRoutes } from './routes/auth.ts';
 import { adminModerationRoutes } from './routes/moderation.ts';
@@ -24,6 +25,8 @@ export interface AdminRouteDeps {
   trust: TrustStore;
   online: OnlineCounter;
   clock: Clock;
+  /** Chat sessions (Redis), e.g. the participants of a live reported chat. */
+  chatSessions: SessionState;
   /** Counts a moderation action (`moderation_actions_total{source="admin"}`). */
   recordAction: (action: string) => void;
 }
@@ -40,7 +43,8 @@ export const adminRoutes: FastifyPluginAsyncZod<AdminRouteDeps> = async (app, de
     void reply.header('cache-control', 'no-store');
   });
 
-  const { config, prisma, redis, objects, bans, trust, online, clock, recordAction } = deps;
+  const { config, prisma, redis, objects, bans, trust, online, clock, chatSessions, recordAction } =
+    deps;
   const sessions = createAdminSessions(redis, config.ADMIN_SESSION_TTL_SECONDS);
   const guard = createAdminGuard({
     prisma,
@@ -57,6 +61,7 @@ export const adminRoutes: FastifyPluginAsyncZod<AdminRouteDeps> = async (app, de
     trust,
     online,
     clock,
+    chatSessions,
     guard,
     recordAction,
   };

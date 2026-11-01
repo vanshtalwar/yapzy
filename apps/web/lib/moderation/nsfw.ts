@@ -56,18 +56,20 @@ function whenIdle(task: () => void): void {
 }
 
 /**
- * Classifies the stranger's video every 2 s and the own video every 5 s.
+ * Classifies one stranger's video every 2 s — round-robin in group calls, so the cost stays
+ * one inference per 2 s however many people are in the call — and the own video every 5 s.
  * `onRemote` / `onSelf` get every verdict; callers act on `flagged`.
  */
 export function createNsfwWatcher(deps: {
-  remote: () => HTMLVideoElement | null;
+  remotes: () => { participantId: string; video: HTMLVideoElement | null }[];
   self: () => HTMLVideoElement | null;
-  onRemote: (verdict: NsfwVerdict) => void;
+  onRemote: (participantId: string, verdict: NsfwVerdict) => void;
   onSelf: (verdict: NsfwVerdict) => void;
   load?: () => Promise<Classifier>;
 }) {
   let stopped = false;
   let busy = false;
+  let turn = 0;
   const timers: ReturnType<typeof setInterval>[] = [];
   const classifier = (deps.load ?? loadNsfwModel)();
 
@@ -91,7 +93,17 @@ export function createNsfwWatcher(deps: {
 
   timers.push(
     setInterval(() => {
-      check(deps.remote, deps.onRemote);
+      const remotes = deps.remotes();
+      if (remotes.length === 0) return;
+      const next = remotes[turn % remotes.length];
+      turn += 1;
+      if (next === undefined) return;
+      check(
+        () => next.video,
+        (verdict) => {
+          deps.onRemote(next.participantId, verdict);
+        },
+      );
     }, 2_000),
     setInterval(() => {
       check(deps.self, deps.onSelf);

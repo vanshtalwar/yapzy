@@ -9,6 +9,7 @@ import {
   reportDismissSchema,
   reportNoteSchema,
   reportPageSchema,
+  type ReportParticipant,
   reportQuerySchema,
   transcriptLineSchema,
 } from '@app/shared';
@@ -18,6 +19,7 @@ import { z } from 'zod';
 
 import { type Clock } from '../../deps.ts';
 import { AppError } from '../../errors.ts';
+import { type SessionState } from '../../services/session-state.ts';
 import { audit } from '../audit.ts';
 import { type AdminGuard, adminOf } from '../guard.ts';
 import { canBan } from '../rbac.ts';
@@ -37,16 +39,62 @@ export interface ReportRouteDeps {
   trust: TrustStore;
   guard: AdminGuard;
   clock: Clock;
+  /** Live chats: their participants are in Redis until the session log is written. */
+  chatSessions: SessionState;
   recordAction: (action: string) => void;
 }
 
 export const adminReportRoutes: FastifyPluginAsyncZod<ReportRouteDeps> = (app, deps) => {
-  const { config, prisma, objects, bans, trust, guard, clock, recordAction } = deps;
+  const { config, prisma, objects, bans, trust, guard, clock, chatSessions, recordAction } = deps;
 
   async function load(id: string) {
     const report = await prisma.report.findUnique({ where: { id } });
     if (report === null) throw new AppError(404, ErrorCode.NOT_FOUND, 'Report not found');
     return report;
+  }
+
+  /**
+   * Everyone in the reported chat (group calls: up to four), in join order: from the session
+   * log once the chat ended, else from the live session (Redis keeps it 1 h after the end).
+   */
+  async function participantsOf(report: {
+    sessionId: string;
+    reporterId: string | null;
+    reportedParticipantId: string;
+  }): Promise<ReportParticipant[]> {
+    const iso = (ms: number | undefined) => (ms === undefined ? null : new Date(ms).toISOString());
+    const logged = await prisma.sessionParticipant.findMany({
+      where: { sessionId: report.sessionId },
+      orderBy: [{ joinedAt: 'asc' }, { participantId: 'asc' }],
+    });
+    const rows =
+      logged.length > 0
+        ? logged.map((p) => ({
+            participantId: p.participantId,
+            visitorId: p.visitorId,
+            joinedAt: p.joinedAt.toISOString(),
+            leftAt: p.leftAt?.toISOString() ?? null,
+            leaveReason: p.leaveReason,
+          }))
+        : [...(await chatSessions.participants(report.sessionId))]
+            .sort(([, a], [, b]) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0))
+            .map(([participantId, p]) => ({
+              participantId,
+              visitorId: p.visitorId,
+              joinedAt: iso(p.joinedAt),
+              leftAt: iso(p.leftAt),
+              leaveReason: p.leaveReason ?? null,
+            }));
+    let others = 0;
+    return rows.map((row) => {
+      if (row.participantId === report.reportedParticipantId) {
+        return { ...row, role: 'reported', label: 'Reported' };
+      }
+      if (row.visitorId === report.reporterId)
+        return { ...row, role: 'reporter', label: 'Reporter' };
+      others += 1;
+      return { ...row, role: 'other', label: `Other ${String(others)}` };
+    });
   }
 
   // Queue: highest priority first, oldest first within a priority.
@@ -115,9 +163,10 @@ export const adminReportRoutes: FastifyPluginAsyncZod<ReportRouteDeps> = (app, d
       });
       if (report === null) throw new AppError(404, ErrorCode.NOT_FOUND, 'Report not found');
       const now = clock.now();
-      const [reporter, reported] = await Promise.all([
+      const [reporter, reported, participants] = await Promise.all([
         report.reporterId === null ? null : visitorProfile(prisma, report.reporterId, now),
         visitorProfile(prisma, report.reportedId, now),
+        participantsOf(report),
       ]);
       if (reported === null)
         throw new AppError(404, ErrorCode.NOT_FOUND, 'Reported visitor is gone');
@@ -157,6 +206,7 @@ export const adminReportRoutes: FastifyPluginAsyncZod<ReportRouteDeps> = (app, d
         reportedParticipantId: report.reportedParticipantId,
         details: report.details,
         transcript: transcriptSchema.parse(report.transcript ?? []),
+        participants,
         evidence,
         resolutionNote: report.resolutionNote,
         resolvedAt: report.resolvedAt?.toISOString() ?? null,
