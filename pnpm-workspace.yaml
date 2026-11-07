@@ -33,10 +33,10 @@ catalog:
   jose: ^6.2.0
   jsdom: ^30.1.0
   lucide-react: ^1.66.0
-  next: ^16.4.0
+  next: ^16.4.5
   # Pinned: 4.4.0 declares engines.node "22.13.0" (exact), which engineStrict rejects on Node 24.
   nsfwjs: 4.3.0
-  '@next/eslint-plugin-next': ^16.4.0
+  '@next/eslint-plugin-next': ^16.4.5
   '@node-rs/argon2': ^2.2.2
   obscenity: ^0.4.6
   otplib: ^13.0.0
