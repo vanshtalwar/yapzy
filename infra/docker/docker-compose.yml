@@ -161,7 +161,7 @@ services:
   # (and the `full` profile's containers); Grafana on http://localhost:3002 with the provisioned
   # "RandomChat — overview" dashboard (anonymous read-only access; admin login for edits).
   prometheus:
-    image: prom/prometheus:v3.15.1
+    image: prom/prometheus:v3.16.0
     profiles: [observability]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
